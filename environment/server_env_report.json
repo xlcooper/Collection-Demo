@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "script_version": "0.1.0",
-  "generated_at_utc": "2026-07-29T06:32:38.189758+00:00",
+  "script_version": "0.2.0",
+  "generated_at_utc": "2026-07-29T11:33:31.581289+00:00",
   "target": {
     "sam3": {
       "source": "facebookresearch/sam3",
@@ -10,20 +10,20 @@
       "minimum_cuda": "12.6"
     },
     "mllm": {
-      "primary": "Qwen/Qwen3-VL-8B-Instruct",
+      "primary": "Qwen/Qwen3-VL-8B-Instruct-FP8",
       "fallback": "Qwen/Qwen3-VL-4B-Instruct",
       "alternative": "OpenGVLab/InternVL3.5-8B-HF"
     }
   },
   "git": {
     "available": true,
-    "version": "git version 2.34.1",
-    "commit": "acdadcc86f6eafedceb747d0eaa49c6cdd7e8c81",
+    "version": "git version 2.55.0",
+    "commit": "b55c7cd10b0d46286de9b7d2306901dc3f448c03",
     "worktree_clean": true,
     "dirty_entry_count": 0,
     "git_lfs": {
       "available": true,
-      "version": "git-lfs/3.0.2 (GitHub; linux amd64; go 1.18.1)"
+      "version": "git-lfs/3.7.1 (GitHub; linux amd64; go 1.26.4)"
     }
   },
   "system": {
@@ -34,7 +34,7 @@
     "memory_total_gib": 1007.51,
     "repo_disk": {
       "total_gib": 50.0,
-      "free_gib": 15.58
+      "free_gib": 33.33
     }
   },
   "gpu": {
@@ -48,6 +48,7 @@
         "driver_version": "580.105.08"
       }
     ],
+    "nvcc_version": "11.8",
     "nvcc": {
       "available": true,
       "return_code": 0,
@@ -57,38 +58,38 @@
   "conda": {
     "available": true,
     "version": "conda 22.11.1",
-    "current_environment": "base"
+    "current_environment": "object-memory-demo"
   },
   "python": {
-    "version": "3.10.8",
+    "version": "3.12.13",
     "implementation": "CPython",
     "executable_name": "python",
-    "meets_sam3_minimum": false
+    "meets_sam3_minimum": true
   },
   "packages": {
     "torch": {
       "installed": true,
-      "version": "2.12.1+cu126"
+      "version": "2.10.0+cu128"
     },
     "torchvision": {
       "installed": true,
-      "version": "0.27.1+cu126"
+      "version": "0.25.0+cu128"
     },
     "sam3": {
-      "installed": false,
-      "version": null
+      "installed": true,
+      "version": "0.1.0"
     },
     "transformers": {
-      "installed": false,
-      "version": null
+      "installed": true,
+      "version": "4.57.6"
     },
     "qwen_vl_utils": {
-      "installed": false,
-      "version": null
+      "installed": true,
+      "version": "0.0.14"
     },
     "huggingface_hub": {
       "installed": true,
-      "version": "1.22.0"
+      "version": "0.36.2"
     },
     "vllm": {
       "installed": false,
@@ -101,9 +102,9 @@
   },
   "pytorch": {
     "importable": true,
-    "version": "2.12.1+cu126",
+    "version": "2.10.0+cu128",
     "cuda_available": true,
-    "compiled_cuda_version": "12.6",
+    "compiled_cuda_version": "12.8",
     "device_count": 1,
     "device_names": [
       "NVIDIA GeForce RTX 4090"
@@ -111,16 +112,32 @@
     "cudnn_version": 91002,
     "nccl_version": [
       2,
-      29,
-      3
+      27,
+      5
     ]
   },
   "paths": {
     "model_directory": {
-      "configured": false
+      "configured": true,
+      "exists": true,
+      "is_directory": true,
+      "writable": true,
+      "disk_free_gib": 33.33
     },
     "data_directory": {
-      "configured": false
+      "configured": true,
+      "exists": true,
+      "is_directory": true,
+      "writable": true,
+      "disk_free_gib": 33.33
+    },
+    "sam3_checkpoint": {
+      "configured": true,
+      "exists": true,
+      "is_directory": false,
+      "writable": true,
+      "disk_free_gib": 769.91,
+      "file_size_gib": 3.21
     }
   },
   "credentials": {
@@ -128,41 +145,16 @@
     "note": "只记录令牌是否通过环境变量配置，不读取或保存令牌值。缓存登录状态未检查。"
   },
   "summary": {
-    "status": "blocked",
+    "status": "warning",
     "issue_counts": {
-      "blocked": 2,
-      "warning": 4
+      "blocked": 0,
+      "warning": 1
     },
     "issues": [
       {
-        "severity": "blocked",
-        "code": "sam3_not_installed",
-        "message": "未安装 SAM3 项目包。"
-      },
-      {
         "severity": "warning",
-        "code": "transformers_not_installed",
-        "message": "未安装 Transformers，Qwen3-VL 直接推理路径当前不可用。"
-      },
-      {
-        "severity": "warning",
-        "code": "qwen_vl_utils_not_installed",
-        "message": "未安装 qwen-vl-utils。"
-      },
-      {
-        "severity": "warning",
-        "code": "conda_base_active",
-        "message": "当前处于 base 环境；项目运行应使用独立环境。"
-      },
-      {
-        "severity": "blocked",
-        "code": "python_too_old",
-        "message": "当前 Python 3.10，SAM3 要求 Python >= 3.12。"
-      },
-      {
-        "severity": "warning",
-        "code": "hf_token_env_not_set",
-        "message": "未检测到 Hugging Face 令牌环境变量；若未使用缓存登录，将无法下载受限 checkpoint。"
+        "code": "nvcc_too_old",
+        "message": "系统 nvcc 为 11.8，低于 SAM3 的 CUDA 12.6 目标；请避免编译可选 CUDA 扩展。"
       }
     ]
   }
