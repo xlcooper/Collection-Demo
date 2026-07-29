@@ -13,6 +13,8 @@ export HF_HOME="${HF_HOME:-${MODEL_DIR}/huggingface}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export PYTHONNOUSERSITE=1
 export TOKENIZERS_PARALLELISM=false
+export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"
+export PIP_RETRIES="${PIP_RETRIES:-10}"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "ERROR: conda is not available." >&2
