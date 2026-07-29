@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCRIPT_VERSION = "0.1.1"
+SCRIPT_VERSION = "0.2.0"
 MIN_PYTHON = (3, 12)
 MIN_TORCH = (2, 7)
 MIN_CUDA = (12, 6)
@@ -395,6 +395,8 @@ def inspect_target_path(raw_path: str | None) -> dict[str, Any]:
     if existing_path.exists():
         disk = shutil.disk_usage(existing_path)
         info["disk_free_gib"] = bytes_to_gib(disk.free)
+    if path.is_file():
+        info["file_size_gib"] = bytes_to_gib(path.stat().st_size)
     return info
 
 
@@ -428,6 +430,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model-dir", help="Optional server model directory to inspect.")
     parser.add_argument("--data-dir", help="Optional server data directory to inspect.")
+    parser.add_argument(
+        "--sam3-checkpoint",
+        help="Optional existing SAM3 checkpoint file to inspect.",
+    )
     return parser.parse_args()
 
 
@@ -467,6 +473,7 @@ def main() -> int:
         "paths": {
             "model_directory": inspect_target_path(args.model_dir),
             "data_directory": inspect_target_path(args.data_dir),
+            "sam3_checkpoint": inspect_target_path(args.sam3_checkpoint),
         },
         "credentials": {
             "hf_token_environment_configured": bool(
@@ -490,14 +497,29 @@ def main() -> int:
             issues,
             "warning",
             "model_directory_not_configured",
-            "未配置模型目录；请通过 --model-dir 指定仓库外的持久化目录。",
+            "未配置模型目录；请通过 --model-dir 指定被 Git 忽略的持久化目录。",
         )
     if not report["paths"]["data_directory"]["configured"]:
         add_issue(
             issues,
             "warning",
             "data_directory_not_configured",
-            "未配置数据目录；请通过 --data-dir 指定仓库外的持久化目录。",
+            "未配置数据目录；请通过 --data-dir 指定被 Git 忽略的持久化目录。",
+        )
+    checkpoint = report["paths"]["sam3_checkpoint"]
+    if not checkpoint["configured"]:
+        add_issue(
+            issues,
+            "warning",
+            "sam3_checkpoint_not_configured",
+            "未配置 SAM3 checkpoint；请通过 --sam3-checkpoint 指定现有权重文件。",
+        )
+    elif not checkpoint["exists"] or checkpoint["is_directory"]:
+        add_issue(
+            issues,
+            "blocked",
+            "sam3_checkpoint_invalid",
+            "指定的 SAM3 checkpoint 不存在或不是文件。",
         )
     if report["system"]["os"] != "Linux":
         add_issue(
@@ -506,7 +528,15 @@ def main() -> int:
             "non_linux_server",
             "当前系统不是 Linux；官方 SAM3 环境通常按 Linux/CUDA 路径部署。",
         )
-    if not report["credentials"]["hf_token_environment_configured"]:
+    checkpoint_ready = (
+        checkpoint["configured"]
+        and checkpoint["exists"]
+        and checkpoint["is_directory"] is False
+    )
+    if (
+        not report["credentials"]["hf_token_environment_configured"]
+        and not checkpoint_ready
+    ):
         add_issue(
             issues,
             "warning",
