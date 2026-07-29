@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCRIPT_VERSION = "0.2.0"
+SCRIPT_VERSION = "0.3.0"
 MIN_PYTHON = (3, 12)
 MIN_TORCH = (2, 7)
 MIN_CUDA = (12, 6)
@@ -341,9 +341,12 @@ def collect_pytorch(
 
 def collect_packages(issues: list[dict[str, str]]) -> dict[str, dict[str, Any]]:
     package_map = {
+        "setuptools": ("setuptools", "setuptools"),
         "torch": ("torch", "torch"),
         "torchvision": ("torchvision", "torchvision"),
         "sam3": ("sam3", "sam3"),
+        "einops": ("einops", "einops"),
+        "pycocotools": ("pycocotools", "pycocotools"),
         "transformers": ("transformers", "transformers"),
         "qwen_vl_utils": ("qwen-vl-utils", "qwen_vl_utils"),
         "huggingface_hub": ("huggingface-hub", "huggingface_hub"),
@@ -378,6 +381,28 @@ def collect_packages(issues: list[dict[str, str]]) -> dict[str, dict[str, Any]]:
         )
 
     return packages
+
+
+def collect_sam3_runtime(issues: list[dict[str, str]]) -> dict[str, Any]:
+    """Import SAM3 so the report detects missing transitive runtime dependencies."""
+    try:
+        import sam3
+
+        return {
+            "importable": True,
+            "version": getattr(sam3, "__version__", None),
+        }
+    except Exception as exc:  # noqa: BLE001 - diagnostics must survive broken imports
+        add_issue(
+            issues,
+            "blocked",
+            "sam3_import_failed",
+            f"SAM3 实际导入失败：{type(exc).__name__}。",
+        )
+        return {
+            "importable": False,
+            "error_type": type(exc).__name__,
+        }
 
 
 def inspect_target_path(raw_path: str | None) -> dict[str, Any]:
@@ -446,6 +471,8 @@ def main() -> int:
 
     issues: list[dict[str, str]] = []
     packages = collect_packages(issues)
+    pytorch = collect_pytorch(packages, issues)
+    sam3_runtime = collect_sam3_runtime(issues)
     report = {
         "schema_version": 1,
         "script_version": SCRIPT_VERSION,
@@ -469,7 +496,8 @@ def main() -> int:
         "conda": collect_conda(issues),
         "python": collect_python(issues),
         "packages": packages,
-        "pytorch": collect_pytorch(packages, issues),
+        "pytorch": pytorch,
+        "sam3_runtime": sam3_runtime,
         "paths": {
             "model_directory": inspect_target_path(args.model_dir),
             "data_directory": inspect_target_path(args.data_dir),
