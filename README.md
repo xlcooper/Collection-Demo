@@ -2,9 +2,9 @@
 
 第一阶段自动化对象记忆 Demo：SAM3 发现并分割场景物体，MLLM 判断对象新颖性、生成结构化标签，并把同一具体物体的多次观测归并至显式记忆库。
 
-- **当前版本**：v0.1.1
+- **当前版本**：v0.1.2
 - **当前阶段**：M0——服务器环境整改
-- **当前状态**：硬件可用，软件环境与存储尚未就绪
+- **当前状态**：硬件、存储和 SAM3 权重已就绪，等待创建项目 Conda 环境
 
 ## 当前范围
 
@@ -19,6 +19,7 @@
 ## 当前技术决策
 
 - **视觉模型**：官方 `facebook/sam3` 图像 checkpoint。
+- **服务器权重**：`/root/autodl-tmp/Collection-Demo/weights/sam3/sam3.pt`，仅服务器保留并由 Git 忽略。
 - **MLLM 首选**：`Qwen/Qwen3-VL-8B-Instruct-FP8`。
 - **MLLM 回退**：`Qwen/Qwen3-VL-4B-Instruct`。
 - **运行方式**：先批量运行 SAM3 并保存中间结果，释放模型后再运行 MLLM；两个模型不同时驻留显存。
@@ -33,8 +34,8 @@
 | Python | 3.10.8，不满足 SAM3；项目环境必须使用 3.12 |
 | CUDA 工具链 | PyTorch 为 cu126，系统 nvcc 为 11.8；MVP 暂不编译可选 CUDA 扩展 |
 | 模型依赖 | SAM3、Transformers 和 Qwen 工具尚未安装 |
-| 磁盘 | 当前仅 15.58 GiB 可用，需先清理或扩容至建议的至少 30 GiB |
-| 权限 | SAM3 checkpoint 需要 Hugging Face 授权和服务器认证 |
+| 磁盘 | 报告后已清理，用户确认约 44.1 GiB 可用；待下次自检固化 |
+| SAM3 权重 | 已认证并放置于 `weights/sam3/sam3.pt`，不进入 Git |
 
 完整判断与执行顺序见 `docs/02_服务器环境分析.md`。
 
@@ -52,11 +53,11 @@
 
 ## 下一步
 
-1. 数据盘清理或扩容，至少准备 30 GiB 可用空间。
-2. 配置仓库外的模型目录和数据目录。
-3. 完成 SAM3 Hugging Face 权限与服务器认证。
-4. 创建 Python 3.12 的 `object-memory-demo` Conda 环境并安装基础依赖。
-5. 重新运行环境自检；通过后分别执行 SAM3 与 Qwen3-VL 冒烟测试。
+1. 创建可复现的 `environment.yml`，固定 Python 3.12 和基础模型依赖。
+2. 服务器创建并激活 `object-memory-demo` Conda 环境。
+3. 指定现有权重目录和数据目录重新运行环境自检。
+4. 分别执行 SAM3 与 Qwen3-VL 冒烟测试。
+5. 两个模型均通过后进入配置、SQLite 与 CLI 骨架开发。
 
 ## 长期开发准则
 
