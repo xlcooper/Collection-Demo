@@ -1,0 +1,36 @@
+# Local-only project context
+/docs/00_项目纲要.md
+/docs/01_第一阶段项目设计规划书.md
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime data and model assets
+/data/
+/models/
+/weights/
+/runs/
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated temporary files
+/environment/*.tmp
+*.log
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
