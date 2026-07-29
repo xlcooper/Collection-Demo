@@ -22,6 +22,7 @@ export HF_HOME="${HF_HOME:-${MODEL_DIR}/qwen}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export PYTHONNOUSERSITE=1
 export TOKENIZERS_PARALLELISM=false
+export OMP_NUM_THREADS="${COLLECTION_OMP_NUM_THREADS:-8}"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "ERROR: conda is not available." >&2

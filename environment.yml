@@ -6,7 +6,7 @@ channels:
 dependencies:
   - python=3.12
   - pip
-  - setuptools<82
+  - setuptools<81
   - wheel
   - git
   - git-lfs
