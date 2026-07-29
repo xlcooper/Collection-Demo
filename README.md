@@ -4,9 +4,9 @@
 
 第一阶段自动化对象记忆 Demo：SAM3 发现并分割场景物体，MLLM 判断对象新颖性、生成结构化标签，并把同一具体物体的多次观测归并至显式记忆库。
 
-- **当前版本**：v0.3.0
+- **当前版本**：v0.3.1
 - **当前阶段**：M0——模型冒烟验证
-- **当前状态**：服务器基础环境无阻塞；等待下载 Qwen 权重并分别完成 SAM3、Qwen3-VL 冒烟测试
+- **当前状态**：服务器基础环境无阻塞，Qwen 权重已下载；SAM3 首次冒烟发现官方处理器的 BF16/FP32 上下文问题，等待拉取修复后重跑
 
 ## 当前范围
 
@@ -40,7 +40,7 @@
 | Python | 3.12.13，满足 SAM3 要求 |
 | PyTorch | 2.10.0+cu128，CUDA 12.8 可用 |
 | SAM3 | 包 0.1.0 已安装；3.21 GiB checkpoint 存在；实际导入已人工验证 |
-| Qwen | Transformers 4.57.6 与 qwen-vl-utils 0.0.14 已安装；模型权重尚未下载 |
+| Qwen | Transformers 4.57.6 与 qwen-vl-utils 0.0.14 已安装；模型权重已下载到 `weights/qwen` 缓存 |
 | 数据盘 | 仓库所在 50 GiB 数据盘剩余 33.33 GiB |
 | 唯一警告 | 系统 nvcc 11.8；MVP 不编译 `flash-attn-3`、`cc_torch` 等可选 CUDA 扩展 |
 
@@ -67,9 +67,9 @@
 ## 下一步
 
 1. 服务器 `pull` 当前版本。
-2. 将 Qwen3-VL-8B-Instruct-FP8 下载到 `weights/qwen` 管理的 Hugging Face 缓存。
-3. 准备一张位于 `data/smoke/`、不进入 Git 的测试图像。
-4. 分别运行 SAM3 和 Qwen3-VL 冒烟测试并生成两份报告。
+2. 使用加入 BF16 autocast 的最新版脚本重新运行 SAM3 冒烟测试。
+3. SAM3 通过后运行 Qwen3-VL 冒烟测试。
+4. 两个单模型测试通过后再验证顺序运行。
 5. 用户可直接 push 服务器报告；本地 AI 收到通知后负责 pull、分析、更新文档与 CHANGELOG。
 
 具体命令见 `docs/03_服务器环境与冒烟测试指南.md`。

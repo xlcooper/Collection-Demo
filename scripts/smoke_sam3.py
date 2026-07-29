@@ -66,6 +66,8 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
 
     if not torch.cuda.is_available():
         raise RuntimeError("PyTorch cannot access CUDA.")
+    if not torch.cuda.is_bf16_supported():
+        raise RuntimeError("The active CUDA device does not support bfloat16 autocast.")
 
     image_path = Path(args.image).expanduser().resolve()
     checkpoint_path = Path(args.checkpoint).expanduser().resolve()
@@ -101,7 +103,9 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
     model_load_seconds = time.perf_counter() - load_started
 
     inference_started = time.perf_counter()
-    with torch.inference_mode():
+    with torch.inference_mode(), torch.autocast(
+        device_type="cuda", dtype=torch.bfloat16
+    ):
         state = processor.set_image(image)
         output = processor.set_text_prompt(state=state, prompt=args.prompt)
     torch.cuda.synchronize()
@@ -138,6 +142,7 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
                 "size_gib": round(checkpoint_path.stat().st_size / (1024**3), 3),
             },
             "prompt": args.prompt,
+            "precision": {"autocast": "bfloat16"},
             "proposal_count": proposal_count,
             "boxes_preview": boxes.tolist()[:20],
             "scores_preview": scores.flatten().tolist()[:20],
