@@ -23,8 +23,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--prompt",
-        default="object",
-        help="Text concept used only for this smoke test.",
+        required=True,
+        help="Concrete singular English category visibly present in the image.",
     )
     parser.add_argument(
         "--output-dir",

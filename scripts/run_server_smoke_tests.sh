@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: bash scripts/run_server_smoke_tests.sh /path/to/image [sam3_prompt]" >&2
+if [[ $# -lt 2 ]]; then
+  echo "Usage: bash scripts/run_server_smoke_tests.sh /path/to/image sam3_prompt" >&2
   exit 2
 fi
 
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 IMAGE_PATH="$1"
-SAM3_PROMPT="${2:-object}"
+SAM3_PROMPT="$2"
 ENV_PREFIX="${COLLECTION_CONDA_ENV_PREFIX:-${REPO_ROOT}/.conda/envs/object-memory-demo}"
 MODEL_DIR="${COLLECTION_MODEL_DIR:-${REPO_ROOT}/weights}"
 SAM3_CHECKPOINT="${SAM3_CHECKPOINT:-${MODEL_DIR}/sam3/sam3.pt}"
