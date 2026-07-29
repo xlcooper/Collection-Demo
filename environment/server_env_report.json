@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "script_version": "0.1.0",
+  "generated_at_utc": "2026-07-29T06:32:38.189758+00:00",
+  "target": {
+    "sam3": {
+      "source": "facebookresearch/sam3",
+      "minimum_python": "3.12",
+      "minimum_pytorch": "2.7",
+      "minimum_cuda": "12.6"
+    },
+    "mllm": {
+      "primary": "Qwen/Qwen3-VL-8B-Instruct",
+      "fallback": "Qwen/Qwen3-VL-4B-Instruct",
+      "alternative": "OpenGVLab/InternVL3.5-8B-HF"
+    }
+  },
+  "git": {
+    "available": true,
+    "version": "git version 2.34.1",
+    "commit": "acdadcc86f6eafedceb747d0eaa49c6cdd7e8c81",
+    "worktree_clean": true,
+    "dirty_entry_count": 0,
+    "git_lfs": {
+      "available": true,
+      "version": "git-lfs/3.0.2 (GitHub; linux amd64; go 1.18.1)"
+    }
+  },
+  "system": {
+    "os": "Linux",
+    "os_release": "5.15.0-78-generic",
+    "architecture": "x86_64",
+    "logical_cpu_count": 128,
+    "memory_total_gib": 1007.51,
+    "repo_disk": {
+      "total_gib": 50.0,
+      "free_gib": 15.58
+    }
+  },
+  "gpu": {
+    "nvidia_smi_available": true,
+    "device_count": 1,
+    "devices": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 4090",
+        "memory_total_mib": 24564,
+        "driver_version": "580.105.08"
+      }
+    ],
+    "nvcc": {
+      "available": true,
+      "return_code": 0,
+      "output": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2022 NVIDIA Corporation\nBuilt on Wed_Sep_21_10:33:58_PDT_2022\nCuda compilation tools, release 11.8, V11.8.89\nBuild cuda_11.8.r11.8/compiler.31833905_0"
+    }
+  },
+  "conda": {
+    "available": true,
+    "version": "conda 22.11.1",
+    "current_environment": "base"
+  },
+  "python": {
+    "version": "3.10.8",
+    "implementation": "CPython",
+    "executable_name": "python",
+    "meets_sam3_minimum": false
+  },
+  "packages": {
+    "torch": {
+      "installed": true,
+      "version": "2.12.1+cu126"
+    },
+    "torchvision": {
+      "installed": true,
+      "version": "0.27.1+cu126"
+    },
+    "sam3": {
+      "installed": false,
+      "version": null
+    },
+    "transformers": {
+      "installed": false,
+      "version": null
+    },
+    "qwen_vl_utils": {
+      "installed": false,
+      "version": null
+    },
+    "huggingface_hub": {
+      "installed": true,
+      "version": "1.22.0"
+    },
+    "vllm": {
+      "installed": false,
+      "version": null
+    },
+    "sglang": {
+      "installed": false,
+      "version": null
+    }
+  },
+  "pytorch": {
+    "importable": true,
+    "version": "2.12.1+cu126",
+    "cuda_available": true,
+    "compiled_cuda_version": "12.6",
+    "device_count": 1,
+    "device_names": [
+      "NVIDIA GeForce RTX 4090"
+    ],
+    "cudnn_version": 91002,
+    "nccl_version": [
+      2,
+      29,
+      3
+    ]
+  },
+  "paths": {
+    "model_directory": {
+      "configured": false
+    },
+    "data_directory": {
+      "configured": false
+    }
+  },
+  "credentials": {
+    "hf_token_environment_configured": false,
+    "note": "只记录令牌是否通过环境变量配置，不读取或保存令牌值。缓存登录状态未检查。"
+  },
+  "summary": {
+    "status": "blocked",
+    "issue_counts": {
+      "blocked": 2,
+      "warning": 4
+    },
+    "issues": [
+      {
+        "severity": "blocked",
+        "code": "sam3_not_installed",
+        "message": "未安装 SAM3 项目包。"
+      },
+      {
+        "severity": "warning",
+        "code": "transformers_not_installed",
+        "message": "未安装 Transformers，Qwen3-VL 直接推理路径当前不可用。"
+      },
+      {
+        "severity": "warning",
+        "code": "qwen_vl_utils_not_installed",
+        "message": "未安装 qwen-vl-utils。"
+      },
+      {
+        "severity": "warning",
+        "code": "conda_base_active",
+        "message": "当前处于 base 环境；项目运行应使用独立环境。"
+      },
+      {
+        "severity": "blocked",
+        "code": "python_too_old",
+        "message": "当前 Python 3.10，SAM3 要求 Python >= 3.12。"
+      },
+      {
+        "severity": "warning",
+        "code": "hf_token_env_not_set",
+        "message": "未检测到 Hugging Face 令牌环境变量；若未使用缓存登录，将无法下载受限 checkpoint。"
+      }
+    ]
+  }
+}
