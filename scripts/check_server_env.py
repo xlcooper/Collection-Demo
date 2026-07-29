@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCRIPT_VERSION = "0.1.0"
+SCRIPT_VERSION = "0.1.1"
 MIN_PYTHON = (3, 12)
 MIN_TORCH = (2, 7)
 MIN_CUDA = (12, 6)
@@ -185,6 +185,9 @@ def collect_gpu(issues: list[dict[str, str]]) -> dict[str, Any]:
         )
 
     nvcc = run_command(["nvcc", "--version"])
+    nvcc_version = parse_major_minor(
+        nvcc["output"] if nvcc["return_code"] == 0 else None
+    )
     if not nvcc["available"] or nvcc["return_code"] != 0:
         add_issue(
             issues,
@@ -192,11 +195,21 @@ def collect_gpu(issues: list[dict[str, str]]) -> dict[str, Any]:
             "nvcc_not_found",
             "未发现 nvcc；预编译运行库可能仍可用，但编译可选 CUDA 扩展会受限。",
         )
+    elif nvcc_version is not None and nvcc_version < MIN_CUDA:
+        add_issue(
+            issues,
+            "warning",
+            "nvcc_too_old",
+            f"系统 nvcc 为 {nvcc_version[0]}.{nvcc_version[1]}，低于 SAM3 的 CUDA 12.6 目标；请避免编译可选 CUDA 扩展。",
+        )
 
     return {
         "nvidia_smi_available": query["return_code"] == 0,
         "device_count": len(devices),
         "devices": devices,
+        "nvcc_version": (
+            f"{nvcc_version[0]}.{nvcc_version[1]}" if nvcc_version is not None else None
+        ),
         "nvcc": nvcc,
     }
 
@@ -439,7 +452,7 @@ def main() -> int:
                 "minimum_cuda": "12.6",
             },
             "mllm": {
-                "primary": "Qwen/Qwen3-VL-8B-Instruct",
+                "primary": "Qwen/Qwen3-VL-8B-Instruct-FP8",
                 "fallback": "Qwen/Qwen3-VL-4B-Instruct",
                 "alternative": "OpenGVLab/InternVL3.5-8B-HF",
             },
@@ -465,6 +478,27 @@ def main() -> int:
 
     if not report["git"]["available"]:
         add_issue(issues, "blocked", "git_not_found", "未发现 Git。")
+    if report["system"]["repo_disk"]["free_gib"] < 30:
+        add_issue(
+            issues,
+            "warning",
+            "repo_disk_low",
+            "仓库所在磁盘可用空间不足 30 GiB，无法安全容纳项目环境、模型权重、缓存和 Demo 数据。",
+        )
+    if not report["paths"]["model_directory"]["configured"]:
+        add_issue(
+            issues,
+            "warning",
+            "model_directory_not_configured",
+            "未配置模型目录；请通过 --model-dir 指定仓库外的持久化目录。",
+        )
+    if not report["paths"]["data_directory"]["configured"]:
+        add_issue(
+            issues,
+            "warning",
+            "data_directory_not_configured",
+            "未配置数据目录；请通过 --data-dir 指定仓库外的持久化目录。",
+        )
     if report["system"]["os"] != "Linux":
         add_issue(
             issues,
