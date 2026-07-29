@@ -18,7 +18,7 @@ QWEN_MODEL_ID="${QWEN_MODEL_ID:-Qwen/Qwen3-VL-8B-Instruct-FP8}"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 OUTPUT_ROOT="${REPO_ROOT}/runs/smoke/${RUN_ID}"
 
-export HF_HOME="${HF_HOME:-${MODEL_DIR}/huggingface}"
+export HF_HOME="${HF_HOME:-${MODEL_DIR}/qwen}"
 export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
 export PYTHONNOUSERSITE=1
 export TOKENIZERS_PARALLELISM=false

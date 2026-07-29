@@ -1,0 +1,21 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+torch==2.10.0+cu128
+torchvision==0.25.0+cu128
+transformers==4.57.6
+qwen-vl-utils==0.0.14
+accelerate==1.14.0
+pydantic==2.13.4
+PyYAML==6.0.3
+Pillow==12.3.0
+
+# SAM3 runtime dependencies are installed here so its isolated GitHub step
+# can use --no-deps and avoid sending PyPI traffic through network_turbo.
+timm>=1.0.17
+numpy>=1.26,<2
+tqdm
+ftfy==6.1.1
+regex
+iopath>=0.1.10
+typing_extensions
+huggingface_hub

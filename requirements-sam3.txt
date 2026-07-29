@@ -1,0 +1,2 @@
+# SAM3 source code only. The checkpoint remains at weights/sam3/sam3.pt.
+sam3 @ https://codeload.github.com/facebookresearch/sam3/zip/6dbb02bd38288df755dfa1378000a861e65b84f6

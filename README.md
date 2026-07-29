@@ -2,7 +2,7 @@
 
 第一阶段自动化对象记忆 Demo：SAM3 发现并分割场景物体，MLLM 判断对象新颖性、生成结构化标签，并把同一具体物体的多次观测归并至显式记忆库。
 
-- **当前版本**：v0.2.0
+- **当前版本**：v0.2.2
 - **当前阶段**：M0——服务器环境整改
 - **当前状态**：环境声明与模型冒烟脚本已就绪，等待服务器执行
 
@@ -49,7 +49,9 @@
 | `environment/server_env_report.json` | 服务器环境原始事实 | 跟踪 |
 | `docs/02_服务器环境分析.md` | 环境详细分析、模型决策和下一步 | 跟踪 |
 | `docs/03_服务器环境与冒烟测试指南.md` | 服务器环境创建与执行命令 | 跟踪 |
-| `environment.yml` | Conda 环境和直接依赖事实源 | 跟踪 |
+| `environment.yml` | Conda 基础环境事实源 | 跟踪 |
+| `requirements.txt` | PyTorch、Qwen 与普通 Python 依赖 | 跟踪 |
+| `requirements-sam3.txt` | SAM3 固定提交的独立安装入口 | 跟踪 |
 | `scripts/check_server_env.py` | 服务器环境自检 | 跟踪 |
 | `docs/00_项目纲要.md` | 完整项目背景 | 仅本地，忽略 |
 | `docs/01_第一阶段项目设计规划书.md` | 第一阶段技术规划 | 仅本地，忽略 |
@@ -57,8 +59,8 @@
 ## 下一步
 
 1. 服务器 pull 当前版本。
-2. 运行 `bash scripts/setup_server_env.sh` 创建环境并重新自检。
-3. 准备一张不进入 Git 的测试图像。
+2. 依次使用 `environment.yml`、`requirements.txt` 和 `requirements-sam3.txt` 配置环境。
+3. 运行环境自检并准备一张不进入 Git 的测试图像。
 4. 运行 `scripts/run_server_smoke_tests.sh` 顺序测试 SAM3 与 Qwen3-VL。
 5. push 三份生成报告；本地 pull 分析后决定是否进入 M1。
 
@@ -72,7 +74,7 @@
 2. **聚焦第一阶段**：当前只开发自动化对象记忆 Demo；主动采集、视角规划、机械臂和世界模型均不提前实施。
 3. **Friendly 代码**：模块、脚本和逻辑必须职责清楚、命名直接、流程可读；优先短函数、显式类型、结构化模型输出和可操作错误信息。
 4. **本地/服务器分工**：本地只用于人与 AI 协作、修改、审查、提交和 push；不在本地安装深度学习环境或运行脚本/测试。所有脚本、测试与 Demo 只在 auto DL 服务器执行。
-5. **Conda 管理**：项目运行环境统一由 Conda 管理；依赖以 `environment.yml` 为事实源，不把临时安装命令当作最终配置，不长期使用 `base` 环境运行项目。
+5. **Conda 与依赖管理**：项目运行环境统一由 Conda 管理；Conda 基础环境以 `environment.yml` 为事实源，Python 依赖以 `requirements*.txt` 为事实源，不把临时安装命令当作最终配置，不长期使用 `base` 环境运行项目。环境配置必须按可独立重跑的步骤拆分，不使用单个脚本串联全量安装。
 6. **Git 与环境先验**：收到服务器已 push 的通知后，本地首先执行 pull，并只依据拉取到的文件分析。每个完成的本地修改批次都必须更新 CHANGELOG、提交并 push；若 push 失败必须明确报告。
 
 ## 版本规则
