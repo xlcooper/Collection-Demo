@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "script_version": "0.2.0",
-  "generated_at_utc": "2026-07-29T11:33:31.581289+00:00",
+  "script_version": "0.3.0",
+  "generated_at_utc": "2026-07-30T03:41:54.585901+00:00",
   "target": {
     "sam3": {
       "source": "facebookresearch/sam3",
@@ -18,9 +18,9 @@
   "git": {
     "available": true,
     "version": "git version 2.55.0",
-    "commit": "b55c7cd10b0d46286de9b7d2306901dc3f448c03",
-    "worktree_clean": true,
-    "dirty_entry_count": 0,
+    "commit": "29221fb70c56bacb8c43cea562459e3588f7f5a2",
+    "worktree_clean": false,
+    "dirty_entry_count": 3,
     "git_lfs": {
       "available": true,
       "version": "git-lfs/3.7.1 (GitHub; linux amd64; go 1.26.4)"
@@ -34,7 +34,7 @@
     "memory_total_gib": 1007.51,
     "repo_disk": {
       "total_gib": 50.0,
-      "free_gib": 33.33
+      "free_gib": 23.45
     }
   },
   "gpu": {
@@ -67,6 +67,10 @@
     "meets_sam3_minimum": true
   },
   "packages": {
+    "setuptools": {
+      "installed": true,
+      "version": "80.10.2"
+    },
     "torch": {
       "installed": true,
       "version": "2.10.0+cu128"
@@ -78,6 +82,14 @@
     "sam3": {
       "installed": true,
       "version": "0.1.0"
+    },
+    "einops": {
+      "installed": true,
+      "version": "0.8.2"
+    },
+    "pycocotools": {
+      "installed": true,
+      "version": "2.0.11"
     },
     "transformers": {
       "installed": true,
@@ -116,27 +128,31 @@
       5
     ]
   },
+  "sam3_runtime": {
+    "importable": true,
+    "version": "0.1.0"
+  },
   "paths": {
     "model_directory": {
       "configured": true,
       "exists": true,
       "is_directory": true,
       "writable": true,
-      "disk_free_gib": 33.33
+      "disk_free_gib": 23.45
     },
     "data_directory": {
       "configured": true,
       "exists": true,
       "is_directory": true,
       "writable": true,
-      "disk_free_gib": 33.33
+      "disk_free_gib": 23.45
     },
     "sam3_checkpoint": {
       "configured": true,
       "exists": true,
       "is_directory": false,
       "writable": true,
-      "disk_free_gib": 769.91,
+      "disk_free_gib": 712.86,
       "file_size_gib": 3.21
     }
   },
@@ -148,13 +164,18 @@
     "status": "warning",
     "issue_counts": {
       "blocked": 0,
-      "warning": 1
+      "warning": 2
     },
     "issues": [
       {
         "severity": "warning",
         "code": "nvcc_too_old",
         "message": "系统 nvcc 为 11.8，低于 SAM3 的 CUDA 12.6 目标；请避免编译可选 CUDA 扩展。"
+      },
+      {
+        "severity": "warning",
+        "code": "repo_disk_low",
+        "message": "仓库所在磁盘可用空间不足 30 GiB，无法安全容纳项目环境、模型权重、缓存和 Demo 数据。"
       }
     ]
   }
