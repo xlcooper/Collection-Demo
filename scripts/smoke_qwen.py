@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
         help="Hugging Face model ID or local model path.",
     )
     parser.add_argument("--revision", help="Optional model revision.")
+    parser.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="Allow Hugging Face network access instead of requiring local cache.",
+    )
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
     parser.add_argument("--max-pixels", type=int, default=1024 * 1024)
     parser.add_argument("--max-new-tokens", type=int, default=256)
@@ -116,6 +121,7 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
     model_kwargs: dict[str, Any] = {
         "dtype": "auto",
         "device_map": "auto",
+        "local_files_only": not args.allow_network,
     }
     if args.revision:
         model_kwargs["revision"] = args.revision
@@ -129,6 +135,7 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
     processor = AutoProcessor.from_pretrained(
         args.model,
         revision=args.revision,
+        local_files_only=not args.allow_network,
     )
     model.eval()
     torch.cuda.synchronize()
@@ -191,8 +198,6 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
     report.update(
         {
             "status": status,
-            "model": args.model,
-            "revision": args.revision,
             "input": {
                 "filename": image_path.name,
                 "sha256": sha256_file(image_path),
@@ -227,6 +232,9 @@ def main() -> int:
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "qwen3_vl_json_smoke",
         "status": "failed",
+        "model": args.model,
+        "revision": args.revision,
+        "loading": {"local_files_only": not args.allow_network},
     }
 
     try:
