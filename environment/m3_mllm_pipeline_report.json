@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-30T08:57:35.263254+00:00",
+  "test": "m3_mllm_pipeline",
+  "status": "failed",
+  "error": {
+    "type": "FileNotFoundError",
+    "message": "Cannot resolve one local Qwen snapshot under /root/.cache/huggingface/hub/models--Qwen--Qwen3-VL-8B-Instruct-FP8/snapshots."
+  }
+}
