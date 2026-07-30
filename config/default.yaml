@@ -9,11 +9,15 @@ models:
   qwen_model_id: Qwen/Qwen3-VL-8B-Instruct-FP8
 
 sam3_pipeline:
-  prompt_strategy: explicit_category_list
+  prompt_strategy: automatic_point_grid
   prompts: []
-  confidence_threshold: 0.5
+  points_per_side: 16
+  points_per_batch: 32
+  confidence_threshold: 0.88
   min_mask_area_ratio: 0.0005
+  max_mask_area_ratio: 0.8
   duplicate_mask_iou_threshold: 0.9
+  max_candidates_per_image: 24
   crop_padding_pixels: 8
   overlay_alpha: 0.45
   overlay_color: [255, 64, 64]

@@ -86,6 +86,8 @@ def process_candidates(
             reason = "empty_mask"
         elif mask_area_ratio < settings.min_mask_area_ratio:
             reason = "mask_too_small"
+        elif mask_area_ratio > settings.max_mask_area_ratio:
+            reason = "mask_too_large"
         elif bbox is None:
             reason = "invalid_bbox"
 
@@ -111,6 +113,11 @@ def process_candidates(
             _mark_filtered(candidate.proposal, reason)
             filtered.append(candidate.proposal)
             filter_counts["duplicate_mask"] += 1
+            continue
+        if len(kept_prepared) >= settings.max_candidates_per_image:
+            _mark_filtered(candidate.proposal, "candidate_limit")
+            filtered.append(candidate.proposal)
+            filter_counts["candidate_limit"] += 1
             continue
         kept_prepared.append(candidate)
 
@@ -255,4 +262,3 @@ def _save_image_atomic(image: Image.Image, path: Path, image_format: str) -> Non
         temporary_path.replace(path)
     finally:
         temporary_path.unlink(missing_ok=True)
-

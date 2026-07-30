@@ -49,6 +49,7 @@ class M2PostprocessTests(unittest.TestCase):
             candidate("weak", "bottle", 0.40, other_mask, (60, 60, 80, 80)),
         ]
         settings = Sam3PipelineConfig(
+            prompt_strategy="explicit_category_list",
             prompts=["cup", "mug", "cap", "bottle"],
             confidence_threshold=0.5,
             min_mask_area_ratio=0.01,
@@ -93,7 +94,56 @@ class M2PostprocessTests(unittest.TestCase):
         self.assertAlmostEqual(mask_iou(first, second), 1 / 3)
         self.assertEqual(mask_iou(first, np.zeros((1, 1), dtype=bool)), 0.0)
 
+    def test_automatic_candidates_filter_large_regions_and_apply_limit(self) -> None:
+        image = Image.new("RGB", (20, 20), (220, 220, 220))
+        large_mask = np.ones((20, 20), dtype=bool)
+        first_mask = np.zeros((20, 20), dtype=bool)
+        first_mask[1:6, 1:6] = True
+        second_mask = np.zeros((20, 20), dtype=bool)
+        second_mask[12:18, 12:18] = True
+        candidates = [
+            candidate(
+                "large",
+                "automatic_point_grid",
+                0.99,
+                large_mask,
+                (0, 0, 20, 20),
+            ),
+            candidate(
+                "first",
+                "automatic_point_grid",
+                0.95,
+                first_mask,
+                (1, 1, 6, 6),
+            ),
+            candidate(
+                "second",
+                "automatic_point_grid",
+                0.90,
+                second_mask,
+                (12, 12, 18, 18),
+            ),
+        ]
+        settings = Sam3PipelineConfig(
+            confidence_threshold=0.5,
+            max_mask_area_ratio=0.8,
+            max_candidates_per_image=1,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            result = process_candidates(
+                candidates,
+                image=image,
+                source_image_id="src_automatic",
+                run_id="run_automatic",
+                paths=MemoryPaths(Path(temporary_directory) / "assets"),
+                settings=settings,
+            )
+
+        self.assertEqual(len(result.kept), 1)
+        self.assertEqual(result.filter_counts["mask_too_large"], 1)
+        self.assertEqual(result.filter_counts["candidate_limit"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-

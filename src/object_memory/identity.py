@@ -23,6 +23,7 @@ from .schemas import (
 SYSTEM_PROMPT = """You are the single-call identity and annotation component of an object-memory system.
 Follow the ordered stages below, then return exactly one JSON object with no Markdown or extra text.
 Stage 1 - validity: decide whether IMAGE_A_CANDIDATE is one valid physical object. Judge the isolated object, not its contents, nearby objects, scene, brand, or product model.
+Candidates may come from automatic point-grid segmentation without a category hint. Reject background regions, object parts that are not independent objects, merged groups, and meaningless fragments as ignored.
 Stage 2 - identity: compare IMAGE_A_CANDIDATE only with images explicitly labelled REFERENCE_IMAGE for known object cards. Never compare the colored context overlay with a reference image. Card text is prior context, not evidence that an unlabeled candidate is different.
 Stage 3 - annotation: describe IMAGE_A_CANDIDATE only, after deciding identity. Use concise Chinese values and visible evidence only.
 Two objects of the same category are not automatically the same instance. However, pixel-identical images or the same distinctive visible details are strong instance evidence and must not be rejected by inventing color, material, or shape differences. If evidence is weak or conflicting, answer uncertain rather than new.
@@ -167,14 +168,24 @@ def build_identity_messages(
     if max_reference_views_per_object <= 0 or max_pixels <= 0:
         raise ValueError("MLLM image limits must be positive")
 
+    normalized_source = sam_prompt.strip()
+    if normalized_source == "automatic_point_grid":
+        candidate_origin = (
+            "No category hint was supplied. The project generated this candidate "
+            "automatically from a point grid; infer its category only from pixels."
+        )
+    else:
+        candidate_origin = (
+            f"Historical SAM category hint: {normalized_source or 'unknown'}."
+        )
+
     content: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": (
                 "IMAGE_A_CANDIDATE follows. This crop is the current proposal, "
                 "the only image to annotate, and the left-hand side of every "
-                "identity comparison. "
-                f"SAM category hint: {sam_prompt.strip() or 'unknown'}."
+                f"identity comparison. {candidate_origin}"
             ),
         },
         {"type": "image", "image": crop.as_uri(), "max_pixels": max_pixels},

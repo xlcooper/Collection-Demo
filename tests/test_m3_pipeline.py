@@ -111,6 +111,33 @@ class M3ResponseTests(unittest.TestCase):
 
 
 class M3IdentityPipelineTests(unittest.TestCase):
+    def test_automatic_candidate_does_not_supply_a_category_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            crop = root / "crop.png"
+            overlay = root / "overlay.jpg"
+            Image.new("RGB", (8, 8)).save(crop)
+            Image.new("RGB", (8, 8)).save(overlay)
+
+            messages = build_identity_messages(
+                candidate_crop=crop,
+                candidate_overlay=overlay,
+                sam_prompt="automatic_point_grid",
+                cards=[],
+                card_assets=None,
+                max_reference_views_per_object=2,
+                max_pixels=1024,
+            )
+
+            all_text = "\n".join(
+                item["text"]
+                for message in messages
+                for item in message["content"]
+                if item["type"] == "text"
+            )
+            self.assertIn("No category hint was supplied", all_text)
+            self.assertIn("infer its category only from pixels", all_text)
+
     def test_messages_map_reference_image_to_object_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = MemoryPaths(Path(temporary_directory) / "assets")

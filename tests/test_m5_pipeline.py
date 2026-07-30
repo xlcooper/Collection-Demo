@@ -22,7 +22,6 @@ from object_memory.sam3_adapter import RawSamCandidate, Sam3Prediction
 
 def test_config(*, max_error_attempts: int = 2) -> AppConfig:
     payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
-    payload["sam3_pipeline"]["prompts"] = ["cup"]
     payload["mllm_pipeline"]["max_error_attempts"] = max_error_attempts
     return AppConfig.model_validate(payload)
 
@@ -76,7 +75,6 @@ class FakeSamRuntime:
     def predict(
         self,
         image: Image.Image,
-        prompts: Sequence[str],
     ) -> Sam3Prediction:
         self.events.append("sam.predict")
         mask = np.zeros((image.height, image.width), dtype=bool)
@@ -84,7 +82,7 @@ class FakeSamRuntime:
         candidates = [
             RawSamCandidate(
                 raw_candidate_id="candidate-main",
-                prompt=prompts[0],
+                prompt="automatic_point_grid",
                 score=0.95,
                 bbox_xyxy=(2, 2, image.width - 2, image.height - 2),
                 mask=mask,
@@ -94,7 +92,7 @@ class FakeSamRuntime:
             candidates.append(
                 RawSamCandidate(
                     raw_candidate_id="candidate-duplicate",
-                    prompt=prompts[0],
+                    prompt="automatic_point_grid",
                     score=0.8,
                     bbox_xyxy=(2, 2, image.width - 2, image.height - 2),
                     mask=mask,
@@ -102,7 +100,7 @@ class FakeSamRuntime:
             )
         return Sam3Prediction(
             candidates=tuple(candidates),
-            prompt_counts={prompts[0]: len(candidates)},
+            prompt_counts={"automatic_point_grid": len(candidates)},
             inference_seconds=0.2,
         )
 
@@ -188,7 +186,6 @@ class M5PipelineTests(unittest.TestCase):
 
             report = pipeline.run(
                 [first, second, duplicate],
-                prompts=["cup"],
                 run_id="run_m5_batch",
             )
 
@@ -232,7 +229,6 @@ class M5PipelineTests(unittest.TestCase):
 
             report = pipeline.run(
                 [image],
-                prompts=["cup"],
                 run_id="run_m5_retry",
             )
 
@@ -265,7 +261,6 @@ class M5PipelineTests(unittest.TestCase):
 
             report = pipeline.run(
                 [image],
-                prompts=["cup"],
                 run_id="run_m5_uncertain",
             )
 

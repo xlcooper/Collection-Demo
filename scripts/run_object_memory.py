@@ -37,14 +37,6 @@ def parse_args() -> argparse.Namespace:
         description="Process an image directory into persistent object memory."
     )
     parser.add_argument("--input-dir", required=True)
-    parser.add_argument(
-        "--prompt",
-        action="append",
-        help=(
-            "Concrete English SAM3 category; repeat for multiple categories. "
-            "Uses config prompts when omitted."
-        ),
-    )
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--memory-root")
     parser.add_argument("--checkpoint")
@@ -69,8 +61,6 @@ def parse_args() -> argparse.Namespace:
 
 def runtime_config(base: AppConfig, args: argparse.Namespace) -> AppConfig:
     payload = base.model_dump(mode="python")
-    prompts = args.prompt if args.prompt is not None else base.sam3_pipeline.prompts
-    payload["sam3_pipeline"]["prompts"] = prompts
     if args.checkpoint:
         payload["models"]["sam3_checkpoint"] = args.checkpoint
     if args.qwen_model:
@@ -136,6 +126,11 @@ def main() -> int:
     args = parse_args()
     try:
         config = runtime_config(load_config(args.config), args)
+        if config.sam3_pipeline.prompt_strategy != "automatic_point_grid":
+            raise ValueError(
+                "The main workflow requires sam3_pipeline.prompt_strategy="
+                "automatic_point_grid"
+            )
         input_root = Path(args.input_dir).expanduser().resolve()
         memory_root = resolve_memory_root(
             config,
@@ -149,6 +144,8 @@ def main() -> int:
         sam_runtime = Sam3Adapter(
             checkpoint,
             config.sam3_pipeline.confidence_threshold,
+            points_per_side=config.sam3_pipeline.points_per_side,
+            points_per_batch=config.sam3_pipeline.points_per_batch,
         )
         mllm_runtime = QwenMllmAdapter(
             config.models.qwen_model_id,
@@ -163,10 +160,7 @@ def main() -> int:
             sam_runtime=sam_runtime,
             mllm_runtime=mllm_runtime,
         )
-        report = pipeline.run(
-            image_paths,
-            prompts=config.sam3_pipeline.prompts,
-        )
+        report = pipeline.run(image_paths)
         if args.validate_phase_one:
             add_phase_one_coverage(report)
             write_json_atomic(paths.resolve_asset(report["run_report"]), report)

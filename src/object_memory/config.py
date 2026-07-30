@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,15 +47,24 @@ class ModelConfig(BaseModel):
 
 
 class Sam3PipelineConfig(BaseModel):
-    """Deterministic settings for explicit-prompt SAM3 candidate generation."""
+    """Deterministic settings for class-agnostic SAM3 candidate generation."""
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt_strategy: Literal["explicit_category_list"] = "explicit_category_list"
+    prompt_strategy: Literal[
+        "automatic_point_grid",
+        "explicit_category_list",
+    ] = "automatic_point_grid"
+    # Retained only for historical M2 verification. The main workflow does not use
+    # category prompts when prompt_strategy is automatic_point_grid.
     prompts: list[str] = Field(default_factory=list)
-    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    points_per_side: int = Field(default=16, ge=2, le=64)
+    points_per_batch: int = Field(default=32, ge=1, le=256)
+    confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
     min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
+    max_mask_area_ratio: float = Field(default=0.8, gt=0.0, le=1.0)
     duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
+    max_candidates_per_image: int = Field(default=24, ge=1, le=256)
     crop_padding_pixels: int = Field(default=8, ge=0)
     overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)
     overlay_color: tuple[int, int, int] = (255, 64, 64)
@@ -78,6 +87,22 @@ class Sam3PipelineConfig(BaseModel):
         if any(channel < 0 or channel > 255 for channel in value):
             raise ValueError("overlay_color channels must be between 0 and 255")
         return value
+
+    @model_validator(mode="after")
+    def validate_mask_area_range(self) -> "Sam3PipelineConfig":
+        if self.min_mask_area_ratio >= self.max_mask_area_ratio:
+            raise ValueError(
+                "min_mask_area_ratio must be smaller than max_mask_area_ratio"
+            )
+        if self.prompt_strategy == "automatic_point_grid" and self.prompts:
+            raise ValueError(
+                "automatic_point_grid must not include category prompts"
+            )
+        if self.prompt_strategy == "explicit_category_list" and not self.prompts:
+            raise ValueError(
+                "explicit_category_list requires at least one category prompt"
+            )
+        return self
 
 
 class MllmPipelineConfig(BaseModel):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one real M2 SAM3 pipeline and write a compact server report."""
+"""Verify SAM3 candidate generation without loading Qwen."""
 
 from __future__ import annotations
 
@@ -25,13 +25,15 @@ from object_memory.schemas import Proposal, SourceImage
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify the real M2 SAM3 pipeline.")
+    parser = argparse.ArgumentParser(description="Verify real SAM3 candidates.")
     parser.add_argument("--image", required=True, help="Source scene image path.")
     parser.add_argument(
         "--prompt",
         action="append",
-        required=True,
-        help="Concrete English category prompt; repeat for more categories.",
+        help=(
+            "Optional historical category prompt. Omit it to verify the current "
+            "automatic point-grid strategy."
+        ),
     )
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--checkpoint", help="Override the configured checkpoint.")
@@ -123,7 +125,12 @@ def inspect_assets(
 def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     config = load_config(args.config)
     settings_payload = config.sam3_pipeline.model_dump()
-    settings_payload["prompts"] = args.prompt
+    if args.prompt:
+        settings_payload["prompt_strategy"] = "explicit_category_list"
+        settings_payload["prompts"] = args.prompt
+    else:
+        settings_payload["prompt_strategy"] = "automatic_point_grid"
+        settings_payload["prompts"] = []
     settings = Sam3PipelineConfig.model_validate(settings_payload)
 
     image_path = Path(args.image).expanduser().resolve()
@@ -151,7 +158,8 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
             image.save(source_asset, format="PNG")
 
     generated_at = datetime.now(timezone.utc)
-    run_id = generated_at.strftime("m2_%Y%m%dT%H%M%S%fZ")
+    run_prefix = "m2" if settings.prompts else "m5_auto"
+    run_id = generated_at.strftime(f"{run_prefix}_%Y%m%dT%H%M%S%fZ")
     source = SourceImage(
         id=f"src_{image_sha256[:32]}",
         run_id=run_id,
@@ -161,10 +169,19 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         height=image.height,
     )
 
-    adapter = Sam3Adapter(checkpoint, settings.confidence_threshold)
+    adapter = Sam3Adapter(
+        checkpoint,
+        settings.confidence_threshold,
+        points_per_side=settings.points_per_side,
+        points_per_batch=settings.points_per_batch,
+    )
     try:
         adapter.load()
-        prediction = adapter.predict(image, settings.prompts)
+        prediction = (
+            adapter.predict(image, settings.prompts)
+            if settings.prompt_strategy == "explicit_category_list"
+            else adapter.predict(image)
+        )
         peak_memory_mib = adapter.peak_memory_mib
         model_load_seconds = adapter.model_load_seconds
     finally:
@@ -180,8 +197,8 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     )
     asset_checks = inspect_assets(result, paths, image.size)
     checks = {
-        "explicit_prompt_strategy": settings.prompt_strategy
-        == "explicit_category_list",
+        "candidate_strategy_valid": settings.prompt_strategy
+        in {"automatic_point_grid", "explicit_category_list"},
         "raw_candidates_nonempty": len(prediction.candidates) > 0,
         "kept_candidates_nonempty": len(result.kept) > 0,
         "source_association_valid": all(
@@ -198,7 +215,12 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         "strategy": {
             "name": settings.prompt_strategy,
             "prompts": settings.prompts,
-            "scope": "configured categories only; not open-scene exhaustive discovery",
+            "external_category_prompts": bool(settings.prompts),
+            "scope": (
+                "automatic class-agnostic point-grid candidates"
+                if settings.prompt_strategy == "automatic_point_grid"
+                else "configured categories only"
+            ),
         },
         "input": {
             "filename": image_path.name,
@@ -212,7 +234,7 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
             "filename": checkpoint.name,
             "size_gib": round(checkpoint.stat().st_size / (1024**3), 3),
         },
-        "prompt_counts": prediction.prompt_counts,
+        "candidate_source_counts": prediction.prompt_counts,
         "counts": {
             "raw": len(prediction.candidates),
             "kept": len(result.kept),
@@ -222,7 +244,7 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         "settings": settings.model_dump(),
         "timing_seconds": {
             "model_load": round(model_load_seconds, 3),
-            "inference_all_prompts": round(prediction.inference_seconds, 3),
+            "candidate_inference": round(prediction.inference_seconds, 3),
         },
         "cuda": {"peak_memory_mib": round(peak_memory_mib, 2)},
         "proposals": [proposal_summary(item) for item in result.proposals],
@@ -234,7 +256,11 @@ def main() -> int:
     report: dict[str, Any] = {
         "schema_version": 1,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "test": "m2_sam3_pipeline",
+        "test": (
+            "m2_sam3_pipeline"
+            if args.prompt
+            else "sam3_automatic_candidate_generation"
+        ),
         "status": "failed",
     }
     try:

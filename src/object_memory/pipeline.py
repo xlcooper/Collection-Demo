@@ -14,7 +14,7 @@ from uuid import uuid4
 from PIL import Image
 
 from .assets import MemoryPaths
-from .config import AppConfig, Sam3PipelineConfig, config_digest
+from .config import AppConfig, config_digest
 from .identity import IdentityEvaluation, evaluate_candidate
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
@@ -35,7 +35,6 @@ class SamRuntime(Protocol):
     def predict(
         self,
         image: Image.Image,
-        prompts: Sequence[str],
     ) -> Sam3Prediction: ...
 
     @property
@@ -71,7 +70,7 @@ class ImageWork:
     kept: tuple[Proposal, ...] = ()
     filtered_count: int = 0
     raw_candidate_count: int = 0
-    prompt_counts: dict[str, int] = field(default_factory=dict)
+    candidate_source_counts: dict[str, int] = field(default_factory=dict)
     sam_inference_seconds: float = 0.0
     decisions: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
@@ -88,7 +87,7 @@ class ImageWork:
                 "raw_candidates": self.raw_candidate_count,
                 "kept": len(self.kept),
                 "filtered": self.filtered_count,
-                "prompt_counts": self.prompt_counts,
+                "candidate_source_counts": self.candidate_source_counts,
                 "inference_seconds": round(self.sam_inference_seconds, 3),
             },
             "decisions": self.decisions,
@@ -174,10 +173,8 @@ class ObjectMemoryPipeline:
         self,
         image_paths: Sequence[str | Path],
         *,
-        prompts: Sequence[str],
         run_id: str | None = None,
     ) -> dict[str, Any]:
-        normalized_prompts = self._normalize_prompts(prompts)
         normalized_images = [Path(path).expanduser().resolve() for path in image_paths]
         if not normalized_images:
             raise ValueError("At least one input image is required")
@@ -198,7 +195,7 @@ class ObjectMemoryPipeline:
         for work in works:
             self._register_image(run, work, external_errors)
 
-        sam_metrics = self._run_sam(run, works, normalized_prompts)
+        sam_metrics = self._run_sam(run, works)
         qwen_metrics = self._run_qwen(run, works)
         external_errors.extend(sam_metrics.pop("external_errors"))
         external_errors.extend(qwen_metrics.pop("external_errors"))
@@ -223,8 +220,13 @@ class ObjectMemoryPipeline:
             "checks": checks,
             "strategy": {
                 "prompt_strategy": self.config.sam3_pipeline.prompt_strategy,
-                "prompts": normalized_prompts,
-                "scope": "configured categories only",
+                "external_category_prompts": False,
+                "points_per_side": self.config.sam3_pipeline.points_per_side,
+                "points_per_batch": self.config.sam3_pipeline.points_per_batch,
+                "scope": (
+                    "class-agnostic point-grid candidates; candidate coverage "
+                    "must be verified empirically"
+                ),
                 "model_residency": "SAM3 then release; Qwen then release",
                 "qwen_call_unit": "one call per candidate per object-card batch",
                 "uncertain_policy": "persist pending; do not immediately repeat",
@@ -242,15 +244,6 @@ class ObjectMemoryPipeline:
         report["run_report"] = self.paths.relative_asset(report_path)
         write_json_atomic(report_path, report)
         return report
-
-    @staticmethod
-    def _normalize_prompts(prompts: Sequence[str]) -> list[str]:
-        normalized = [prompt.strip() for prompt in prompts]
-        if not normalized or any(not prompt for prompt in normalized):
-            raise ValueError("At least one non-empty SAM3 prompt is required")
-        if len(set(normalized)) != len(normalized):
-            raise ValueError("SAM3 prompts must be unique")
-        return normalized
 
     @staticmethod
     def _new_run_id() -> str:
@@ -316,7 +309,6 @@ class ObjectMemoryPipeline:
         self,
         run: Run,
         works: list[ImageWork],
-        prompts: Sequence[str],
     ) -> dict[str, Any]:
         pending = [work for work in works if work.status == "registered"]
         metrics: dict[str, Any] = {
@@ -336,7 +328,7 @@ class ObjectMemoryPipeline:
                 3,
             )
             for work in pending:
-                self._process_image_with_sam(run, work, prompts)
+                self._process_image_with_sam(run, work)
             metrics["inference_seconds"] = round(
                 sum(work.sam_inference_seconds for work in pending),
                 3,
@@ -364,25 +356,24 @@ class ObjectMemoryPipeline:
         self,
         run: Run,
         work: ImageWork,
-        prompts: Sequence[str],
     ) -> None:
         assert work.source is not None
         try:
             with Image.open(work.input_path) as opened:
                 image = opened.convert("RGB")
-            prediction = self.sam_runtime.predict(image, prompts)
+            prediction = self.sam_runtime.predict(image)
             result = process_candidates(
                 prediction.candidates,
                 image=image,
                 source_image_id=work.source.id,
                 run_id=run.id,
                 paths=self.paths,
-                settings=self._sam_settings(prompts),
+                settings=self.config.sam3_pipeline,
             )
             for proposal in result.filtered:
                 self.loop.record_filtered_proposal(proposal)
             work.raw_candidate_count = len(prediction.candidates)
-            work.prompt_counts = prediction.prompt_counts
+            work.candidate_source_counts = prediction.prompt_counts
             work.sam_inference_seconds = prediction.inference_seconds
             work.filtered_count = len(result.filtered)
             work.kept = result.kept
@@ -396,11 +387,6 @@ class ObjectMemoryPipeline:
             work.error = message
             self.loop.fail_source(work.source.id, message)
             work.status = "failed"
-
-    def _sam_settings(self, prompts: Sequence[str]) -> Sam3PipelineConfig:
-        payload = self.config.sam3_pipeline.model_dump()
-        payload["prompts"] = list(prompts)
-        return Sam3PipelineConfig.model_validate(payload)
 
     def _fail_registered_source(
         self,
