@@ -77,14 +77,18 @@ class FakeSamRuntime:
         image: Image.Image,
     ) -> Sam3Prediction:
         self.events.append("sam.predict")
+        x_min = image.width // 4
+        y_min = image.height // 4
+        x_max = image.width - x_min
+        y_max = image.height - y_min
         mask = np.zeros((image.height, image.width), dtype=bool)
-        mask[2 : image.height - 2, 2 : image.width - 2] = True
+        mask[y_min:y_max, x_min:x_max] = True
         candidates = [
             RawSamCandidate(
                 raw_candidate_id="candidate-main",
                 prompt="automatic_point_grid",
                 score=0.95,
-                bbox_xyxy=(2, 2, image.width - 2, image.height - 2),
+                bbox_xyxy=(x_min, y_min, x_max, y_max),
                 mask=mask,
             )
         ]
@@ -93,8 +97,8 @@ class FakeSamRuntime:
                 RawSamCandidate(
                     raw_candidate_id="candidate-duplicate",
                     prompt="automatic_point_grid",
-                    score=0.8,
-                    bbox_xyxy=(2, 2, image.width - 2, image.height - 2),
+                    score=0.90,
+                    bbox_xyxy=(x_min, y_min, x_max, y_max),
                     mask=mask,
                 )
             )
