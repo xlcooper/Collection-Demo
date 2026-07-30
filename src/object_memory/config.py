@@ -62,8 +62,13 @@ class Sam3PipelineConfig(BaseModel):
     points_per_batch: int = Field(default=32, ge=1, le=256)
     confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
     min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
-    max_mask_area_ratio: float = Field(default=0.8, gt=0.0, le=1.0)
+    max_mask_area_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
     duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
+    contained_mask_overlap_threshold: float = Field(
+        default=0.9,
+        gt=0.0,
+        le=1.0,
+    )
     max_candidates_per_image: int = Field(default=24, ge=1, le=256)
     crop_padding_pixels: int = Field(default=8, ge=0)
     overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)

@@ -15,8 +15,9 @@ sam3_pipeline:
   points_per_batch: 32
   confidence_threshold: 0.88
   min_mask_area_ratio: 0.0005
-  max_mask_area_ratio: 0.8
+  max_mask_area_ratio: 0.5
   duplicate_mask_iou_threshold: 0.9
+  contained_mask_overlap_threshold: 0.9
   max_candidates_per_image: 24
   crop_padding_pixels: 8
   overlay_alpha: 0.45

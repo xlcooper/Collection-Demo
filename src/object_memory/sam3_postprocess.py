@@ -101,18 +101,39 @@ def process_candidates(
     kept_prepared: list[_PreparedCandidate] = []
     for candidate in prepared:
         duplicate_of: Proposal | None = None
+        contained_by: Proposal | None = None
         for kept_candidate in kept_prepared:
-            if (
-                mask_iou(candidate.raw.mask, kept_candidate.raw.mask)
-                >= settings.duplicate_mask_iou_threshold
-            ):
+            intersection = int(
+                np.count_nonzero(candidate.raw.mask & kept_candidate.raw.mask)
+            )
+            union = (
+                candidate.proposal.mask_area_pixels
+                + kept_candidate.proposal.mask_area_pixels
+                - intersection
+            )
+            overlap_iou = intersection / union if union else 0.0
+            if overlap_iou >= settings.duplicate_mask_iou_threshold:
                 duplicate_of = kept_candidate.proposal
                 break
+            if (
+                contained_by is None
+                and candidate.proposal.mask_area_pixels
+                < kept_candidate.proposal.mask_area_pixels
+                and intersection / candidate.proposal.mask_area_pixels
+                >= settings.contained_mask_overlap_threshold
+            ):
+                contained_by = kept_candidate.proposal
         if duplicate_of is not None:
             reason = f"duplicate_mask:{duplicate_of.id}"
             _mark_filtered(candidate.proposal, reason)
             filtered.append(candidate.proposal)
             filter_counts["duplicate_mask"] += 1
+            continue
+        if contained_by is not None:
+            reason = f"contained_mask:{contained_by.id}"
+            _mark_filtered(candidate.proposal, reason)
+            filtered.append(candidate.proposal)
+            filter_counts["contained_mask"] += 1
             continue
         if len(kept_prepared) >= settings.max_candidates_per_image:
             _mark_filtered(candidate.proposal, "candidate_limit")
@@ -149,6 +170,18 @@ def mask_iou(first: np.ndarray, second: np.ndarray) -> float:
     intersection = int(np.count_nonzero(first & second))
     union = int(np.count_nonzero(first | second))
     return intersection / union if union else 0.0
+
+
+def mask_containment(inner: np.ndarray, outer: np.ndarray) -> float:
+    """Return how much of the smaller candidate lies inside a kept mask."""
+
+    if inner.shape != outer.shape:
+        return 0.0
+    inner_area = int(np.count_nonzero(inner))
+    if not inner_area:
+        return 0.0
+    intersection = int(np.count_nonzero(inner & outer))
+    return intersection / inner_area
 
 
 def _clamp_bbox(

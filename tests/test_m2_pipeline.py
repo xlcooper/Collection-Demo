@@ -12,7 +12,11 @@ from PIL import Image
 from object_memory.assets import MemoryPaths
 from object_memory.config import Sam3PipelineConfig
 from object_memory.sam3_adapter import RawSamCandidate
-from object_memory.sam3_postprocess import mask_iou, process_candidates
+from object_memory.sam3_postprocess import (
+    mask_containment,
+    mask_iou,
+    process_candidates,
+)
 from object_memory.schemas import ProposalStatus
 
 
@@ -93,6 +97,76 @@ class M2PostprocessTests(unittest.TestCase):
         second = np.array([[True, False], [True, False]])
         self.assertAlmostEqual(mask_iou(first, second), 1 / 3)
         self.assertEqual(mask_iou(first, np.zeros((1, 1), dtype=bool)), 0.0)
+
+    def test_filters_lower_scored_mask_contained_by_complete_candidate(self) -> None:
+        image = Image.new("RGB", (40, 40), (220, 220, 220))
+        complete_mask = np.zeros((40, 40), dtype=bool)
+        complete_mask[5:25, 5:25] = True
+        part_mask = np.zeros((40, 40), dtype=bool)
+        part_mask[10:15, 10:15] = True
+        separate_mask = np.zeros((40, 40), dtype=bool)
+        separate_mask[30:35, 30:35] = True
+        candidates = [
+            candidate(
+                "complete",
+                "automatic_point_grid",
+                0.98,
+                complete_mask,
+                (5, 5, 25, 25),
+            ),
+            candidate(
+                "part",
+                "automatic_point_grid",
+                0.95,
+                part_mask,
+                (10, 10, 15, 15),
+            ),
+            candidate(
+                "separate",
+                "automatic_point_grid",
+                0.94,
+                separate_mask,
+                (30, 30, 35, 35),
+            ),
+        ]
+        settings = Sam3PipelineConfig(
+            confidence_threshold=0.5,
+            min_mask_area_ratio=0.001,
+            contained_mask_overlap_threshold=0.9,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            result = process_candidates(
+                candidates,
+                image=image,
+                source_image_id="src_containment",
+                run_id="run_containment",
+                paths=MemoryPaths(Path(temporary_directory) / "assets"),
+                settings=settings,
+            )
+
+        self.assertEqual(
+            [proposal.raw_candidate_id for proposal in result.kept],
+            ["complete", "separate"],
+        )
+        self.assertEqual(result.filter_counts["contained_mask"], 1)
+        contained = next(
+            proposal
+            for proposal in result.filtered
+            if proposal.raw_candidate_id == "part"
+        )
+        self.assertTrue((contained.filter_reason or "").startswith("contained_mask:"))
+
+    def test_mask_containment_is_directional(self) -> None:
+        outer = np.ones((4, 4), dtype=bool)
+        inner = np.zeros((4, 4), dtype=bool)
+        inner[1:3, 1:3] = True
+        self.assertEqual(mask_containment(inner, outer), 1.0)
+        self.assertEqual(mask_containment(outer, inner), 0.25)
+        self.assertEqual(
+            mask_containment(inner, np.zeros((1, 1), dtype=bool)),
+            0.0,
+        )
 
     def test_automatic_candidates_filter_large_regions_and_apply_limit(self) -> None:
         image = Image.new("RGB", (20, 20), (220, 220, 220))
