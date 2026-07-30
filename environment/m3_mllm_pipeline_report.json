@@ -1,15 +1,16 @@
 {
   "schema_version": 1,
-  "generated_at_utc": "2026-07-30T09:04:08.649436+00:00",
+  "generated_at_utc": "2026-07-30T09:52:37.874553+00:00",
   "test": "m3_mllm_pipeline",
-  "status": "failed",
+  "status": "passed",
   "checks": {
     "m2_report_passed": true,
+    "ordered_single_call_prompt_v2": true,
     "empty_memory_decision_new": true,
     "new_annotation_complete": true,
     "annotation_targets_physical_object": true,
-    "same_view_decision_existing": false,
-    "same_view_match_id_valid": false,
+    "same_view_decision_existing": true,
+    "same_view_match_id_valid": true,
     "all_outputs_schema_valid": true,
     "database_unchanged_by_m3": true
   },
@@ -30,12 +31,36 @@
     "overlay": "proposals/m2_20260730T082541925209Z/prop_b1f3781d3a71448b9aa5b9a52a7b7acd/overlay.jpg"
   },
   "settings": {
-    "prompt_version": "m3-object-identity-v1",
+    "prompt_version": "m3-object-identity-v2",
     "max_pixels": 1048576,
     "max_new_tokens": 512,
     "object_card_batch_size": 8,
     "max_reference_views_per_object": 2,
     "existing_min_confidence": 0.8
+  },
+  "interface": {
+    "qwen_call_unit": "one call per candidate per object-card batch",
+    "ordered_tasks_in_one_call": [
+      "candidate_validity",
+      "instance_identity",
+      "candidate_annotation"
+    ],
+    "image_roles": {
+      "IMAGE_A_CANDIDATE": "identity input and only annotation target",
+      "REFERENCE_IMAGE": "known-object identity evidence",
+      "IMAGE_Z_CONTEXT_OVERLAY": "SAM location context; excluded from identity comparison"
+    },
+    "output_contract": {
+      "decision": [
+        "new",
+        "existing",
+        "ignored",
+        "uncertain"
+      ],
+      "matched_object_id": "required only for existing",
+      "annotation": "required for new and existing"
+    },
+    "persistence": "M3 validates only; M4 will write decisions, objects, and observations to SQLite"
   },
   "empty_memory": {
     "final_response": {
@@ -43,18 +68,18 @@
       "matched_object_id": null,
       "confidence": 0.95,
       "reason_code": "new_object",
-      "short_reason": "无已知对象卡，且为新物理实例",
+      "short_reason": "valid physical object with no matching reference card",
       "annotation": {
-        "coarse_category": "容器",
-        "fine_category": "杯子",
+        "coarse_category": "cup",
+        "fine_category": "coffee cup",
         "material": [
-          "陶瓷"
+          "ceramic"
         ],
         "color": [
-          "粉红色"
+          "white"
         ],
-        "shape": "带把手的圆柱形",
-        "description": "一个粉红色陶瓷杯，内盛有拉花咖啡，置于白色杯托上，杯身有明显把手",
+        "shape": "round with handle",
+        "description": "white ceramic cup with handle, containing coffee with latte art, sitting on matching saucer",
         "annotation_confidence": 0.98
       }
     },
@@ -66,47 +91,47 @@
           "matched_object_id": null,
           "confidence": 0.95,
           "reason_code": "new_object",
-          "short_reason": "无已知对象卡，且为新物理实例",
+          "short_reason": "valid physical object with no matching reference card",
           "annotation": {
-            "coarse_category": "容器",
-            "fine_category": "杯子",
+            "coarse_category": "cup",
+            "fine_category": "coffee cup",
             "material": [
-              "陶瓷"
+              "ceramic"
             ],
             "color": [
-              "粉红色"
+              "white"
             ],
-            "shape": "带把手的圆柱形",
-            "description": "一个粉红色陶瓷杯，内盛有拉花咖啡，置于白色杯托上，杯身有明显把手",
+            "shape": "round with handle",
+            "description": "white ceramic cup with handle, containing coffee with latte art, sitting on matching saucer",
             "annotation_confidence": 0.98
           }
         },
-        "input_tokens": 1443,
-        "generated_tokens": 148,
-        "inference_seconds": 10.947
+        "input_tokens": 1777,
+        "generated_tokens": 137,
+        "inference_seconds": 10.238
       }
     ]
   },
   "same_view_card": {
     "reference_object_id": "obj_m3_same_view_reference",
     "final_response": {
-      "decision": "new",
-      "matched_object_id": null,
-      "confidence": 0.95,
-      "reason_code": "new_object",
-      "short_reason": "候选区域中的物体与已知对象卡描述不符，颜色和材质不一致",
+      "decision": "existing",
+      "matched_object_id": "obj_m3_same_view_reference",
+      "confidence": 1.0,
+      "reason_code": "visual_instance_match",
+      "short_reason": "identical cup, saucer, and latte art pattern",
       "annotation": {
-        "coarse_category": "容器",
-        "fine_category": "杯子",
+        "coarse_category": "cup",
+        "fine_category": "coffee cup",
         "material": [
-          "陶瓷"
+          "ceramic"
         ],
         "color": [
-          "粉红色"
+          "white"
         ],
-        "shape": "带把手的圆柱形",
-        "description": "一个粉红色陶瓷杯，内盛有拉花咖啡，置于白色杯托上，杯身有明显把手",
-        "annotation_confidence": 0.98
+        "shape": "round with handle",
+        "description": "white ceramic cup with handle, containing coffee with latte art, sitting on matching saucer",
+        "annotation_confidence": 1.0
       }
     },
     "batches": [
@@ -115,37 +140,37 @@
           "obj_m3_same_view_reference"
         ],
         "response": {
-          "decision": "new",
-          "matched_object_id": null,
-          "confidence": 0.95,
-          "reason_code": "new_object",
-          "short_reason": "候选区域中的物体与已知对象卡描述不符，颜色和材质不一致",
+          "decision": "existing",
+          "matched_object_id": "obj_m3_same_view_reference",
+          "confidence": 1.0,
+          "reason_code": "visual_instance_match",
+          "short_reason": "identical cup, saucer, and latte art pattern",
           "annotation": {
-            "coarse_category": "容器",
-            "fine_category": "杯子",
+            "coarse_category": "cup",
+            "fine_category": "coffee cup",
             "material": [
-              "陶瓷"
+              "ceramic"
             ],
             "color": [
-              "粉红色"
+              "white"
             ],
-            "shape": "带把手的圆柱形",
-            "description": "一个粉红色陶瓷杯，内盛有拉花咖啡，置于白色杯托上，杯身有明显把手",
-            "annotation_confidence": 0.98
+            "shape": "round with handle",
+            "description": "white ceramic cup with handle, containing coffee with latte art, sitting on matching saucer",
+            "annotation_confidence": 1.0
           }
         },
-        "input_tokens": 1619,
-        "generated_tokens": 154,
-        "inference_seconds": 10.314
+        "input_tokens": 1987,
+        "generated_tokens": 146,
+        "inference_seconds": 9.852
       }
     ]
   },
   "timing_seconds": {
-    "model_load": 3.604,
-    "inference_total": 21.261
+    "model_load": 3.562,
+    "inference_total": 20.09
   },
   "cuda": {
-    "peak_memory_mib": 10579.1
+    "peak_memory_mib": 10667.93
   },
   "raw_responses": {
     "empty_memory": "runs/m3/empty_memory_response.txt",
