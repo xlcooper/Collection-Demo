@@ -11,12 +11,12 @@
 
 ## 当前快照
 
-- **版本**：v0.3.4
-- **当前关卡**：M0-C——Qwen3-VL 单模型冒烟
-- **最近完成**：SAM3 使用与测试图像匹配的具体单数类别提示完成真实推理
-- **当前问题**：v0.3.3 已传入 `local_files_only=true`，但仓库 ID 加载路径仍调用 Hugging Face 模型信息接口；日志仍停留在模型加载前
-- **下一动作**：拉取 v0.3.4，以解析出的本地 snapshot 目录重跑 Qwen 冒烟
-- **进入 M1 的剩余条件**：Qwen 冒烟通过、双模型顺序运行通过
+- **版本**：v0.3.5
+- **当前关卡**：M0-D——双模型顺序运行
+- **最近完成**：Qwen3-VL-8B-Instruct-FP8 从本地 snapshot 加载并输出完整结构化 JSON
+- **当前问题**：两个模型尚未由统一入口顺序运行；模型下载后的最新磁盘余量尚未回传
+- **下一动作**：拉取 v0.3.5，运行统一冒烟入口并生成三份报告
+- **进入 M1 的剩余条件**：双模型顺序运行通过，最新环境报告无新增阻塞
 
 状态说明：✅ 已完成；🟡 正在进行；⬜ 尚未开始；⛔ 被外部条件阻塞。
 
@@ -25,13 +25,13 @@
 | 里程碑 | 状态 | 最小交付物 / 完成条件 | 当前证据 | 下一动作 |
 |---|---|---|---|---|
 | P0 项目基线 | ✅ | 第一阶段范围、开发准则、Git 与环境流程固化 | `README.md`、环境声明和执行指南 | 持续维护，不扩展阶段范围 |
-| M0-A 服务器环境 | ✅ | Conda、CUDA、SAM3 及 Qwen 依赖可用，0 个阻塞项 | `environment/server_env_report.json`；最新报告为 `warning`，0 blocker | 模型冒烟后重新自检磁盘余量 |
+| M0-A 服务器环境 | ✅ | Conda、CUDA、SAM3 及 Qwen 依赖可用，0 个阻塞项 | `environment/server_env_report.json`；最新报告为 `warning`，0 blocker | 顺序测试后刷新报告，确认模型下载后的磁盘余量 |
 | M0-B SAM3 单模型冒烟 | ✅ | 真实加载 checkpoint，并输出至少一个 proposal 和 mask | 用户已明确确认具体类别提示运行通过 | 指标报告可后续回传，不阻塞推进 |
-| M0-C Qwen 单模型冒烟 | 🟡 | 8B FP8 加载成功，输出可解析的约定 JSON，并记录耗时/显存 | v0.3.3 报告确认 `local_files_only=true` 仍触发仓库 API；尚未进入推理 | 使用 v0.3.4 解析并传入本地 snapshot 目录 |
-| M0-D 双模型顺序运行 | ⬜ | 同一环境中先后完成 SAM3、Qwen，且无显存或磁盘阻塞 | 单模型尚未全部通过 | M0-B、M0-C 固化后运行顺序测试 |
+| M0-C Qwen 单模型冒烟 | ✅ | 8B FP8 加载成功，输出可解析的约定 JSON，并记录耗时/显存 | 7 个字段齐全；加载 3.909 秒、推理 9.875 秒、峰值显存 10439.92 MiB | 结构链路完成；语义质量留到 M3 验证 |
+| M0-D 双模型顺序运行 | 🟡 | 同一环境中先后完成 SAM3、Qwen，且无显存或磁盘阻塞 | 两个单模型均已通过 | 运行统一入口，并刷新环境报告 |
 | M1 数据骨架 | ⬜ | 配置、统一数据类型、SQLite schema、文件路径和最小 CLI | 继承初始规划；尚未开始 | M0 通过后建立可读写骨架 |
 | M2 SAM3 流水线 | ⬜ | 全量候选策略、mask 去重、crop/mask/overlay 和源图关联 | 单提示分割链路已通；全量候选策略未决 | 在统一数据结构上实现并实测一种 MVP 策略 |
-| M3 MLLM 流水线 | ⬜ | 对象卡片、身份判断、自动标注和 JSON 校验 | Qwen 冒烟进行中 | M2 输出稳定后接入记忆上下文 |
+| M3 MLLM 流水线 | ⬜ | 对象卡片、身份判断、自动标注和 JSON 校验 | Qwen 结构化输出链路已通过；对象语义质量未验收 | M2 输出稳定后基于 crop/mask 接入记忆上下文 |
 | M4 记忆闭环 | ⬜ | 新建/归并、幂等、pending/failed、事务写入和运行摘要 | 尚未开始 | 串联 M1–M3，优先避免错误归并 |
 | M5 第一阶段验收 | ⬜ | 单命令、无人确认地完成发现—判断—标注—存储—归并，并可追踪失败 | 尚未开始 | 用固定小型场景集覆盖新对象、重复对象、同类不同实例和无效候选 |
 
@@ -39,29 +39,21 @@
 
 1. SAM3 的模型加载、BF16 推理和 mask 输出链路已经跑通；报告只用于补充精确提示、proposal 数、耗时和显存，不再作为完成门槛。
 2. 通用提示 `object` 在当前测试图像上返回 0 proposals，不能据此宣称“全量发现物体”。M2 必须确定一个最小、可复现的全量候选发现策略。
-3. 当前 Qwen 日志仍是模型加载前的网络寻址失败，不是模型推理失败。仅设置 `local_files_only` 不足以绕过当前仓库 ID 路径；v0.3.4 将 `refs/main` 解析为 `snapshots/<commit>` 的真实本地目录。
-4. Qwen3-VL-8B-Instruct-FP8 是否能在 RTX 4090 上稳定加载和输出 JSON，仍是进入 M1 前的主要未知项。
-5. 系统 `nvcc` 11.8 只影响可选源码扩展；当前 MVP 不编译这些扩展，因此不是阻塞项。
+3. Qwen3-VL-8B-Instruct-FP8 已在 RTX 4090 上通过：本地 snapshot 加载约 3.9 秒，单图推理约 9.9 秒，峰值显存约 10.2 GiB。
+4. 本次 JSON 结构完整，但整张场景图输出了 `coffee/latte`，没有严格聚焦物理容器类别。M0 只验证运行和结构；M3 必须使用 SAM crop/mask 与对象限定提示验证语义质量。
+5. generation flags 警告未影响确定性生成和 JSON 结果，当前不作为阻塞项。
+6. 系统 `nvcc` 11.8 只影响可选源码扩展；当前 MVP 不编译这些扩展，因此不是阻塞项。
 
 ## 现在执行
 
-服务器拉取 v0.3.4 后，在项目环境中直接使用本地 snapshot 运行 Qwen 冒烟：
+服务器拉取 v0.3.5 后，运行统一入口：
 
 ```bash
 git pull origin main
-conda activate "$PWD/.conda/envs/object-memory-demo"
-export OMP_NUM_THREADS=8
-export HF_HOME="$PWD/weights/qwen"
-export HF_HUB_CACHE="$HF_HOME/hub"
-
-python scripts/smoke_qwen.py \
-  --image data/smoke/scene.jpg \
-  --model Qwen/Qwen3-VL-8B-Instruct-FP8 \
-  --output-dir runs/smoke/qwen \
-  --report environment/qwen_smoke_report.json
+bash scripts/run_server_smoke_tests.sh data/smoke/scene.jpg cup
 ```
 
-脚本默认不访问网络；只有明确需要在线下载时才使用 `--allow-network`。通过后再运行双模型顺序测试；完整命令和报告回传方式见 `docs/03_服务器环境与冒烟测试指南.md`。
+将 `cup` 替换为已通过的具体 SAM3 提示。统一入口会自行激活项目 Conda 环境、设置线程和 Qwen 缓存路径，并依次生成环境、SAM3、Qwen 三份报告；无需手动重复 `export`。完整说明见 `docs/03_服务器环境与冒烟测试指南.md`。
 
 ## 第一阶段边界
 
