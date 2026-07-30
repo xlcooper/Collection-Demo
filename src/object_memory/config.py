@@ -85,7 +85,7 @@ class MllmPipelineConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt_version: Literal["m3-object-identity-v1"] = "m3-object-identity-v1"
+    prompt_version: Literal["m3-object-identity-v2"] = "m3-object-identity-v2"
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=512, gt=0)
     object_card_batch_size: int = Field(default=8, gt=0)

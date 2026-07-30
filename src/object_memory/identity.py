@@ -20,10 +20,12 @@ from .schemas import (
 )
 
 
-SYSTEM_PROMPT = """You are the visual identity component of an object-memory system.
-Judge the physical object isolated by SAM, not its contents, nearby objects, scene, brand, or product model.
-Two items with the same category are not automatically the same physical instance. Match only when visible instance-level evidence supports it. When evidence is weak or conflicting, answer uncertain.
-Return exactly one JSON object with no Markdown or extra text. Use concise Chinese annotation values.
+SYSTEM_PROMPT = """You are the single-call identity and annotation component of an object-memory system.
+Follow the ordered stages below, then return exactly one JSON object with no Markdown or extra text.
+Stage 1 - validity: decide whether IMAGE_A_CANDIDATE is one valid physical object. Judge the isolated object, not its contents, nearby objects, scene, brand, or product model.
+Stage 2 - identity: compare IMAGE_A_CANDIDATE only with images explicitly labelled REFERENCE_IMAGE for known object cards. Never compare the colored context overlay with a reference image. Card text is prior context, not evidence that an unlabeled candidate is different.
+Stage 3 - annotation: describe IMAGE_A_CANDIDATE only, after deciding identity. Use concise Chinese values and visible evidence only.
+Two objects of the same category are not automatically the same instance. However, pixel-identical images or the same distinctive visible details are strong instance evidence and must not be rejected by inventing color, material, or shape differences. If evidence is weak or conflicting, answer uncertain rather than new.
 """
 
 
@@ -45,7 +47,12 @@ OUTPUT_RULES = """Required JSON structure:
   }
 }
 annotation is required for new and existing; use null for ignored and when no reliable annotation is possible.
-Decision rules: valid object with no matching card -> new; same physical instance -> existing; invalid/non-object candidate -> ignored; insufficient or ambiguous evidence -> uncertain.
+Decision rules, in order:
+1. invalid/non-object IMAGE_A_CANDIDATE -> ignored.
+2. IMAGE_A_CANDIDATE matches a REFERENCE_IMAGE for one shown object card -> existing with that exact object_id.
+3. evidence is insufficient, contradictory, or close to more than one card -> uncertain.
+4. valid candidate and no shown card matches -> new. For one card batch, new means no match in this batch; the program accepts final new only after every batch returns new.
+Do not claim a color, material, or shape mismatch unless that difference is directly visible between IMAGE_A_CANDIDATE and the relevant REFERENCE_IMAGE.
 Reason codes must agree with the decision: new_object for new, visual_instance_match for existing, invalid_candidate for ignored, and ambiguous_match or insufficient_evidence for uncertain.
 """
 
@@ -137,6 +144,7 @@ def _card_summary(card: ObjectCard) -> dict[str, Any]:
         "color": card.color,
         "shape": card.shape,
         "description": card.description,
+        "reference_view_count": len(card.representative_view_paths),
     }
 
 
@@ -163,32 +171,35 @@ def build_identity_messages(
         {
             "type": "text",
             "text": (
-                f"SAM category hint: {sam_prompt.strip() or 'unknown'}. "
-                "Candidate crop follows. Judge the isolated physical object."
+                "IMAGE_A_CANDIDATE follows. This crop is the current proposal, "
+                "the only image to annotate, and the left-hand side of every "
+                "identity comparison. "
+                f"SAM category hint: {sam_prompt.strip() or 'unknown'}."
             ),
         },
         {"type": "image", "image": crop.as_uri(), "max_pixels": max_pixels},
-        {
-            "type": "text",
-            "text": "Source overlay follows; the colored mask marks the candidate.",
-        },
-        {"type": "image", "image": overlay.as_uri(), "max_pixels": max_pixels},
     ]
 
     if not cards:
         content.append(
             {
                 "type": "text",
-                "text": "Known-object card batch is empty. Do not invent an object ID.",
+                "text": (
+                    "KNOWN_OBJECT_CARD_BATCH is empty. If IMAGE_A_CANDIDATE is "
+                    "valid, decision must be new. Do not invent an object ID."
+                ),
             }
         )
-    for card in cards:
+    for card_index, card in enumerate(cards, start=1):
         content.append(
             {
                 "type": "text",
                 "text": (
-                    "Known-object card:\n"
+                    f"OBJECT_CARD_{card_index} begins. Its exact object_id and "
+                    "stored attributes are:\n"
                     + json.dumps(_card_summary(card), ensure_ascii=False, sort_keys=True)
+                    + "\nCompare IMAGE_A_CANDIDATE with only the REFERENCE_IMAGE "
+                    "items explicitly assigned to this object_id."
                 ),
             }
         )
@@ -207,8 +218,9 @@ def build_identity_messages(
                     {
                         "type": "text",
                         "text": (
-                            f"Reference view {view_index} for object_id "
-                            f"{card.object_id} follows."
+                            f"REFERENCE_IMAGE_CARD_{card_index}_VIEW_{view_index} "
+                            f"for object_id={card.object_id} follows immediately. "
+                            "This is an identity reference, not the image to annotate."
                         ),
                     },
                     {
@@ -219,7 +231,28 @@ def build_identity_messages(
                 ]
             )
 
-    content.append({"type": "text", "text": OUTPUT_RULES})
+    content.extend(
+        [
+            {
+                "type": "text",
+                "text": (
+                    "IMAGE_Z_CONTEXT_OVERLAY follows. It only shows where the SAM "
+                    "mask lies in the source scene. Its colored mask changes visible "
+                    "colors. Never compare IMAGE_Z_CONTEXT_OVERLAY with any "
+                    "REFERENCE_IMAGE and never annotate it."
+                ),
+            },
+            {"type": "image", "image": overlay.as_uri(), "max_pixels": max_pixels},
+            {
+                "type": "text",
+                "text": (
+                    "Now follow Stage 1 validity, Stage 2 identity using only "
+                    "IMAGE_A_CANDIDATE versus REFERENCE_IMAGE items, and Stage 3 "
+                    "annotation of IMAGE_A_CANDIDATE.\n" + OUTPUT_RULES
+                ),
+            },
+        ]
+    )
     return [
         {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
         {"role": "user", "content": content},

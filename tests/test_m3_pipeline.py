@@ -143,9 +143,28 @@ class M3IdentityPipelineTests(unittest.TestCase):
                 for message in messages
                 for item in message["content"]
             )
+            image_uris = [
+                item["image"]
+                for message in messages
+                for item in message["content"]
+                if item["type"] == "image"
+            ]
             self.assertIn("obj_reference", all_text)
-            self.assertIn("physical object", all_text)
+            self.assertIn("Stage 1 - validity", all_text)
+            self.assertIn("Stage 2 - identity", all_text)
+            self.assertIn("Stage 3 - annotation", all_text)
+            self.assertIn("IMAGE_A_CANDIDATE", all_text)
+            self.assertIn("REFERENCE_IMAGE_CARD_1_VIEW_1", all_text)
+            self.assertIn("Never compare IMAGE_Z_CONTEXT_OVERLAY", all_text)
             self.assertEqual(image_count, 3)
+            self.assertEqual(
+                image_uris,
+                [
+                    crop.resolve().as_uri(),
+                    reference.resolve().as_uri(),
+                    overlay.resolve().as_uri(),
+                ],
+            )
 
     def test_all_card_batches_are_checked_before_new_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -181,6 +200,7 @@ class M3IdentityPipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(len(evaluation.batches), 2)
+            self.assertEqual(len(predictor.messages), 2)
             self.assertEqual(
                 evaluation.final_response.decision,
                 DecisionType.EXISTING,

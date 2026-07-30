@@ -233,6 +233,9 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     )
     checks = {
         "m2_report_passed": m2_report.get("status") == "passed",
+        "ordered_single_call_prompt_v2": (
+            settings.prompt_version == "m3-object-identity-v2"
+        ),
         "empty_memory_decision_new": empty_response.decision is DecisionType.NEW,
         "new_annotation_complete": empty_response.annotation is not None,
         "annotation_targets_physical_object": annotation_targets_object(
@@ -268,6 +271,25 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
             "overlay": str(kept["assets"]["overlay"]),
         },
         "settings": settings.model_dump(mode="json"),
+        "interface": {
+            "qwen_call_unit": "one call per candidate per object-card batch",
+            "ordered_tasks_in_one_call": [
+                "candidate_validity",
+                "instance_identity",
+                "candidate_annotation",
+            ],
+            "image_roles": {
+                "IMAGE_A_CANDIDATE": "identity input and only annotation target",
+                "REFERENCE_IMAGE": "known-object identity evidence",
+                "IMAGE_Z_CONTEXT_OVERLAY": "SAM location context; excluded from identity comparison",
+            },
+            "output_contract": {
+                "decision": ["new", "existing", "ignored", "uncertain"],
+                "matched_object_id": "required only for existing",
+                "annotation": "required for new and existing",
+            },
+            "persistence": "M3 validates only; M4 will write decisions, objects, and observations to SQLite",
+        },
         "empty_memory": {
             "final_response": empty_response.model_dump(mode="json"),
             "batches": batch_summary(empty_memory_evaluation),
