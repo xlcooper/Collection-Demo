@@ -1,0 +1,10 @@
+schema_version: 1
+
+storage:
+  memory_root: data/memory
+  database_filename: memory.sqlite
+
+models:
+  sam3_checkpoint: weights/sam3/sam3.pt
+  qwen_model_id: Qwen/Qwen3-VL-8B-Instruct-FP8
+

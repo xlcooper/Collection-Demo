@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "collection-object-memory"
+version = "0.5.0"
+description = "Phase-one explicit object-memory demo"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.13.4",
+  "PyYAML==6.0.3",
+]
+
+[project.scripts]
+object-memory = "object_memory.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
