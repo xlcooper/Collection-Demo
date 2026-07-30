@@ -25,3 +25,4 @@ mllm_pipeline:
   object_card_batch_size: 8
   max_reference_views_per_object: 2
   existing_min_confidence: 0.8
+  max_error_attempts: 2

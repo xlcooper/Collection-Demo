@@ -91,6 +91,7 @@ class MllmPipelineConfig(BaseModel):
     object_card_batch_size: int = Field(default=8, gt=0)
     max_reference_views_per_object: int = Field(default=2, gt=0)
     existing_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    max_error_attempts: int = Field(default=2, ge=1, le=3)
 
 
 class AppConfig(BaseModel):

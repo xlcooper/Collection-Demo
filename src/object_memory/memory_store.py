@@ -223,6 +223,7 @@ class RunSummary:
     observations_added: int
     active_objects_total: int
     duplicate_sources_skipped: int = 0
+    external_errors: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -234,6 +235,7 @@ class RunSummary:
             "observations_added": self.observations_added,
             "active_objects_total": self.active_objects_total,
             "duplicate_sources_skipped": self.duplicate_sources_skipped,
+            "external_errors": self.external_errors,
         }
 
 
@@ -349,7 +351,11 @@ class MemoryStore:
             ).fetchone()
             if existing is not None:
                 existing_status = SourceImageStatus(str(existing["status"]))
-                if existing_status is SourceImageStatus.COMPLETED:
+                if existing_status is SourceImageStatus.COMPLETED or (
+                    str(existing["run_id"]) == source.run_id
+                    and existing_status
+                    in {SourceImageStatus.PENDING, SourceImageStatus.PROCESSING}
+                ):
                     return SourceRegistration(
                         source_id=str(existing["id"]),
                         status=existing_status,
@@ -649,7 +655,12 @@ class MemoryStore:
             if cursor.rowcount != 1:
                 raise MemoryStoreError(f"Source image cannot be failed: {source_id}")
 
-    def complete_run(self, run_id: str) -> RunSummary:
+    def complete_run(
+        self,
+        run_id: str,
+        *,
+        error_message: str | None = None,
+    ) -> RunSummary:
         """Close a run, treating pending or failed work as completed-with-errors."""
 
         with self.transaction() as connection:
@@ -682,16 +693,21 @@ class MemoryStore:
             )
             final_status = (
                 RunStatus.COMPLETED_WITH_ERRORS
-                if incomplete_sources or pending_or_failed_proposals
+                if incomplete_sources or pending_or_failed_proposals or error_message
                 else RunStatus.COMPLETED
             )
             connection.execute(
                 """
                 UPDATE runs
-                SET status = ?, completed_at = ?
+                SET status = ?, completed_at = ?, error_message = ?
                 WHERE id = ?
                 """,
-                (final_status.value, utc_now().isoformat(), run_id),
+                (
+                    final_status.value,
+                    utc_now().isoformat(),
+                    error_message,
+                    run_id,
+                ),
             )
         return self.run_summary(run_id)
 

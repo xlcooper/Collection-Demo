@@ -147,11 +147,27 @@ class MemoryLoop:
     def fail_source(self, source_id: str, error_message: str) -> None:
         self.store.fail_source(source_id, error_message)
 
-    def complete_run(self, run_id: str) -> RunSummary:
-        summary = self.store.complete_run(run_id)
+    def complete_run(
+        self,
+        run_id: str,
+        *,
+        external_errors: int = 0,
+    ) -> RunSummary:
+        if external_errors < 0:
+            raise ValueError("external_errors must not be negative")
+        error_message = (
+            f"{external_errors} error(s) occurred outside registered records"
+            if external_errors
+            else None
+        )
+        summary = self.store.complete_run(
+            run_id,
+            error_message=error_message,
+        )
         return replace(
             summary,
             duplicate_sources_skipped=self._duplicate_counts.get(run_id, 0),
+            external_errors=external_errors,
         )
 
     def _promote_observation_assets(
