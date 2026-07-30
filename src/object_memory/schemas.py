@@ -82,6 +82,14 @@ class DecisionType(str, Enum):
     UNCERTAIN = "uncertain"
 
 
+class DecisionReasonCode(str, Enum):
+    NEW_OBJECT = "new_object"
+    VISUAL_INSTANCE_MATCH = "visual_instance_match"
+    INVALID_CANDIDATE = "invalid_candidate"
+    AMBIGUOUS_MATCH = "ambiguous_match"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
 class BoundingBox(StrictModel):
     x_min: Annotated[float, Field(ge=0.0)]
     y_min: Annotated[float, Field(ge=0.0)]
@@ -150,6 +158,66 @@ class MemoryObject(StrictModel):
     status: ObjectStatus = ObjectStatus.ACTIVE
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ObjectAnnotation(StrictModel):
+    """Visible facts produced by the MLLM for one candidate observation."""
+
+    coarse_category: NonEmptyText
+    fine_category: NonEmptyText
+    material: list[str] = Field(default_factory=list)
+    color: list[str] = Field(default_factory=list)
+    shape: NonEmptyText
+    description: NonEmptyText
+    annotation_confidence: Confidence
+
+
+class ObjectCard(StrictModel):
+    """Compact known-object context sent to the MLLM."""
+
+    object_id: Identifier
+    coarse_category: NonEmptyText
+    fine_category: NonEmptyText
+    material: list[str] = Field(default_factory=list)
+    color: list[str] = Field(default_factory=list)
+    shape: NonEmptyText
+    description: NonEmptyText
+    representative_view_paths: list[RelativeAssetPath] = Field(default_factory=list)
+
+
+class MllmResponse(StrictModel):
+    """Validated combined identity decision and visible-object annotation."""
+
+    decision: DecisionType
+    matched_object_id: Identifier | None = None
+    confidence: Confidence
+    reason_code: DecisionReasonCode
+    short_reason: NonEmptyText
+    annotation: ObjectAnnotation | None = None
+
+    @model_validator(mode="after")
+    def validate_decision_payload(self) -> "MllmResponse":
+        if self.decision is DecisionType.EXISTING and self.matched_object_id is None:
+            raise ValueError("existing responses require matched_object_id")
+        if self.decision is not DecisionType.EXISTING and self.matched_object_id:
+            raise ValueError(
+                "matched_object_id is only valid for existing responses"
+            )
+        if self.decision in {DecisionType.NEW, DecisionType.EXISTING}:
+            if self.annotation is None:
+                raise ValueError("new and existing responses require annotation")
+        allowed_reasons = {
+            DecisionType.NEW: {DecisionReasonCode.NEW_OBJECT},
+            DecisionType.EXISTING: {DecisionReasonCode.VISUAL_INSTANCE_MATCH},
+            DecisionType.IGNORED: {DecisionReasonCode.INVALID_CANDIDATE},
+            DecisionType.UNCERTAIN: {
+                DecisionReasonCode.AMBIGUOUS_MATCH,
+                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+            },
+        }
+        if self.reason_code not in allowed_reasons[self.decision]:
+            raise ValueError("reason_code does not agree with decision")
+        return self
 
 
 class Observation(StrictModel):

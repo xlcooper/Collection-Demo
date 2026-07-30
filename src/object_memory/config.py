@@ -80,6 +80,19 @@ class Sam3PipelineConfig(BaseModel):
         return value
 
 
+class MllmPipelineConfig(BaseModel):
+    """Settings for constrained Qwen object annotation and identity checks."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt_version: Literal["m3-object-identity-v1"] = "m3-object-identity-v1"
+    max_pixels: int = Field(default=1024 * 1024, gt=0)
+    max_new_tokens: int = Field(default=512, gt=0)
+    object_card_batch_size: int = Field(default=8, gt=0)
+    max_reference_views_per_object: int = Field(default=2, gt=0)
+    existing_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+
 class AppConfig(BaseModel):
     """Validated top-level project configuration."""
 
@@ -89,6 +102,7 @@ class AppConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)
+    mllm_pipeline: MllmPipelineConfig = Field(default_factory=MllmPipelineConfig)
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:
