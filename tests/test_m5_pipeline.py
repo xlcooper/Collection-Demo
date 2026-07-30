@@ -210,6 +210,16 @@ class M5PipelineTests(unittest.TestCase):
             self.assertEqual(report["run"]["proposal_counts"]["filtered"], 2)
             self.assertEqual(report["run"]["decision_counts"]["new"], 1)
             self.assertEqual(report["run"]["decision_counts"]["existing"], 1)
+            first_decision = report["images"][0]["decisions"][0]
+            self.assertEqual(
+                first_decision["candidate"]["raw_candidate_id"],
+                "candidate-main",
+            )
+            self.assertEqual(first_decision["reason_code"], "new_object")
+            self.assertEqual(
+                first_decision["annotation"]["fine_category"],
+                "coffee cup",
+            )
             self.assertLess(events.index("sam.close"), events.index("qwen.load"))
             self.assertTrue(paths.resolve_asset(report["run_report"]).is_file())
 

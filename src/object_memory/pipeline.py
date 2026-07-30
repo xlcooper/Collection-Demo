@@ -533,12 +533,21 @@ class ObjectMemoryPipeline:
                     raw_response_path=raw_path,
                     attempt=1,
                 )
+                response = evaluation.final_response
                 return {
                     "proposal_id": proposal.id,
+                    "candidate": self._candidate_report(proposal),
                     "status": write_result.proposal_status.value,
                     "decision": write_result.decision.value,
                     "object_id": write_result.object_id,
-                    "confidence": evaluation.final_response.confidence,
+                    "confidence": response.confidence,
+                    "reason_code": response.reason_code.value,
+                    "short_reason": response.short_reason,
+                    "annotation": (
+                        response.annotation.model_dump(mode="json")
+                        if response.annotation is not None
+                        else None
+                    ),
                     "qwen_call_attempts": call_attempt,
                     "object_cards": len(cards),
                     "raw_response": raw_path,
@@ -569,11 +578,29 @@ class ObjectMemoryPipeline:
             )
         return {
             "proposal_id": proposal.id,
+            "candidate": self._candidate_report(proposal),
             "status": "failed",
             "decision": None,
             "object_id": None,
+            "confidence": None,
+            "reason_code": None,
+            "short_reason": None,
+            "annotation": None,
             "qwen_call_attempts": len(errors),
             "errors": errors,
+        }
+
+    @staticmethod
+    def _candidate_report(proposal: Proposal) -> dict[str, Any]:
+        return {
+            "raw_candidate_id": proposal.raw_candidate_id,
+            "source": proposal.prompt,
+            "score": proposal.score,
+            "bbox": proposal.bbox.model_dump(mode="json"),
+            "mask_area_ratio": proposal.mask_area_ratio,
+            "crop": proposal.crop_path,
+            "mask": proposal.mask_path,
+            "overlay": proposal.overlay_path,
         }
 
     @staticmethod
@@ -642,9 +669,14 @@ class ObjectMemoryPipeline:
                 work.decisions.append(
                     {
                         "proposal_id": proposal.id,
+                        "candidate": self._candidate_report(proposal),
                         "status": "failed",
                         "decision": None,
                         "object_id": None,
+                        "confidence": None,
+                        "reason_code": None,
+                        "short_reason": None,
+                        "annotation": None,
                         "qwen_call_attempts": 0,
                         "errors": [message],
                     }
