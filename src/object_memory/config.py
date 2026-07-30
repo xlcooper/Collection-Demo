@@ -46,6 +46,40 @@ class ModelConfig(BaseModel):
     )
 
 
+class Sam3PipelineConfig(BaseModel):
+    """Deterministic settings for explicit-prompt SAM3 candidate generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt_strategy: Literal["explicit_category_list"] = "explicit_category_list"
+    prompts: list[str] = Field(default_factory=list)
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
+    duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
+    crop_padding_pixels: int = Field(default=8, ge=0)
+    overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)
+    overlay_color: tuple[int, int, int] = (255, 64, 64)
+
+    @field_validator("prompts")
+    @classmethod
+    def normalize_prompts(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value for value in normalized):
+            raise ValueError("SAM3 prompts must not be empty")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("SAM3 prompts must be unique")
+        return normalized
+
+    @field_validator("overlay_color")
+    @classmethod
+    def validate_overlay_color(
+        cls, value: tuple[int, int, int]
+    ) -> tuple[int, int, int]:
+        if any(channel < 0 or channel > 255 for channel in value):
+            raise ValueError("overlay_color channels must be between 0 and 255")
+        return value
+
+
 class AppConfig(BaseModel):
     """Validated top-level project configuration."""
 
@@ -54,6 +88,7 @@ class AppConfig(BaseModel):
     schema_version: Literal[1] = 1
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
+    sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:

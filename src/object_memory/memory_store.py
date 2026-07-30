@@ -10,7 +10,7 @@ from typing import Iterator
 from .assets import MemoryPaths
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CORE_TABLES = (
     "runs",
     "source_images",
@@ -54,11 +54,16 @@ CREATE TABLE IF NOT EXISTS proposals (
     id TEXT PRIMARY KEY,
     source_image_id TEXT NOT NULL REFERENCES source_images(id),
     raw_candidate_id TEXT NOT NULL,
+    prompt TEXT NOT NULL,
     score REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
     bbox_x_min REAL NOT NULL CHECK (bbox_x_min >= 0.0),
     bbox_y_min REAL NOT NULL CHECK (bbox_y_min >= 0.0),
     bbox_x_max REAL NOT NULL CHECK (bbox_x_max > bbox_x_min),
     bbox_y_max REAL NOT NULL CHECK (bbox_y_max > bbox_y_min),
+    mask_area_pixels INTEGER NOT NULL CHECK (mask_area_pixels >= 0),
+    mask_area_ratio REAL NOT NULL CHECK (
+        mask_area_ratio >= 0.0 AND mask_area_ratio <= 1.0
+    ),
     mask_path TEXT,
     crop_path TEXT,
     overlay_path TEXT,
@@ -136,6 +141,21 @@ CREATE INDEX IF NOT EXISTS idx_decisions_proposal
 """
 
 
+MIGRATION_V1_TO_V2_SQL = """
+BEGIN;
+ALTER TABLE proposals
+    ADD COLUMN prompt TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE proposals
+    ADD COLUMN mask_area_pixels INTEGER NOT NULL DEFAULT 0
+    CHECK (mask_area_pixels >= 0);
+ALTER TABLE proposals
+    ADD COLUMN mask_area_ratio REAL NOT NULL DEFAULT 0.0
+    CHECK (mask_area_ratio >= 0.0 AND mask_area_ratio <= 1.0);
+PRAGMA user_version = 2;
+COMMIT;
+"""
+
+
 class MemoryStoreError(RuntimeError):
     """Raised when the on-disk store is missing or incompatible."""
 
@@ -173,10 +193,12 @@ class MemoryStore:
         self.paths.ensure_layout()
         with closing(self._connect()) as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version not in (0, SCHEMA_VERSION):
+            if version < 0 or version > SCHEMA_VERSION:
                 raise MemoryStoreError(
                     f"Unsupported schema version {version}; expected {SCHEMA_VERSION}."
                 )
+            if version == 1:
+                connection.executescript(MIGRATION_V1_TO_V2_SQL)
             connection.executescript(SCHEMA_SQL)
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             connection.commit()

@@ -1,0 +1,216 @@
+"""Thin adapter around the pinned SAM3 image processor."""
+
+from __future__ import annotations
+
+import gc
+import inspect
+import math
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from types import TracebackType
+from typing import Any, Sequence
+
+import numpy as np
+from PIL import Image
+
+
+@dataclass(frozen=True, slots=True)
+class RawSamCandidate:
+    """One SDK-independent SAM3 candidate kept on CPU."""
+
+    raw_candidate_id: str
+    prompt: str
+    score: float
+    bbox_xyxy: tuple[float, float, float, float]
+    mask: np.ndarray
+
+    def __post_init__(self) -> None:
+        if not self.raw_candidate_id:
+            raise ValueError("raw_candidate_id must not be empty")
+        if not self.prompt.strip():
+            raise ValueError("prompt must not be empty")
+        if not math.isfinite(self.score) or not 0.0 <= self.score <= 1.0:
+            raise ValueError("score must be finite and between 0 and 1")
+        if len(self.bbox_xyxy) != 4 or not all(
+            math.isfinite(value) for value in self.bbox_xyxy
+        ):
+            raise ValueError("bbox_xyxy must contain four finite values")
+        mask = np.asarray(self.mask, dtype=bool)
+        if mask.ndim != 2:
+            raise ValueError("SAM3 candidate masks must be two-dimensional")
+        object.__setattr__(self, "prompt", self.prompt.strip())
+        object.__setattr__(self, "mask", mask)
+
+
+@dataclass(frozen=True, slots=True)
+class Sam3Prediction:
+    candidates: tuple[RawSamCandidate, ...]
+    prompt_counts: dict[str, int]
+    inference_seconds: float
+
+
+class Sam3Adapter:
+    """Load SAM3 once and expose prompt-based CPU candidates."""
+
+    def __init__(self, checkpoint: str | Path, confidence_threshold: float) -> None:
+        self.checkpoint = Path(checkpoint).expanduser().resolve()
+        self.confidence_threshold = confidence_threshold
+        self.model_load_seconds = 0.0
+        self._model: Any | None = None
+        self._processor: Any | None = None
+        self._torch: Any | None = None
+
+    def load(self) -> None:
+        if self._processor is not None:
+            return
+        if not 0.0 <= self.confidence_threshold <= 1.0:
+            raise ValueError("confidence_threshold must be between 0 and 1")
+        if not self.checkpoint.is_file():
+            raise FileNotFoundError(f"SAM3 checkpoint not found: {self.checkpoint}")
+
+        import torch
+        from sam3.model.sam3_image_processor import Sam3Processor
+        from sam3.model_builder import build_sam3_image_model
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("PyTorch cannot access CUDA.")
+        if not torch.cuda.is_bf16_supported():
+            raise RuntimeError(
+                "The active CUDA device does not support bfloat16 autocast."
+            )
+
+        builder_parameters = inspect.signature(build_sam3_image_model).parameters
+        if "checkpoint_path" not in builder_parameters:
+            raise RuntimeError("Installed SAM3 builder does not accept checkpoint_path.")
+        builder_kwargs: dict[str, Any] = {"checkpoint_path": str(self.checkpoint)}
+        for name, value in {
+            "load_from_HF": False,
+            "device": "cuda",
+            "eval_mode": True,
+        }.items():
+            if name in builder_parameters:
+                builder_kwargs[name] = value
+
+        torch.cuda.reset_peak_memory_stats()
+        load_started = time.perf_counter()
+        model = build_sam3_image_model(**builder_kwargs)
+        processor = Sam3Processor(
+            model,
+            confidence_threshold=self.confidence_threshold,
+        )
+        model.eval()
+        torch.cuda.synchronize()
+
+        self.model_load_seconds = time.perf_counter() - load_started
+        self._model = model
+        self._processor = processor
+        self._torch = torch
+
+    def predict(self, image: Image.Image, prompts: Sequence[str]) -> Sam3Prediction:
+        normalized_prompts = [prompt.strip() for prompt in prompts]
+        if not normalized_prompts or any(not prompt for prompt in normalized_prompts):
+            raise ValueError("At least one non-empty SAM3 prompt is required")
+        if len(set(normalized_prompts)) != len(normalized_prompts):
+            raise ValueError("SAM3 prompts must be unique")
+        if self._processor is None:
+            self.load()
+
+        torch = self._torch
+        processor = self._processor
+        if torch is None or processor is None:
+            raise RuntimeError("SAM3 adapter failed to initialize")
+
+        candidates: list[RawSamCandidate] = []
+        prompt_counts: dict[str, int] = {}
+        inference_started = time.perf_counter()
+        with torch.inference_mode(), torch.autocast(
+            device_type="cuda", dtype=torch.bfloat16
+        ):
+            state = processor.set_image(image.convert("RGB"))
+            for prompt_index, prompt in enumerate(normalized_prompts):
+                output = processor.set_text_prompt(state=state, prompt=prompt)
+                prompt_candidates = self._extract_candidates(
+                    output,
+                    prompt=prompt,
+                    prompt_index=prompt_index,
+                )
+                prompt_counts[prompt] = len(prompt_candidates)
+                candidates.extend(prompt_candidates)
+        torch.cuda.synchronize()
+        inference_seconds = time.perf_counter() - inference_started
+        return Sam3Prediction(
+            candidates=tuple(candidates),
+            prompt_counts=prompt_counts,
+            inference_seconds=inference_seconds,
+        )
+
+    def _extract_candidates(
+        self,
+        output: dict[str, Any],
+        *,
+        prompt: str,
+        prompt_index: int,
+    ) -> list[RawSamCandidate]:
+        torch = self._torch
+        if torch is None:
+            raise RuntimeError("SAM3 adapter is not loaded")
+
+        masks = torch.as_tensor(output["masks"]).detach().cpu()
+        boxes = torch.as_tensor(output["boxes"]).detach().cpu().reshape(-1, 4)
+        scores = torch.as_tensor(output["scores"]).detach().cpu().flatten()
+        if masks.ndim == 4 and masks.shape[1] == 1:
+            masks = masks[:, 0]
+        if masks.ndim == 2:
+            masks = masks.unsqueeze(0)
+        if masks.ndim != 3:
+            raise ValueError(f"Unexpected SAM3 mask shape: {tuple(masks.shape)}")
+
+        count = int(masks.shape[0])
+        if int(boxes.shape[0]) != count or int(scores.shape[0]) != count:
+            raise ValueError(
+                "SAM3 returned different numbers of masks, boxes, and scores"
+            )
+
+        candidates: list[RawSamCandidate] = []
+        for candidate_index in range(count):
+            box = tuple(float(value) for value in boxes[candidate_index].tolist())
+            candidate = RawSamCandidate(
+                raw_candidate_id=(
+                    f"prompt_{prompt_index:03d}_candidate_{candidate_index:03d}"
+                ),
+                prompt=prompt,
+                score=float(scores[candidate_index].item()),
+                bbox_xyxy=box,
+                mask=(masks[candidate_index] > 0.5).numpy(),
+            )
+            candidates.append(candidate)
+        return candidates
+
+    @property
+    def peak_memory_mib(self) -> float:
+        if self._torch is None:
+            return 0.0
+        return float(self._torch.cuda.max_memory_allocated() / (1024**2))
+
+    def close(self) -> None:
+        torch = self._torch
+        self._processor = None
+        self._model = None
+        gc.collect()
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        self._torch = None
+
+    def __enter__(self) -> "Sam3Adapter":
+        self.load()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+

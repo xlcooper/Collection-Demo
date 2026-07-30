@@ -123,8 +123,11 @@ class Proposal(StrictModel):
     id: Identifier = Field(default_factory=lambda: new_id("prop"))
     source_image_id: Identifier
     raw_candidate_id: NonEmptyText
+    prompt: NonEmptyText = "unknown"
     score: Confidence
     bbox: BoundingBox
+    mask_area_pixels: int = Field(default=0, ge=0)
+    mask_area_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
     mask_path: RelativeAssetPath | None = None
     crop_path: RelativeAssetPath | None = None
     overlay_path: RelativeAssetPath | None = None

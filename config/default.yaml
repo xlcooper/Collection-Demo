@@ -8,3 +8,12 @@ models:
   sam3_checkpoint: weights/sam3/sam3.pt
   qwen_model_id: Qwen/Qwen3-VL-8B-Instruct-FP8
 
+sam3_pipeline:
+  prompt_strategy: explicit_category_list
+  prompts: []
+  confidence_threshold: 0.5
+  min_mask_area_ratio: 0.0005
+  duplicate_mask_iou_threshold: 0.9
+  crop_padding_pixels: 8
+  overlay_alpha: 0.45
+  overlay_color: [255, 64, 64]

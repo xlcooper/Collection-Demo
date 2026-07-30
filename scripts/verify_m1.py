@@ -15,7 +15,7 @@ from typing import Any
 from object_memory.assets import MemoryPaths
 from object_memory.cli import main as cli_main
 from object_memory.config import DEFAULT_CONFIG_PATH, config_digest, load_config
-from object_memory.memory_store import CORE_TABLES, MemoryStore
+from object_memory.memory_store import CORE_TABLES, SCHEMA_VERSION, MemoryStore
 from object_memory.schemas import (
     BoundingBox,
     Decision,
@@ -124,7 +124,7 @@ def run_verification() -> dict[str, Any]:
         "six_core_models_valid": len(validated_models) == 6,
         "database_reopens": first_status.schema_version
         == second_status.schema_version
-        == 1,
+        == SCHEMA_VERSION,
         "six_core_tables_present": set(second_status.counts) == set(CORE_TABLES),
         "empty_store_queryable": all(
             count == 0 for count in second_status.counts.values()

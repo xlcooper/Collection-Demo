@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -13,7 +14,7 @@ from pydantic import ValidationError
 from object_memory.assets import MemoryPaths
 from object_memory.cli import main as cli_main
 from object_memory.config import DEFAULT_CONFIG_PATH, config_digest, load_config
-from object_memory.memory_store import CORE_TABLES, MemoryStore
+from object_memory.memory_store import CORE_TABLES, SCHEMA_VERSION, MemoryStore
 from object_memory.schemas import (
     BoundingBox,
     Decision,
@@ -120,8 +121,8 @@ class MemoryStoreTests(unittest.TestCase):
             first_status = store.initialize()
             second_status = store.initialize()
 
-            self.assertEqual(first_status.schema_version, 1)
-            self.assertEqual(second_status.schema_version, 1)
+            self.assertEqual(first_status.schema_version, SCHEMA_VERSION)
+            self.assertEqual(second_status.schema_version, SCHEMA_VERSION)
             self.assertEqual(set(second_status.counts), set(CORE_TABLES))
             self.assertTrue(all(count == 0 for count in second_status.counts.values()))
             self.assertTrue(paths.database.is_file())
@@ -141,6 +142,48 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertEqual(status_code, 0)
             self.assertIn('"status": "ready"', output.getvalue())
             self.assertIn('"objects": 0', output.getvalue())
+
+    def test_schema_version_one_migrates_to_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = MemoryPaths(Path(temporary_directory) / "memory")
+            paths.ensure_layout()
+            with sqlite3.connect(paths.database) as connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE proposals (
+                        id TEXT PRIMARY KEY,
+                        source_image_id TEXT NOT NULL,
+                        raw_candidate_id TEXT NOT NULL,
+                        score REAL NOT NULL,
+                        bbox_x_min REAL NOT NULL,
+                        bbox_y_min REAL NOT NULL,
+                        bbox_x_max REAL NOT NULL,
+                        bbox_y_max REAL NOT NULL,
+                        mask_path TEXT,
+                        crop_path TEXT,
+                        overlay_path TEXT,
+                        status TEXT NOT NULL,
+                        filter_reason TEXT,
+                        error_message TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    PRAGMA user_version = 1;
+                    """
+                )
+
+            status = MemoryStore(paths).initialize()
+            with sqlite3.connect(paths.database) as connection:
+                proposal_columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(proposals)")
+                }
+            self.assertEqual(status.schema_version, SCHEMA_VERSION)
+            self.assertTrue(
+                {"prompt", "mask_area_pixels", "mask_area_ratio"}.issubset(
+                    proposal_columns
+                )
+            )
 
 
 if __name__ == "__main__":
