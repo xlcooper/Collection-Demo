@@ -206,6 +206,12 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
         processor_kwargs["revision"] = args.revision
     processor = AutoProcessor.from_pretrained(model_source, **processor_kwargs)
     model.eval()
+    device_map = getattr(model, "hf_device_map", None)
+    model_placement = (
+        sorted({str(device) for device in device_map.values()})
+        if isinstance(device_map, dict)
+        else [str(model.device)]
+    )
     torch.cuda.synchronize()
     model_load_seconds = time.perf_counter() - load_started
 
@@ -237,6 +243,7 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
         padding=True,
         return_tensors="pt",
     ).to(model.device)
+    input_token_count = int(inputs.input_ids.numel())
 
     inference_started = time.perf_counter()
     with torch.inference_mode():
@@ -252,6 +259,10 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
         output_ids[len(input_ids) :]
         for input_ids, output_ids in zip(inputs.input_ids, generated_ids)
     ]
+    generated_token_count = sum(int(token_ids.numel()) for token_ids in trimmed_ids)
+    generated_tokens_per_second = (
+        generated_token_count / inference_seconds if inference_seconds > 0 else 0.0
+    )
     raw_response = processor.batch_decode(
         trimmed_ids,
         skip_special_tokens=True,
@@ -277,8 +288,17 @@ def run_smoke(args: argparse.Namespace, report: dict[str, Any]) -> int:
                 "model_load": round(model_load_seconds, 3),
                 "inference": round(inference_seconds, 3),
             },
+            "generation": {
+                "input_tokens": input_token_count,
+                "generated_tokens": generated_token_count,
+                "generated_tokens_per_second": round(
+                    generated_tokens_per_second, 2
+                ),
+                "max_new_tokens": args.max_new_tokens,
+            },
             "cuda": {
                 "device": torch.cuda.get_device_name(0),
+                "model_placement": model_placement,
                 "peak_memory_mib": round(
                     torch.cuda.max_memory_allocated() / (1024**2), 2
                 ),
