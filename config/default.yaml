@@ -25,7 +25,7 @@ sam3_pipeline:
   overlay_color: [255, 64, 64]
 
 mllm_pipeline:
-  prompt_version: m3-object-identity-v3
+  prompt_version: m3-object-identity-v4
   max_pixels: 1048576
   max_new_tokens: 512
   object_card_batch_size: 8

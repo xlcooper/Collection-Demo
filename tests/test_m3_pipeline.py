@@ -140,6 +140,14 @@ class M3IdentityPipelineTests(unittest.TestCase):
             self.assertIn("mask-isolated", all_text)
             self.assertIn("uniform neutral gray", all_text)
             self.assertIn("Reject shadows, reflections", all_text)
+            self.assertIn(
+                "Never use disagreement with a known card to invalidate",
+                all_text,
+            )
+            self.assertIn(
+                "no match means new",
+                all_text,
+            )
 
     def test_messages_map_reference_image_to_object_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

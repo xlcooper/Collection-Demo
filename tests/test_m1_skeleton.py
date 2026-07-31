@@ -37,7 +37,7 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "m3-object-identity-v3",
+            "m3-object-identity-v4",
         )
         self.assertEqual(
             config.sam3_pipeline.crop_background_color,

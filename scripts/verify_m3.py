@@ -235,7 +235,11 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         "m2_report_passed": m2_report.get("status") == "passed",
         "ordered_single_call_prompt": (
             settings.prompt_version
-            in {"m3-object-identity-v2", "m3-object-identity-v3"}
+            in {
+                "m3-object-identity-v2",
+                "m3-object-identity-v3",
+                "m3-object-identity-v4",
+            }
         ),
         "empty_memory_decision_new": empty_response.decision is DecisionType.NEW,
         "new_annotation_complete": empty_response.annotation is not None,

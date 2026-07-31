@@ -119,7 +119,8 @@ class MllmPipelineConfig(BaseModel):
     prompt_version: Literal[
         "m3-object-identity-v2",
         "m3-object-identity-v3",
-    ] = "m3-object-identity-v3"
+        "m3-object-identity-v4",
+    ] = "m3-object-identity-v4"
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=512, gt=0)
     object_card_batch_size: int = Field(default=8, gt=0)

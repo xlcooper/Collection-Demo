@@ -22,9 +22,10 @@ from .schemas import (
 
 SYSTEM_PROMPT = """You are the single-call identity and annotation component of an object-memory system.
 Follow the ordered stages below, then return exactly one JSON object with no Markdown or extra text.
-Stage 1 - validity: decide whether IMAGE_A_CANDIDATE is one valid physical object. IMAGE_A_CANDIDATE is mask-isolated: original pixels outside the proposed mask were replaced with a uniform neutral gray. Judge only the preserved mask pixels, not nearby content from the original scene.
+Stage 1 - validity: decide whether IMAGE_A_CANDIDATE is one valid physical object before and independently of comparing it with any known object card. IMAGE_A_CANDIDATE is mask-isolated: original pixels outside the proposed mask were replaced with a uniform neutral gray. Judge only the preserved mask pixels, not nearby content from the original scene.
 Candidates may come from automatic point-grid segmentation without a category hint. Reject shadows, reflections, background regions, object parts that are not independent objects, merged groups, textures, and meaningless fragments as ignored.
-Stage 2 - identity: compare IMAGE_A_CANDIDATE only with images explicitly labelled REFERENCE_IMAGE for known object cards. Never compare the colored context overlay with a reference image. Card text is prior context, not evidence that an unlabeled candidate is different.
+Never use disagreement with a known card to invalidate a candidate. A complete physical object remains valid even when its category, appearance, or identity differs from every card. "It is not the known object" is never a valid reason for ignored.
+Stage 2 - identity: if the candidate passed Stage 1, compare IMAGE_A_CANDIDATE only with images explicitly labelled REFERENCE_IMAGE for known object cards. Never compare the colored context overlay with a reference image. Card text is prior context, not evidence that an unlabeled candidate is invalid. A valid candidate that matches no shown card is new, not ignored.
 Stage 3 - annotation: describe IMAGE_A_CANDIDATE only, after deciding identity. Use concise Chinese values and visible evidence only.
 Two objects of the same category are not automatically the same instance. However, pixel-identical images or the same distinctive visible details are strong instance evidence and must not be rejected by inventing color, material, or shape differences. If evidence is weak or conflicting, answer uncertain rather than new.
 """
@@ -49,7 +50,7 @@ OUTPUT_RULES = """Required JSON structure:
 }
 annotation is required for new and existing; use null for ignored and when no reliable annotation is possible.
 Decision rules, in order:
-1. invalid/non-object IMAGE_A_CANDIDATE -> ignored.
+1. IMAGE_A_CANDIDATE itself is not one complete independent physical object -> ignored. This decision must depend only on candidate validity; category or identity mismatch with a known card must never produce ignored.
 2. IMAGE_A_CANDIDATE matches a REFERENCE_IMAGE for one shown object card -> existing with that exact object_id.
 3. evidence is insufficient, contradictory, or close to more than one card -> uncertain.
 4. valid candidate and no shown card matches -> new. For one card batch, new means no match in this batch; the program accepts final new only after every batch returns new.
@@ -260,9 +261,11 @@ def build_identity_messages(
             {
                 "type": "text",
                 "text": (
-                    "Now follow Stage 1 validity, Stage 2 identity using only "
-                    "IMAGE_A_CANDIDATE versus REFERENCE_IMAGE items, and Stage 3 "
-                    "annotation of IMAGE_A_CANDIDATE.\n" + OUTPUT_RULES
+                    "First decide Stage 1 validity without using card similarity. "
+                    "If the candidate is a complete physical object, do not return "
+                    "ignored merely because it differs from every known card; "
+                    "continue to Stage 2, where no match means new. Then perform "
+                    "Stage 3 annotation of IMAGE_A_CANDIDATE.\n" + OUTPUT_RULES
                 ),
             },
         ]
