@@ -120,10 +120,11 @@ class MllmPipelineConfig(BaseModel):
         "m3-object-identity-v2",
         "m3-object-identity-v3",
         "m3-object-identity-v4",
-    ] = "m3-object-identity-v4"
+        "m5-semantic-retrieval-visual-confirmation-v1",
+    ] = "m5-semantic-retrieval-visual-confirmation-v1"
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=512, gt=0)
-    object_card_batch_size: int = Field(default=8, gt=0)
+    object_card_shortlist_size: int = Field(default=8, gt=0, le=64)
     max_reference_views_per_object: int = Field(default=2, gt=0)
     existing_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     max_error_attempts: int = Field(default=2, ge=1, le=3)

@@ -6,7 +6,7 @@ import json
 import sqlite3
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, Sequence
 
 from .assets import MemoryPaths
 from .schemas import (
@@ -712,10 +712,19 @@ class MemoryStore:
         return self.run_summary(run_id)
 
     def list_object_cards(self, *, max_reference_views: int = 2) -> list[ObjectCard]:
-        """Read active objects and a small number of recent observation images."""
+        """Read active objects with recent views; retained for direct M4 queries."""
 
         if max_reference_views <= 0:
             raise ValueError("max_reference_views must be positive")
+        texts = self.list_object_card_texts()
+        return self.get_object_cards(
+            [card.object_id for card in texts],
+            max_reference_views=max_reference_views,
+        )
+
+    def list_object_card_texts(self) -> list[ObjectCard]:
+        """Read all active object text in one query without observation images."""
+
         with closing(self._connect()) as connection:
             object_rows = connection.execute(
                 """
@@ -725,8 +734,57 @@ class MemoryStore:
                 ORDER BY created_at, id
                 """
             ).fetchall()
+        return [
+            ObjectCard(
+                object_id=str(row["id"]),
+                coarse_category=str(row["coarse_category"]),
+                fine_category=str(row["fine_category"]),
+                material=json.loads(str(row["material_json"])),
+                color=json.loads(str(row["color_json"])),
+                shape=str(row["shape"]),
+                description=str(row["description"]),
+                representative_view_paths=[],
+            )
+            for row in object_rows
+        ]
+
+    def get_object_cards(
+        self,
+        object_ids: Sequence[str],
+        *,
+        max_reference_views: int = 2,
+    ) -> list[ObjectCard]:
+        """Hydrate only selected active cards with recent observation images."""
+
+        if max_reference_views <= 0:
+            raise ValueError("max_reference_views must be positive")
+        ordered_ids = list(object_ids)
+        if not ordered_ids:
+            return []
+        if len(ordered_ids) != len(set(ordered_ids)):
+            raise ValueError("object_ids must be unique")
+        placeholders = ", ".join("?" for _ in ordered_ids)
+        with closing(self._connect()) as connection:
+            object_rows = connection.execute(
+                f"""
+                SELECT *
+                FROM objects
+                WHERE status = 'active' AND id IN ({placeholders})
+                """,
+                ordered_ids,
+            ).fetchall()
+            rows_by_id = {str(row["id"]): row for row in object_rows}
+            missing = [
+                object_id for object_id in ordered_ids if object_id not in rows_by_id
+            ]
+            if missing:
+                raise MemoryStoreError(
+                    "Cannot hydrate missing or archived object cards: "
+                    + ", ".join(missing)
+                )
             cards: list[ObjectCard] = []
-            for row in object_rows:
+            for object_id in ordered_ids:
+                row = rows_by_id[object_id]
                 view_rows = connection.execute(
                     """
                     SELECT crop_path
@@ -739,7 +797,7 @@ class MemoryStore:
                 ).fetchall()
                 cards.append(
                     ObjectCard(
-                        object_id=str(row["id"]),
+                        object_id=object_id,
                         coarse_category=str(row["coarse_category"]),
                         fine_category=str(row["fine_category"]),
                         material=json.loads(str(row["material_json"])),

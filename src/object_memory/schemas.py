@@ -83,11 +83,17 @@ class DecisionType(str, Enum):
 
 
 class DecisionReasonCode(str, Enum):
+    VALID_CANDIDATE = "valid_candidate"
     NEW_OBJECT = "new_object"
     VISUAL_INSTANCE_MATCH = "visual_instance_match"
     INVALID_CANDIDATE = "invalid_candidate"
     AMBIGUOUS_MATCH = "ambiguous_match"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+
+
+class CandidateValidity(str, Enum):
+    VALID = "valid"
+    IGNORED = "ignored"
 
 
 class BoundingBox(StrictModel):
@@ -183,6 +189,62 @@ class ObjectCard(StrictModel):
     shape: NonEmptyText
     description: NonEmptyText
     representative_view_paths: list[RelativeAssetPath] = Field(default_factory=list)
+
+
+class CandidateAnalysis(StrictModel):
+    """Validity decision and temporary annotation produced before memory lookup."""
+
+    validity: CandidateValidity
+    confidence: Confidence
+    reason_code: DecisionReasonCode
+    short_reason: NonEmptyText
+    annotation: ObjectAnnotation | None = None
+
+    @model_validator(mode="after")
+    def validate_analysis_payload(self) -> "CandidateAnalysis":
+        if self.validity is CandidateValidity.VALID:
+            if self.reason_code is not DecisionReasonCode.VALID_CANDIDATE:
+                raise ValueError("valid candidates require valid_candidate reason")
+            if self.annotation is None:
+                raise ValueError("valid candidates require a temporary annotation")
+        else:
+            if self.reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
+                raise ValueError("ignored candidates require invalid_candidate reason")
+            if self.annotation is not None:
+                raise ValueError("ignored candidates must not include an annotation")
+        return self
+
+
+class IdentityMatchResponse(StrictModel):
+    """Identity-only result after semantic retrieval and visual confirmation."""
+
+    decision: DecisionType
+    matched_object_id: Identifier | None = None
+    confidence: Confidence
+    reason_code: DecisionReasonCode
+    short_reason: NonEmptyText
+
+    @model_validator(mode="after")
+    def validate_identity_payload(self) -> "IdentityMatchResponse":
+        if self.decision is DecisionType.IGNORED:
+            raise ValueError("identity confirmation cannot ignore a valid candidate")
+        if self.decision is DecisionType.EXISTING and self.matched_object_id is None:
+            raise ValueError("existing identity responses require matched_object_id")
+        if self.decision is not DecisionType.EXISTING and self.matched_object_id:
+            raise ValueError(
+                "matched_object_id is only valid for existing identity responses"
+            )
+        allowed_reasons = {
+            DecisionType.NEW: {DecisionReasonCode.NEW_OBJECT},
+            DecisionType.EXISTING: {DecisionReasonCode.VISUAL_INSTANCE_MATCH},
+            DecisionType.UNCERTAIN: {
+                DecisionReasonCode.AMBIGUOUS_MATCH,
+                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+            },
+        }
+        if self.reason_code not in allowed_reasons[self.decision]:
+            raise ValueError("reason_code does not agree with identity decision")
+        return self
 
 
 class MllmResponse(StrictModel):

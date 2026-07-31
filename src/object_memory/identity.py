@@ -1,11 +1,13 @@
-"""Object-card prompting, constrained response parsing, and batch aggregation."""
+"""Two-stage candidate analysis, semantic retrieval, and identity confirmation."""
 
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 from pydantic import ValidationError
 
@@ -13,30 +15,30 @@ from .assets import MemoryPaths
 from .config import MllmPipelineConfig
 from .mllm_adapter import MllmPrediction
 from .schemas import (
+    CandidateAnalysis,
+    CandidateValidity,
     DecisionReasonCode,
     DecisionType,
+    IdentityMatchResponse,
     MllmResponse,
+    ObjectAnnotation,
     ObjectCard,
 )
 
 
-SYSTEM_PROMPT = """You are the single-call identity and annotation component of an object-memory system.
-Follow the ordered stages below, then return exactly one JSON object with no Markdown or extra text.
-Stage 1 - validity: decide whether IMAGE_A_CANDIDATE is one valid physical object before and independently of comparing it with any known object card. IMAGE_A_CANDIDATE is mask-isolated: original pixels outside the proposed mask were replaced with a uniform neutral gray. Judge only the preserved mask pixels, not nearby content from the original scene.
-Candidates may come from automatic point-grid segmentation without a category hint. Reject shadows, reflections, background regions, object parts that are not independent objects, merged groups, textures, and meaningless fragments as ignored.
-Never use disagreement with a known card to invalidate a candidate. A complete physical object remains valid even when its category, appearance, or identity differs from every card. "It is not the known object" is never a valid reason for ignored.
-Stage 2 - identity: if the candidate passed Stage 1, compare IMAGE_A_CANDIDATE only with images explicitly labelled REFERENCE_IMAGE for known object cards. Never compare the colored context overlay with a reference image. Card text is prior context, not evidence that an unlabeled candidate is invalid. A valid candidate that matches no shown card is new, not ignored.
-Stage 3 - annotation: describe IMAGE_A_CANDIDATE only, after deciding identity. Use concise Chinese values and visible evidence only.
-Two objects of the same category are not automatically the same instance. However, pixel-identical images or the same distinctive visible details are strong instance evidence and must not be rejected by inventing color, material, or shape differences. If evidence is weak or conflicting, answer uncertain rather than new.
+ANALYSIS_SYSTEM_PROMPT = """You are the candidate-analysis component of an object-memory system.
+Analyze exactly one mask-isolated candidate without seeing or considering any memory object cards.
+First decide whether it is one complete, independent physical object. Reject shadows, reflections, background regions, textures, merged groups, meaningless fragments, and object parts that are not independent objects.
+If valid, create a concise temporary annotation using only visible evidence. Use Chinese annotation values. Do not decide whether the object is new or existing; memory comparison happens later.
+Return exactly one JSON object with no Markdown or extra text.
 """
 
 
-OUTPUT_RULES = """Required JSON structure:
+ANALYSIS_OUTPUT_RULES = """Required JSON structure:
 {
-  "decision": "new | existing | ignored | uncertain",
-  "matched_object_id": "known object ID when existing, otherwise null",
+  "validity": "valid | ignored",
   "confidence": 0.0,
-  "reason_code": "new_object | visual_instance_match | invalid_candidate | ambiguous_match | insufficient_evidence",
+  "reason_code": "valid_candidate | invalid_candidate",
   "short_reason": "brief reason",
   "annotation": {
     "coarse_category": "physical object category",
@@ -44,18 +46,39 @@ OUTPUT_RULES = """Required JSON structure:
     "material": ["visible material"],
     "color": ["visible color"],
     "shape": "visible shape",
-    "description": "visible facts about the isolated object",
+    "description": "visible facts and distinctive instance cues",
     "annotation_confidence": 0.0
   }
 }
-annotation is required for new and existing; use null for ignored and when no reliable annotation is possible.
-Decision rules, in order:
-1. IMAGE_A_CANDIDATE itself is not one complete independent physical object -> ignored. This decision must depend only on candidate validity; category or identity mismatch with a known card must never produce ignored.
-2. IMAGE_A_CANDIDATE matches a REFERENCE_IMAGE for one shown object card -> existing with that exact object_id.
-3. evidence is insufficient, contradictory, or close to more than one card -> uncertain.
-4. valid candidate and no shown card matches -> new. For one card batch, new means no match in this batch; the program accepts final new only after every batch returns new.
-Do not claim a color, material, or shape mismatch unless that difference is directly visible between IMAGE_A_CANDIDATE and the relevant REFERENCE_IMAGE.
-Reason codes must agree with the decision: new_object for new, visual_instance_match for existing, invalid_candidate for ignored, and ambiguous_match or insufficient_evidence for uncertain.
+For valid, reason_code must be valid_candidate and annotation is required.
+For ignored, reason_code must be invalid_candidate and annotation must be null.
+Do not use new, existing, or uncertain in this stage.
+"""
+
+
+IDENTITY_SYSTEM_PROMPT = """You are the identity-confirmation component of an object-memory system.
+The candidate has already been confirmed as a complete physical object and has a temporary annotation. It can never be ignored in this stage.
+Compare the candidate with only the shortlisted memory object cards shown in this request. Use card text for semantic comparison and REFERENCE_IMAGE items for concrete instance evidence.
+Same category, color, or material alone does not prove that two observations are the same physical instance. Distinctive visible details or matching reference views are stronger evidence.
+Return existing only for one supported instance match, new when no shown card matches, and uncertain when evidence is weak, conflicting, or ambiguous.
+Return exactly one JSON object with no Markdown or extra text.
+"""
+
+
+IDENTITY_OUTPUT_RULES = """Required JSON structure:
+{
+  "decision": "new | existing | uncertain",
+  "matched_object_id": "known object ID when existing, otherwise null",
+  "confidence": 0.0,
+  "reason_code": "new_object | visual_instance_match | ambiguous_match | insufficient_evidence",
+  "short_reason": "brief reason"
+}
+Decision rules:
+1. one supported instance match -> existing with that exact object_id.
+2. weak, conflicting, or ambiguous identity evidence -> uncertain.
+3. no shown card matches -> new.
+ignored and invalid_candidate are forbidden because validity was resolved before memory lookup.
+Reason codes must agree with the decision.
 """
 
 
@@ -68,16 +91,35 @@ class MllmPredictor(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class BatchEvaluation:
-    object_ids: tuple[str, ...]
-    response: MllmResponse
-    prediction: MllmPrediction
+class RetrievedObjectCard:
+    card: ObjectCard
+    score: float
+    matched_fields: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "object_id": self.card.object_id,
+            "score": self.score,
+            "matched_fields": list(self.matched_fields),
+        }
 
 
 @dataclass(frozen=True, slots=True)
-class IdentityEvaluation:
+class CandidateEvaluation:
+    analysis: CandidateAnalysis
     final_response: MllmResponse
-    batches: tuple[BatchEvaluation, ...]
+    analysis_prediction: MllmPrediction
+    memory_lookup_performed: bool
+    available_object_cards: int
+    retrieved_cards: tuple[RetrievedObjectCard, ...] = ()
+    identity_response: IdentityMatchResponse | None = None
+    identity_prediction: MllmPrediction | None = None
+
+    @property
+    def predictions(self) -> tuple[MllmPrediction, ...]:
+        if self.identity_prediction is None:
+            return (self.analysis_prediction,)
+        return (self.analysis_prediction, self.identity_prediction)
 
 
 def extract_json_object(raw_text: str) -> dict[str, Any]:
@@ -104,36 +146,106 @@ def extract_json_object(raw_text: str) -> dict[str, Any]:
     return payload
 
 
-def parse_mllm_response(
+def parse_candidate_analysis(raw_text: str) -> CandidateAnalysis:
+    """Validate the memory-independent candidate analysis."""
+
+    try:
+        return CandidateAnalysis.model_validate(extract_json_object(raw_text))
+    except (ValidationError, ValueError) as exc:
+        raise MllmOutputError(
+            f"Qwen candidate analysis failed schema validation: {exc}"
+        ) from exc
+
+
+def parse_identity_response(
     raw_text: str,
     *,
     allowed_object_ids: set[str],
-) -> MllmResponse:
-    """Validate JSON fields and prevent references to cards not in the batch."""
+) -> IdentityMatchResponse:
+    """Validate identity output and reject object IDs outside the shortlist."""
 
     try:
-        response = MllmResponse.model_validate(extract_json_object(raw_text))
+        response = IdentityMatchResponse.model_validate(
+            extract_json_object(raw_text)
+        )
     except (ValidationError, ValueError) as exc:
-        raise MllmOutputError(f"Qwen response failed schema validation: {exc}") from exc
+        raise MllmOutputError(
+            f"Qwen identity response failed schema validation: {exc}"
+        ) from exc
 
-    if response.decision is DecisionType.EXISTING:
-        if response.matched_object_id not in allowed_object_ids:
-            raise MllmOutputError(
-                "Qwen matched an object ID that was not present in its card batch"
-            )
+    if (
+        response.decision is DecisionType.EXISTING
+        and response.matched_object_id not in allowed_object_ids
+    ):
+        raise MllmOutputError(
+            "Qwen matched an object ID that was not present in the shortlist"
+        )
     return response
 
 
-def partition_object_cards(
-    cards: Sequence[ObjectCard], batch_size: int
-) -> list[tuple[ObjectCard, ...]]:
-    if batch_size <= 0:
-        raise ValueError("object card batch size must be positive")
-    if not cards:
-        return [tuple()]
+def _candidate_origin(sam_prompt: str) -> str:
+    normalized_source = sam_prompt.strip()
+    if normalized_source == "automatic_point_grid":
+        return (
+            "No category hint was supplied. The project generated this candidate "
+            "automatically from a point grid; infer its category only from pixels."
+        )
+    return f"Historical SAM category hint: {normalized_source or 'unknown'}."
+
+
+def build_candidate_analysis_messages(
+    *,
+    candidate_crop: Path,
+    candidate_overlay: Path,
+    sam_prompt: str,
+    max_pixels: int,
+) -> list[dict[str, Any]]:
+    """Build the first call: validity and a temporary visible annotation."""
+
+    crop = candidate_crop.expanduser().resolve()
+    overlay = candidate_overlay.expanduser().resolve()
+    if not crop.is_file() or not overlay.is_file():
+        raise FileNotFoundError("Candidate crop and overlay must both exist")
+    if max_pixels <= 0:
+        raise ValueError("MLLM image limits must be positive")
+
+    content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "IMAGE_A_CANDIDATE follows. This mask-isolated crop is the only "
+                "annotation target. Pixels outside the SAM mask were replaced with "
+                "uniform neutral gray; judge only the preserved mask pixels. "
+                + _candidate_origin(sam_prompt)
+            ),
+        },
+        {"type": "image", "image": crop.as_uri(), "max_pixels": max_pixels},
+        {
+            "type": "text",
+            "text": (
+                "IMAGE_Z_CONTEXT_OVERLAY follows. It only shows the candidate's "
+                "location in the source scene. Its colored mask changes visible "
+                "colors; use it only to understand boundaries and context, never "
+                "as the annotation target."
+            ),
+        },
+        {"type": "image", "image": overlay.as_uri(), "max_pixels": max_pixels},
+        {
+            "type": "text",
+            "text": (
+                "Decide candidate validity first. If valid, produce a temporary "
+                "annotation with visible category, attributes, and distinctive "
+                "instance cues. Do not compare with memory in this call.\n"
+                + ANALYSIS_OUTPUT_RULES
+            ),
+        },
+    ]
     return [
-        tuple(cards[index : index + batch_size])
-        for index in range(0, len(cards), batch_size)
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": ANALYSIS_SYSTEM_PROMPT}],
+        },
+        {"role": "user", "content": content},
     ]
 
 
@@ -150,71 +262,55 @@ def _card_summary(card: ObjectCard) -> dict[str, Any]:
     }
 
 
-def build_identity_messages(
+def build_identity_confirmation_messages(
     *,
     candidate_crop: Path,
-    candidate_overlay: Path,
-    sam_prompt: str,
+    temporary_annotation: ObjectAnnotation,
     cards: Sequence[ObjectCard],
     card_assets: MemoryPaths | None,
     max_reference_views_per_object: int,
     max_pixels: int,
 ) -> list[dict[str, Any]]:
-    """Build an interleaved image/text request with explicit image ownership."""
+    """Build the second call for a semantically retrieved object-card shortlist."""
 
     crop = candidate_crop.expanduser().resolve()
-    overlay = candidate_overlay.expanduser().resolve()
-    if not crop.is_file() or not overlay.is_file():
-        raise FileNotFoundError("Candidate crop and overlay must both exist")
+    if not crop.is_file():
+        raise FileNotFoundError(f"Candidate crop not found: {crop}")
+    if not cards:
+        raise ValueError("Identity confirmation requires at least one object card")
     if max_reference_views_per_object <= 0 or max_pixels <= 0:
         raise ValueError("MLLM image limits must be positive")
-
-    normalized_source = sam_prompt.strip()
-    if normalized_source == "automatic_point_grid":
-        candidate_origin = (
-            "No category hint was supplied. The project generated this candidate "
-            "automatically from a point grid; infer its category only from pixels."
-        )
-    else:
-        candidate_origin = (
-            f"Historical SAM category hint: {normalized_source or 'unknown'}."
-        )
 
     content: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": (
-                "IMAGE_A_CANDIDATE follows. This mask-isolated crop is the current "
-                "proposal: pixels outside the SAM mask were replaced with a uniform "
-                "neutral gray. Judge and annotate only the preserved mask pixels; "
-                "do not infer an object from the gray area or nearby scene content. "
-                "It is the left-hand side of every identity comparison. "
-                f"{candidate_origin}"
+                "VALID_IMAGE_A_CANDIDATE follows. It already passed independent "
+                "validity analysis. Its temporary annotation is:\n"
+                + json.dumps(
+                    temporary_annotation.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+                + "\nCompare this valid candidate with the shortlisted cards below."
             ),
         },
         {"type": "image", "image": crop.as_uri(), "max_pixels": max_pixels},
     ]
 
-    if not cards:
-        content.append(
-            {
-                "type": "text",
-                "text": (
-                    "KNOWN_OBJECT_CARD_BATCH is empty. If IMAGE_A_CANDIDATE is "
-                    "valid, decision must be new. Do not invent an object ID."
-                ),
-            }
-        )
     for card_index, card in enumerate(cards, start=1):
         content.append(
             {
                 "type": "text",
                 "text": (
-                    f"OBJECT_CARD_{card_index} begins. Its exact object_id and "
-                    "stored attributes are:\n"
-                    + json.dumps(_card_summary(card), ensure_ascii=False, sort_keys=True)
-                    + "\nCompare IMAGE_A_CANDIDATE with only the REFERENCE_IMAGE "
-                    "items explicitly assigned to this object_id."
+                    f"SHORTLISTED_OBJECT_CARD_{card_index} begins:\n"
+                    + json.dumps(
+                        _card_summary(card),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                    + "\nIts REFERENCE_IMAGE items, when present, are concrete "
+                    "identity evidence for this exact object_id."
                 ),
             }
         )
@@ -223,6 +319,16 @@ def build_identity_messages(
         ]
         if view_paths and card_assets is None:
             raise ValueError("card_assets is required for representative views")
+        if not view_paths:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        f"OBJECT_CARD_{card_index} has no reference image. Its text "
+                        "alone is not sufficient for a confident exact-instance match."
+                    ),
+                }
+            )
         for view_index, relative_path in enumerate(view_paths, start=1):
             assert card_assets is not None
             view = card_assets.resolve_asset(relative_path)
@@ -234,8 +340,7 @@ def build_identity_messages(
                         "type": "text",
                         "text": (
                             f"REFERENCE_IMAGE_CARD_{card_index}_VIEW_{view_index} "
-                            f"for object_id={card.object_id} follows immediately. "
-                            "This is an identity reference, not the image to annotate."
+                            f"for object_id={card.object_id} follows."
                         ),
                     },
                     {
@@ -246,98 +351,166 @@ def build_identity_messages(
                 ]
             )
 
-    content.extend(
-        [
-            {
-                "type": "text",
-                "text": (
-                    "IMAGE_Z_CONTEXT_OVERLAY follows. It only shows where the SAM "
-                    "mask lies in the source scene. Its colored mask changes visible "
-                    "colors. Never compare IMAGE_Z_CONTEXT_OVERLAY with any "
-                    "REFERENCE_IMAGE and never annotate it."
-                ),
-            },
-            {"type": "image", "image": overlay.as_uri(), "max_pixels": max_pixels},
-            {
-                "type": "text",
-                "text": (
-                    "First decide Stage 1 validity without using card similarity. "
-                    "If the candidate is a complete physical object, do not return "
-                    "ignored merely because it differs from every known card; "
-                    "continue to Stage 2, where no match means new. Then perform "
-                    "Stage 3 annotation of IMAGE_A_CANDIDATE.\n" + OUTPUT_RULES
-                ),
-            },
-        ]
+    content.append(
+        {
+            "type": "text",
+            "text": (
+                "Compare temporary text semantics first, then use reference images "
+                "to confirm or reject exact instance identity.\n"
+                + IDENTITY_OUTPUT_RULES
+            ),
+        }
     )
     return [
-        {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": IDENTITY_SYSTEM_PROMPT}],
+        },
         {"role": "user", "content": content},
     ]
 
 
-def aggregate_batch_responses(
-    batches: Sequence[BatchEvaluation],
-    *,
-    existing_min_confidence: float,
-) -> MllmResponse:
-    """Conservatively combine fixed-size card comparisons."""
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return " ".join(re.findall(r"[a-z0-9]+|[\u3400-\u4dbf\u4e00-\u9fff]+", normalized))
 
-    if not batches:
-        raise ValueError("At least one MLLM batch response is required")
-    if not 0.0 <= existing_min_confidence <= 1.0:
-        raise ValueError("existing_min_confidence must be between 0 and 1")
 
-    strong_existing = [
-        batch.response
-        for batch in batches
-        if batch.response.decision is DecisionType.EXISTING
-        and batch.response.confidence >= existing_min_confidence
-    ]
-    matched_ids = {response.matched_object_id for response in strong_existing}
-    if len(matched_ids) == 1:
-        matched_id = next(iter(matched_ids))
-        has_conflict = any(
-            response.decision in {DecisionType.IGNORED, DecisionType.UNCERTAIN}
-            or (
-                response.decision is DecisionType.EXISTING
-                and response.matched_object_id != matched_id
-            )
-            for response in (batch.response for batch in batches)
-        )
-        if not has_conflict:
-            return max(strong_existing, key=lambda response: response.confidence)
-    if matched_ids:
-        return MllmResponse(
-            decision=DecisionType.UNCERTAIN,
-            matched_object_id=None,
-            confidence=max(response.confidence for response in strong_existing),
-            reason_code=DecisionReasonCode.AMBIGUOUS_MATCH,
-            short_reason="对象卡片批次给出了冲突或不确定匹配",
-            annotation=strong_existing[0].annotation,
-        )
+def _text_features(value: str) -> set[str]:
+    normalized = _normalize_text(value)
+    features = set(re.findall(r"[a-z0-9]+", normalized))
+    for run in re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff]+", normalized):
+        features.add(run)
+        features.update(run)
+        features.update(run[index : index + 2] for index in range(len(run) - 1))
+    return {feature for feature in features if feature}
 
-    responses = [batch.response for batch in batches]
-    if all(response.decision is DecisionType.NEW for response in responses):
-        selected = max(responses, key=lambda response: response.confidence)
-        return selected.model_copy(
-            update={"confidence": min(response.confidence for response in responses)}
-        )
-    if all(response.decision is DecisionType.IGNORED for response in responses):
-        return max(responses, key=lambda response: response.confidence)
 
-    annotation = next(
-        (response.annotation for response in responses if response.annotation is not None),
-        None,
+def _text_similarity(left: str, right: str) -> float:
+    left_normalized = _normalize_text(left)
+    right_normalized = _normalize_text(right)
+    if not left_normalized or not right_normalized:
+        return 0.0
+    if left_normalized == right_normalized:
+        return 1.0
+    if left_normalized in right_normalized or right_normalized in left_normalized:
+        return 0.8
+    left_features = _text_features(left)
+    right_features = _text_features(right)
+    union = left_features | right_features
+    if not union:
+        return 0.0
+    return len(left_features & right_features) / len(union)
+
+
+def _list_similarity(left: Sequence[str], right: Sequence[str]) -> float:
+    return _text_similarity(" ".join(left), " ".join(right))
+
+
+def _card_relevance(
+    annotation: ObjectAnnotation,
+    card: ObjectCard,
+) -> tuple[float, tuple[str, ...]]:
+    weighted_fields = (
+        (
+            "coarse_category",
+            3.0,
+            _text_similarity(annotation.coarse_category, card.coarse_category),
+        ),
+        (
+            "fine_category",
+            4.0,
+            _text_similarity(annotation.fine_category, card.fine_category),
+        ),
+        (
+            "material",
+            1.0,
+            _list_similarity(annotation.material, card.material),
+        ),
+        (
+            "color",
+            1.0,
+            _list_similarity(annotation.color, card.color),
+        ),
+        (
+            "shape",
+            1.5,
+            _text_similarity(annotation.shape, card.shape),
+        ),
+        (
+            "description",
+            2.5,
+            _text_similarity(annotation.description, card.description),
+        ),
     )
-    confidence = max(response.confidence for response in responses)
+    total_weight = sum(weight for _, weight, _ in weighted_fields)
+    score = sum(weight * similarity for _, weight, similarity in weighted_fields)
+    matched_fields = tuple(
+        field_name
+        for field_name, _, similarity in weighted_fields
+        if similarity > 0.0
+    )
+    return round(score / total_weight, 6), matched_fields
+
+
+def retrieve_object_cards(
+    annotation: ObjectAnnotation,
+    cards: Sequence[ObjectCard],
+    *,
+    limit: int,
+) -> tuple[RetrievedObjectCard, ...]:
+    """Rank all card text locally and retain only a bounded visual shortlist."""
+
+    if limit <= 0:
+        raise ValueError("object-card shortlist limit must be positive")
+    object_ids = [card.object_id for card in cards]
+    if len(object_ids) != len(set(object_ids)):
+        raise ValueError("object-card IDs must be unique")
+
+    ranked: list[RetrievedObjectCard] = []
+    for card in cards:
+        score, matched_fields = _card_relevance(annotation, card)
+        ranked.append(
+            RetrievedObjectCard(
+                card=card,
+                score=score,
+                matched_fields=matched_fields,
+            )
+        )
+    ranked.sort(key=lambda item: (-item.score, item.card.object_id))
+    return tuple(ranked[:limit])
+
+
+def _final_from_analysis(
+    analysis: CandidateAnalysis,
+    identity: IdentityMatchResponse | None,
+) -> MllmResponse:
+    if analysis.validity is CandidateValidity.IGNORED:
+        return MllmResponse(
+            decision=DecisionType.IGNORED,
+            matched_object_id=None,
+            confidence=analysis.confidence,
+            reason_code=DecisionReasonCode.INVALID_CANDIDATE,
+            short_reason=analysis.short_reason,
+            annotation=None,
+        )
+
+    assert analysis.annotation is not None
+    if identity is None:
+        return MllmResponse(
+            decision=DecisionType.NEW,
+            matched_object_id=None,
+            confidence=analysis.confidence,
+            reason_code=DecisionReasonCode.NEW_OBJECT,
+            short_reason="候选是有效物体，且当前记忆库为空",
+            annotation=analysis.annotation,
+        )
     return MllmResponse(
-        decision=DecisionType.UNCERTAIN,
-        matched_object_id=None,
-        confidence=confidence,
-        reason_code=DecisionReasonCode.INSUFFICIENT_EVIDENCE,
-        short_reason="对象卡片批次的判断不一致或匹配置信度不足",
-        annotation=annotation,
+        decision=identity.decision,
+        matched_object_id=identity.matched_object_id,
+        confidence=min(analysis.confidence, identity.confidence),
+        reason_code=identity.reason_code,
+        short_reason=identity.short_reason,
+        annotation=analysis.annotation,
     )
 
 
@@ -347,42 +520,94 @@ def evaluate_candidate(
     candidate_crop: Path,
     candidate_overlay: Path,
     sam_prompt: str,
-    cards: Sequence[ObjectCard],
+    get_card_texts: Callable[[], Sequence[ObjectCard]],
+    get_reference_cards: Callable[[Sequence[str]], Sequence[ObjectCard]],
     card_assets: MemoryPaths | None,
     settings: MllmPipelineConfig,
-) -> IdentityEvaluation:
-    """Compare one candidate against every object card in fixed-size batches."""
+) -> CandidateEvaluation:
+    """Analyze one candidate, retrieve card text, then confirm identity visually."""
 
-    evaluations: list[BatchEvaluation] = []
-    for card_batch in partition_object_cards(cards, settings.object_card_batch_size):
-        messages = build_identity_messages(
+    analysis_prediction = predictor.predict(
+        build_candidate_analysis_messages(
             candidate_crop=candidate_crop,
             candidate_overlay=candidate_overlay,
             sam_prompt=sam_prompt,
-            cards=card_batch,
+            max_pixels=settings.max_pixels,
+        )
+    )
+    analysis = parse_candidate_analysis(analysis_prediction.raw_text)
+    if analysis.validity is CandidateValidity.IGNORED:
+        return CandidateEvaluation(
+            analysis=analysis,
+            final_response=_final_from_analysis(analysis, None),
+            analysis_prediction=analysis_prediction,
+            memory_lookup_performed=False,
+            available_object_cards=0,
+        )
+
+    card_texts = list(get_card_texts())
+    if not card_texts:
+        return CandidateEvaluation(
+            analysis=analysis,
+            final_response=_final_from_analysis(analysis, None),
+            analysis_prediction=analysis_prediction,
+            memory_lookup_performed=True,
+            available_object_cards=0,
+        )
+
+    assert analysis.annotation is not None
+    retrieved = retrieve_object_cards(
+        analysis.annotation,
+        card_texts,
+        limit=settings.object_card_shortlist_size,
+    )
+    selected_ids = [item.card.object_id for item in retrieved]
+    hydrated_cards = list(get_reference_cards(selected_ids))
+    hydrated_by_id = {card.object_id: card for card in hydrated_cards}
+    if set(hydrated_by_id) != set(selected_ids):
+        raise ValueError("reference-card query did not return the complete shortlist")
+    shortlisted_cards = [hydrated_by_id[object_id] for object_id in selected_ids]
+    retrieved = tuple(
+        RetrievedObjectCard(
+            card=hydrated_by_id[item.card.object_id],
+            score=item.score,
+            matched_fields=item.matched_fields,
+        )
+        for item in retrieved
+    )
+    identity_prediction = predictor.predict(
+        build_identity_confirmation_messages(
+            candidate_crop=candidate_crop,
+            temporary_annotation=analysis.annotation,
+            cards=shortlisted_cards,
             card_assets=card_assets,
             max_reference_views_per_object=settings.max_reference_views_per_object,
             max_pixels=settings.max_pixels,
         )
-        prediction = predictor.predict(messages)
-        object_ids = tuple(card.object_id for card in card_batch)
-        response = parse_mllm_response(
-            prediction.raw_text,
-            allowed_object_ids=set(object_ids),
-        )
-        evaluations.append(
-            BatchEvaluation(
-                object_ids=object_ids,
-                response=response,
-                prediction=prediction,
-            )
+    )
+    identity = parse_identity_response(
+        identity_prediction.raw_text,
+        allowed_object_ids={card.object_id for card in shortlisted_cards},
+    )
+    if (
+        identity.decision is DecisionType.EXISTING
+        and identity.confidence < settings.existing_min_confidence
+    ):
+        identity = IdentityMatchResponse(
+            decision=DecisionType.UNCERTAIN,
+            matched_object_id=None,
+            confidence=identity.confidence,
+            reason_code=DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+            short_reason="候选可能匹配已有对象，但身份置信度低于阈值",
         )
 
-    final_response = aggregate_batch_responses(
-        evaluations,
-        existing_min_confidence=settings.existing_min_confidence,
-    )
-    return IdentityEvaluation(
-        final_response=final_response,
-        batches=tuple(evaluations),
+    return CandidateEvaluation(
+        analysis=analysis,
+        final_response=_final_from_analysis(analysis, identity),
+        analysis_prediction=analysis_prediction,
+        memory_lookup_performed=True,
+        available_object_cards=len(card_texts),
+        retrieved_cards=retrieved,
+        identity_response=identity,
+        identity_prediction=identity_prediction,
     )

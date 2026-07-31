@@ -37,7 +37,11 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "m3-object-identity-v4",
+            "m5-semantic-retrieval-visual-confirmation-v1",
+        )
+        self.assertEqual(
+            config.mllm_pipeline.object_card_shortlist_size,
+            8,
         )
         self.assertEqual(
             config.sam3_pipeline.crop_background_color,

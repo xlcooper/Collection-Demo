@@ -134,17 +134,33 @@ def annotation_targets_object(
     return any(term and term in category_text for term in expected_terms)
 
 
-def batch_summary(evaluation: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "object_ids": list(batch.object_ids),
-            "response": batch.response.model_dump(mode="json"),
-            "input_tokens": batch.prediction.input_tokens,
-            "generated_tokens": batch.prediction.generated_tokens,
-            "inference_seconds": round(batch.prediction.inference_seconds, 3),
-        }
-        for batch in evaluation.batches
-    ]
+def evaluation_summary(evaluation: Any) -> dict[str, Any]:
+    return {
+        "analysis": evaluation.analysis.model_dump(mode="json"),
+        "memory_lookup_performed": evaluation.memory_lookup_performed,
+        "available_object_cards": evaluation.available_object_cards,
+        "shortlisted": [
+            item.as_dict() for item in evaluation.retrieved_cards
+        ],
+        "identity_confirmation": (
+            evaluation.identity_response.model_dump(mode="json")
+            if evaluation.identity_response is not None
+            else None
+        ),
+        "predictions": [
+            {
+                "stage": (
+                    "candidate_analysis"
+                    if index == 0
+                    else "identity_confirmation"
+                ),
+                "input_tokens": prediction.input_tokens,
+                "generated_tokens": prediction.generated_tokens,
+                "inference_seconds": round(prediction.inference_seconds, 3),
+            }
+            for index, prediction in enumerate(evaluation.predictions)
+        ],
+    }
 
 
 def run_verification(args: argparse.Namespace) -> dict[str, Any]:
@@ -181,12 +197,15 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
             candidate_crop=crop,
             candidate_overlay=overlay,
             sam_prompt=sam_prompt,
-            cards=[],
+            get_card_texts=lambda: [],
+            get_reference_cards=lambda object_ids: [],
             card_assets=m2_asset_paths,
             settings=settings,
         )
-        first_batch = empty_memory_evaluation.batches[0]
-        write_raw(output_dir / "empty_memory_response.txt", first_batch.prediction.raw_text)
+        write_raw(
+            output_dir / "empty_memory_analysis_response.txt",
+            empty_memory_evaluation.analysis_prediction.raw_text,
+        )
 
         annotation = empty_memory_evaluation.final_response.annotation
         if annotation is not None:
@@ -207,15 +226,24 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
                 candidate_crop=crop,
                 candidate_overlay=overlay,
                 sam_prompt=sam_prompt,
-                cards=[reference_card],
+                get_card_texts=lambda: [
+                    reference_card.model_copy(
+                        update={"representative_view_paths": []}
+                    )
+                ],
+                get_reference_cards=lambda object_ids: [reference_card],
                 card_assets=m2_asset_paths,
                 settings=settings,
             )
-            second_batch = same_view_evaluation.batches[0]
             write_raw(
-                output_dir / "same_view_response.txt",
-                second_batch.prediction.raw_text,
+                output_dir / "same_view_analysis_response.txt",
+                same_view_evaluation.analysis_prediction.raw_text,
             )
+            if same_view_evaluation.identity_prediction is not None:
+                write_raw(
+                    output_dir / "same_view_identity_response.txt",
+                    same_view_evaluation.identity_prediction.raw_text,
+                )
 
         peak_memory_mib = adapter.peak_memory_mib
         model_load_seconds = adapter.model_load_seconds
@@ -233,13 +261,9 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     )
     checks = {
         "m2_report_passed": m2_report.get("status") == "passed",
-        "ordered_single_call_prompt": (
+        "two_stage_prompt_configured": (
             settings.prompt_version
-            in {
-                "m3-object-identity-v2",
-                "m3-object-identity-v3",
-                "m3-object-identity-v4",
-            }
+            == "m5-semantic-retrieval-visual-confirmation-v1"
         ),
         "empty_memory_decision_new": empty_response.decision is DecisionType.NEW,
         "new_annotation_complete": empty_response.annotation is not None,
@@ -277,16 +301,19 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         },
         "settings": settings.model_dump(mode="json"),
         "interface": {
-            "qwen_call_unit": "one call per candidate per object-card batch",
-            "ordered_tasks_in_one_call": [
-                "candidate_validity",
-                "instance_identity",
-                "candidate_annotation",
+            "ordered_stages": [
+                "candidate_validity_and_temporary_annotation",
+                "structured_text_shortlist",
+                "reference_image_identity_confirmation",
             ],
+            "qwen_calls": (
+                "one analysis call; one additional identity call only when the "
+                "candidate is valid and memory cards exist"
+            ),
             "image_roles": {
-                "IMAGE_A_CANDIDATE": "identity input and only annotation target",
+                "IMAGE_A_CANDIDATE": "validity input and temporary annotation target",
                 "REFERENCE_IMAGE": "known-object identity evidence",
-                "IMAGE_Z_CONTEXT_OVERLAY": "SAM location context; excluded from identity comparison",
+                "IMAGE_Z_CONTEXT_OVERLAY": "analysis-stage SAM location context",
             },
             "output_contract": {
                 "decision": ["new", "existing", "ignored", "uncertain"],
@@ -297,13 +324,13 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         },
         "empty_memory": {
             "final_response": empty_response.model_dump(mode="json"),
-            "batches": batch_summary(empty_memory_evaluation),
+            "evaluation": evaluation_summary(empty_memory_evaluation),
         },
         "same_view_card": (
             {
                 "reference_object_id": "obj_m3_same_view_reference",
                 "final_response": same_response.model_dump(mode="json"),
-                "batches": batch_summary(same_view_evaluation),
+                "evaluation": evaluation_summary(same_view_evaluation),
             }
             if same_response is not None and same_view_evaluation is not None
             else None
@@ -312,25 +339,35 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
             "model_load": round(model_load_seconds, 3),
             "inference_total": round(
                 sum(
-                    batch.prediction.inference_seconds
+                    prediction.inference_seconds
                     for evaluation in (
                         empty_memory_evaluation,
                         same_view_evaluation,
                     )
                     if evaluation is not None
-                    for batch in evaluation.batches
+                    for prediction in evaluation.predictions
                 ),
                 3,
             ),
         },
         "cuda": {"peak_memory_mib": round(peak_memory_mib, 2)},
         "raw_responses": {
-            "empty_memory": portable_report_path(
-                output_dir / "empty_memory_response.txt"
+            "empty_memory_analysis": portable_report_path(
+                output_dir / "empty_memory_analysis_response.txt"
             ),
-            "same_view": (
-                portable_report_path(output_dir / "same_view_response.txt")
+            "same_view_analysis": (
+                portable_report_path(
+                    output_dir / "same_view_analysis_response.txt"
+                )
                 if same_view_evaluation is not None
+                else None
+            ),
+            "same_view_identity": (
+                portable_report_path(
+                    output_dir / "same_view_identity_response.txt"
+                )
+                if same_view_evaluation is not None
+                and same_view_evaluation.identity_prediction is not None
                 else None
             ),
         },

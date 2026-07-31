@@ -150,6 +150,11 @@ class M4MemoryLoopTests(unittest.TestCase):
             duplicate_summary = loop.complete_run(duplicate_run.id)
 
             cards = loop.object_cards(max_reference_views=2)
+            text_cards = loop.object_card_texts()
+            hydrated_cards = loop.object_cards_by_ids(
+                [new_result.object_id],
+                max_reference_views=1,
+            )
             counts = store.status().counts
             self.assertFalse(first_registration.duplicate)
             self.assertTrue(duplicate_registration.duplicate)
@@ -166,6 +171,11 @@ class M4MemoryLoopTests(unittest.TestCase):
             self.assertEqual(len(cards), 1)
             self.assertEqual(cards[0].object_id, new_result.object_id)
             self.assertEqual(len(cards[0].representative_view_paths), 2)
+            self.assertEqual(text_cards[0].representative_view_paths, [])
+            self.assertEqual(
+                len(hydrated_cards[0].representative_view_paths),
+                1,
+            )
             for relative_path in cards[0].representative_view_paths:
                 self.assertTrue(paths.resolve_asset(relative_path).is_file())
 

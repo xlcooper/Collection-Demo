@@ -26,20 +26,13 @@ def test_config(*, max_error_attempts: int = 2) -> AppConfig:
     return AppConfig.model_validate(payload)
 
 
-def response_text(decision: str, object_id: str | None = None) -> str:
-    reasons = {
-        "new": "new_object",
-        "existing": "visual_instance_match",
-        "ignored": "invalid_candidate",
-        "uncertain": "insufficient_evidence",
-    }
+def analysis_text(*, valid: bool = True) -> str:
     return json.dumps(
         {
-            "decision": decision,
-            "matched_object_id": object_id,
+            "validity": "valid" if valid else "ignored",
             "confidence": 0.95,
-            "reason_code": reasons[decision],
-            "short_reason": "deterministic M5 response",
+            "reason_code": "valid_candidate" if valid else "invalid_candidate",
+            "short_reason": "deterministic candidate analysis",
             "annotation": (
                 {
                     "coarse_category": "cup",
@@ -50,9 +43,26 @@ def response_text(decision: str, object_id: str | None = None) -> str:
                     "description": "white ceramic cup with handle",
                     "annotation_confidence": 0.96,
                 }
-                if decision in {"new", "existing"}
+                if valid
                 else None
             ),
+        }
+    )
+
+
+def identity_text(decision: str, object_id: str | None = None) -> str:
+    reasons = {
+        "new": "new_object",
+        "existing": "visual_instance_match",
+        "uncertain": "insufficient_evidence",
+    }
+    return json.dumps(
+        {
+            "decision": decision,
+            "matched_object_id": object_id,
+            "confidence": 0.95,
+            "reason_code": reasons[decision],
+            "short_reason": "deterministic identity response",
         }
     )
 
@@ -149,11 +159,10 @@ class FakeQwenRuntime:
                 if item["type"] == "text"
             )
             object_ids = re.findall(r'"object_id": "(obj_[^"]+)"', all_text)
-            raw_text = (
-                response_text("existing", object_ids[0])
-                if object_ids
-                else response_text("new")
-            )
+            if "candidate-analysis component" in all_text:
+                raw_text = analysis_text()
+            else:
+                raw_text = identity_text("existing", object_ids[0])
         return MllmPrediction(
             raw_text=raw_text,
             input_tokens=100,
@@ -220,6 +229,26 @@ class M5PipelineTests(unittest.TestCase):
                 first_decision["annotation"]["fine_category"],
                 "coffee cup",
             )
+            self.assertEqual(first_decision["qwen_calls"], 1)
+            second_decision = report["images"][1]["decisions"][0]
+            self.assertEqual(second_decision["qwen_calls"], 2)
+            self.assertTrue(
+                first_decision["retrieval"]["memory_lookup_performed"]
+            )
+            self.assertEqual(
+                first_decision["retrieval"]["available_object_cards"],
+                0,
+            )
+            self.assertEqual(
+                second_decision["retrieval"]["available_object_cards"],
+                1,
+            )
+            self.assertEqual(
+                second_decision["retrieval"]["shortlisted"][0]["object_id"],
+                first_decision["object_id"],
+            )
+            self.assertEqual(report["models"]["qwen"]["analysis_calls"], 2)
+            self.assertEqual(report["models"]["qwen"]["identity_calls"], 1)
             self.assertLess(events.index("sam.close"), events.index("qwen.load"))
             self.assertTrue(paths.resolve_asset(report["run_report"]).is_file())
 
@@ -231,7 +260,7 @@ class M5PipelineTests(unittest.TestCase):
             events: list[str] = []
             qwen = FakeQwenRuntime(
                 events,
-                responses=["not json", response_text("new")],
+                responses=["not json", analysis_text()],
             )
             paths = MemoryPaths(root / "memory")
             pipeline = ObjectMemoryPipeline(
@@ -251,19 +280,29 @@ class M5PipelineTests(unittest.TestCase):
             self.assertEqual(report["core_counts"]["decisions"], 1)
             self.assertEqual(report["images"][0]["decisions"][0]["decision"], "new")
             self.assertEqual(
-                report["images"][0]["decisions"][0]["qwen_call_attempts"],
+                report["images"][0]["decisions"][0]["pipeline_attempts"],
+                2,
+            )
+            self.assertEqual(
+                report["images"][0]["decisions"][0]["qwen_calls"],
                 2,
             )
 
     def test_uncertain_is_persisted_without_immediate_second_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            image = root / "image.png"
-            Image.new("RGB", (20, 20), (128, 128, 128)).save(image)
+            first = root / "first.png"
+            second = root / "second.png"
+            Image.new("RGB", (20, 20), (128, 128, 128)).save(first)
+            Image.new("RGB", (20, 20), (64, 64, 64)).save(second)
             events: list[str] = []
             qwen = FakeQwenRuntime(
                 events,
-                responses=[response_text("uncertain")],
+                responses=[
+                    analysis_text(),
+                    analysis_text(),
+                    identity_text("uncertain"),
+                ],
             )
             paths = MemoryPaths(root / "memory")
             pipeline = ObjectMemoryPipeline(
@@ -274,12 +313,12 @@ class M5PipelineTests(unittest.TestCase):
             )
 
             report = pipeline.run(
-                [image],
+                [first, second],
                 run_id="run_m5_uncertain",
             )
 
             self.assertEqual(report["status"], "completed_with_errors")
-            self.assertEqual(qwen.call_count, 1)
+            self.assertEqual(qwen.call_count, 3)
             self.assertEqual(report["run"]["proposal_counts"]["pending"], 1)
             self.assertEqual(report["run"]["decision_counts"]["uncertain"], 1)
 

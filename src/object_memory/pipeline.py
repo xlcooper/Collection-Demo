@@ -15,13 +15,13 @@ from PIL import Image
 
 from .assets import MemoryPaths
 from .config import AppConfig, config_digest
-from .identity import IdentityEvaluation, evaluate_candidate
+from .identity import CandidateEvaluation, evaluate_candidate
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
 from .mllm_adapter import MllmPrediction
 from .sam3_adapter import Sam3Prediction
 from .sam3_postprocess import process_candidates
-from .schemas import Proposal, Run, SourceImage
+from .schemas import ObjectCard, Proposal, Run, SourceImage
 
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -228,7 +228,17 @@ class ObjectMemoryPipeline:
                     "must be verified empirically"
                 ),
                 "model_residency": "SAM3 then release; Qwen then release",
-                "qwen_call_unit": "one call per candidate per object-card batch",
+                "qwen_call_policy": (
+                    "one analysis call per candidate; one identity call only for "
+                    "valid candidates when memory cards exist"
+                ),
+                "object_card_selection": (
+                    "rank all card text locally, then send only the top semantic "
+                    "shortlist with reference images"
+                ),
+                "object_card_shortlist_size": (
+                    self.config.mllm_pipeline.object_card_shortlist_size
+                ),
                 "uncertain_policy": "persist pending; do not immediately repeat",
                 "error_attempts": self.config.mllm_pipeline.max_error_attempts,
             },
@@ -412,6 +422,8 @@ class ObjectMemoryPipeline:
             "inference_seconds": 0.0,
             "input_tokens": 0,
             "generated_tokens": 0,
+            "analysis_calls": 0,
+            "identity_calls": 0,
             "peak_memory_mib": 0.0,
             "placement": [],
             "snapshot": None,
@@ -492,19 +504,15 @@ class ObjectMemoryPipeline:
         metrics: dict[str, Any],
     ) -> dict[str, Any]:
         errors: list[str] = []
+        total_qwen_calls = 0
         for call_attempt in range(
             1,
             self.config.mllm_pipeline.max_error_attempts + 1,
         ):
             recorder = RecordingPredictor(self.mllm_runtime)
-            evaluation: IdentityEvaluation | None = None
+            evaluation: CandidateEvaluation | None = None
             metrics_added = False
             try:
-                cards = self.loop.object_cards(
-                    max_reference_views=(
-                        self.config.mllm_pipeline.max_reference_views_per_object
-                    )
-                )
                 evaluation = evaluate_candidate(
                     recorder,
                     candidate_crop=self.paths.resolve_asset(proposal.crop_path or ""),
@@ -512,11 +520,13 @@ class ObjectMemoryPipeline:
                         proposal.overlay_path or ""
                     ),
                     sam_prompt=proposal.prompt,
-                    cards=cards,
+                    get_card_texts=self.loop.object_card_texts,
+                    get_reference_cards=self._reference_cards,
                     card_assets=self.paths,
                     settings=self.config.mllm_pipeline,
                 )
                 self._add_prediction_metrics(recorder.predictions, metrics)
+                total_qwen_calls += len(recorder.predictions)
                 metrics_added = True
                 raw_path = self._write_raw_response(
                     run.id,
@@ -548,14 +558,32 @@ class ObjectMemoryPipeline:
                         if response.annotation is not None
                         else None
                     ),
-                    "qwen_call_attempts": call_attempt,
-                    "object_cards": len(cards),
+                    "candidate_analysis": evaluation.analysis.model_dump(mode="json"),
+                    "retrieval": {
+                        "memory_lookup_performed": (
+                            evaluation.memory_lookup_performed
+                        ),
+                        "available_object_cards": (
+                            evaluation.available_object_cards
+                        ),
+                        "shortlisted": [
+                            item.as_dict() for item in evaluation.retrieved_cards
+                        ],
+                    },
+                    "identity_confirmation": (
+                        evaluation.identity_response.model_dump(mode="json")
+                        if evaluation.identity_response is not None
+                        else None
+                    ),
+                    "qwen_calls": total_qwen_calls,
+                    "pipeline_attempts": call_attempt,
                     "raw_response": raw_path,
                     "errors": errors,
                 }
             except Exception as exc:  # noqa: BLE001 - bounded model retry
                 if not metrics_added:
                     self._add_prediction_metrics(recorder.predictions, metrics)
+                    total_qwen_calls += len(recorder.predictions)
                 message = f"{type(exc).__name__}: {exc}"
                 errors.append(message)
                 self._write_raw_response(
@@ -586,7 +614,11 @@ class ObjectMemoryPipeline:
             "reason_code": None,
             "short_reason": None,
             "annotation": None,
-            "qwen_call_attempts": len(errors),
+            "candidate_analysis": None,
+            "retrieval": None,
+            "identity_confirmation": None,
+            "qwen_calls": total_qwen_calls,
+            "pipeline_attempts": len(errors),
             "errors": errors,
         }
 
@@ -603,6 +635,17 @@ class ObjectMemoryPipeline:
             "overlay": proposal.overlay_path,
         }
 
+    def _reference_cards(
+        self,
+        object_ids: Sequence[str],
+    ) -> list[ObjectCard]:
+        return self.loop.object_cards_by_ids(
+            list(object_ids),
+            max_reference_views=(
+                self.config.mllm_pipeline.max_reference_views_per_object
+            ),
+        )
+
     @staticmethod
     def _add_prediction_metrics(
         predictions: Sequence[MllmPrediction],
@@ -617,6 +660,9 @@ class ObjectMemoryPipeline:
         metrics["generated_tokens"] += sum(
             prediction.generated_tokens for prediction in predictions
         )
+        if predictions:
+            metrics["analysis_calls"] += 1
+            metrics["identity_calls"] += max(0, len(predictions) - 1)
 
     def _write_raw_response(
         self,
@@ -625,7 +671,7 @@ class ObjectMemoryPipeline:
         call_attempt: int,
         predictions: Sequence[MllmPrediction],
         *,
-        evaluation: IdentityEvaluation | None,
+        evaluation: CandidateEvaluation | None,
         error: str | None,
     ) -> str | None:
         path = (
@@ -640,14 +686,43 @@ class ObjectMemoryPipeline:
                 if evaluation is not None
                 else None
             ),
+            "candidate_analysis": (
+                evaluation.analysis.model_dump(mode="json")
+                if evaluation is not None
+                else None
+            ),
+            "retrieval": (
+                {
+                    "memory_lookup_performed": (
+                        evaluation.memory_lookup_performed
+                    ),
+                    "available_object_cards": evaluation.available_object_cards,
+                    "shortlisted": [
+                        item.as_dict() for item in evaluation.retrieved_cards
+                    ],
+                }
+                if evaluation is not None
+                else None
+            ),
+            "identity_confirmation": (
+                evaluation.identity_response.model_dump(mode="json")
+                if evaluation is not None
+                and evaluation.identity_response is not None
+                else None
+            ),
             "predictions": [
                 {
+                    "stage": (
+                        "candidate_analysis"
+                        if index == 0
+                        else "identity_confirmation"
+                    ),
                     "raw_text": prediction.raw_text,
                     "input_tokens": prediction.input_tokens,
                     "generated_tokens": prediction.generated_tokens,
                     "inference_seconds": prediction.inference_seconds,
                 }
-                for prediction in predictions
+                for index, prediction in enumerate(predictions)
             ],
         }
         try:
@@ -677,7 +752,11 @@ class ObjectMemoryPipeline:
                         "reason_code": None,
                         "short_reason": None,
                         "annotation": None,
-                        "qwen_call_attempts": 0,
+                        "candidate_analysis": None,
+                        "retrieval": None,
+                        "identity_confirmation": None,
+                        "qwen_calls": 0,
+                        "pipeline_attempts": 0,
                         "errors": [message],
                     }
                 )
