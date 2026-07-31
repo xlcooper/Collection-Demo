@@ -51,13 +51,6 @@ class Sam3PipelineConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt_strategy: Literal[
-        "automatic_point_grid",
-        "explicit_category_list",
-    ] = "automatic_point_grid"
-    # Retained only for historical M2 verification. The main workflow does not use
-    # category prompts when prompt_strategy is automatic_point_grid.
-    prompts: list[str] = Field(default_factory=list)
     points_per_side: int = Field(default=16, ge=2, le=64)
     points_per_batch: int = Field(default=32, ge=1, le=256)
     confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
@@ -75,16 +68,6 @@ class Sam3PipelineConfig(BaseModel):
     overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)
     overlay_color: tuple[int, int, int] = (255, 64, 64)
 
-    @field_validator("prompts")
-    @classmethod
-    def normalize_prompts(cls, values: list[str]) -> list[str]:
-        normalized = [value.strip() for value in values]
-        if any(not value for value in normalized):
-            raise ValueError("SAM3 prompts must not be empty")
-        if len(set(normalized)) != len(normalized):
-            raise ValueError("SAM3 prompts must be unique")
-        return normalized
-
     @field_validator("crop_background_color", "overlay_color")
     @classmethod
     def validate_rgb_color(
@@ -100,14 +83,6 @@ class Sam3PipelineConfig(BaseModel):
             raise ValueError(
                 "min_mask_area_ratio must be smaller than max_mask_area_ratio"
             )
-        if self.prompt_strategy == "automatic_point_grid" and self.prompts:
-            raise ValueError(
-                "automatic_point_grid must not include category prompts"
-            )
-        if self.prompt_strategy == "explicit_category_list" and not self.prompts:
-            raise ValueError(
-                "explicit_category_list requires at least one category prompt"
-            )
         return self
 
 
@@ -117,8 +92,8 @@ class MllmPipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt_version: Literal[
-        "m5-image-batch-memory-reasoning-v1"
-    ] = "m5-image-batch-memory-reasoning-v1"
+        "image-batch-memory-reasoning-v1"
+    ] = "image-batch-memory-reasoning-v1"
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=4096, gt=0)
     max_reference_views_per_object: int = Field(default=2, gt=0)

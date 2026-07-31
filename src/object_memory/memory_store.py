@@ -420,7 +420,7 @@ class MemoryStore:
             )
 
     def record_filtered_proposal(self, proposal: Proposal) -> None:
-        """Persist an M2-filtered candidate without sending it to Qwen."""
+        """Persist a filtered candidate without sending it to Qwen."""
 
         if proposal.status is not ProposalStatus.FILTERED:
             raise MemoryStoreError("Filtered proposals require status='filtered'.")

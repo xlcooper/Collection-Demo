@@ -33,5 +33,6 @@ venv/
 # Editors and operating systems
 .idea/
 .vscode/
+.ipynb_checkpoints/
 .DS_Store
 Thumbs.db

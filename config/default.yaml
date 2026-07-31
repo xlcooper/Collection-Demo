@@ -9,8 +9,6 @@ models:
   qwen_model_id: Qwen/Qwen3-VL-8B-Instruct-FP8
 
 sam3_pipeline:
-  prompt_strategy: automatic_point_grid
-  prompts: []
   points_per_side: 16
   points_per_batch: 32
   confidence_threshold: 0.88
@@ -25,7 +23,7 @@ sam3_pipeline:
   overlay_color: [255, 64, 64]
 
 mllm_pipeline:
-  prompt_version: m5-image-batch-memory-reasoning-v1
+  prompt_version: image-batch-memory-reasoning-v1
   max_pixels: 1048576
   max_new_tokens: 4096
   max_reference_views_per_object: 2

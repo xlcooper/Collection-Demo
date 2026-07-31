@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the real phase-one batch object-memory workflow."""
+"""Run the batch object-memory Demo workflow."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--revision")
     parser.add_argument("--allow-network", action="store_true")
     parser.add_argument(
-        "--validate-phase-one",
+        "--validate-demo",
         action="store_true",
         help=(
             "Require coverage for at least two new objects, one existing match, "
@@ -88,7 +88,7 @@ def failure_report(exc: Exception) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "test": "m5_end_to_end_batch",
+        "test": "object_memory_demo_batch",
         "status": "failed",
         "error": {
             "type": type(exc).__name__,
@@ -97,7 +97,7 @@ def failure_report(exc: Exception) -> dict[str, Any]:
     }
 
 
-def add_phase_one_coverage(report: dict[str, Any]) -> None:
+def add_demo_coverage(report: dict[str, Any]) -> None:
     run = report["run"]
     decisions = run["decision_counts"]
     proposals = run["proposal_counts"]
@@ -116,7 +116,7 @@ def add_phase_one_coverage(report: dict[str, Any]) -> None:
             proposals["pending"] == 0 and proposals["failed"] == 0
         ),
     }
-    report["phase_one_coverage"] = coverage
+    report["demo_coverage"] = coverage
     if report["status"] != "passed" or not all(coverage.values()):
         report["pipeline_status"] = report["status"]
         report["status"] = "failed"
@@ -126,11 +126,6 @@ def main() -> int:
     args = parse_args()
     try:
         config = runtime_config(load_config(args.config), args)
-        if config.sam3_pipeline.prompt_strategy != "automatic_point_grid":
-            raise ValueError(
-                "The main workflow requires sam3_pipeline.prompt_strategy="
-                "automatic_point_grid"
-            )
         input_root = Path(args.input_dir).expanduser().resolve()
         memory_root = resolve_memory_root(
             config,
@@ -161,8 +156,8 @@ def main() -> int:
             mllm_runtime=mllm_runtime,
         )
         report = pipeline.run(image_paths)
-        if args.validate_phase_one:
-            add_phase_one_coverage(report)
+        if args.validate_demo:
+            add_demo_coverage(report)
             write_json_atomic(paths.resolve_asset(report["run_report"]), report)
         if args.report:
             write_json_atomic(Path(args.report).expanduser().resolve(), report)

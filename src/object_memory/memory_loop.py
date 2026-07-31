@@ -38,7 +38,7 @@ class ObservationAssets:
 
 
 class MemoryLoop:
-    """Expose readable M4 operations while keeping SQL inside MemoryStore."""
+    """Expose readable memory operations while keeping SQL inside MemoryStore."""
 
     def __init__(self, store: MemoryStore) -> None:
         self.store = store

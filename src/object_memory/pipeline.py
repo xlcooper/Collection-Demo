@@ -1,4 +1,4 @@
-"""M5 batch orchestration for SAM3, Qwen, and persistent object memory."""
+"""Batch orchestration for SAM3, Qwen, and persistent object memory."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ class ImageWork:
 
 
 class RecordingPredictor:
-    """Retain raw model text even when M3 response parsing fails."""
+    """Retain raw model text even when response parsing fails."""
 
     def __init__(self, runtime: MllmRuntime) -> None:
         self.runtime = runtime
@@ -220,12 +220,12 @@ class ObjectMemoryPipeline:
         report = {
             "schema_version": 2,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "test": "m5_end_to_end_batch",
+            "test": "object_memory_demo_batch",
             "status": report_status,
             "run": summary.as_dict(),
             "checks": checks,
             "strategy": {
-                "prompt_strategy": self.config.sam3_pipeline.prompt_strategy,
+                "prompt_strategy": "automatic_point_grid",
                 "external_category_prompts": False,
                 "points_per_side": self.config.sam3_pipeline.points_per_side,
                 "points_per_batch": self.config.sam3_pipeline.points_per_batch,

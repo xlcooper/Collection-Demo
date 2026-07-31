@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -124,16 +124,10 @@ class Sam3Adapter:
         self._processor = processor
         self._torch = torch
 
-    def predict(
-        self,
-        image: Image.Image,
-        prompts: Sequence[str] | None = None,
-    ) -> Sam3Prediction:
-        """Generate candidates automatically, or retain explicit prompts for M2 replay."""
+    def predict(self, image: Image.Image) -> Sam3Prediction:
+        """Generate class-agnostic candidates from an automatic point grid."""
 
-        if prompts is None:
-            return self._predict_automatic(image)
-        return self._predict_with_text_prompts(image, prompts)
+        return self._predict_automatic(image)
 
     def _predict_automatic(self, image: Image.Image) -> Sam3Prediction:
         if self._processor is None:
@@ -182,48 +176,6 @@ class Sam3Adapter:
         return Sam3Prediction(
             candidates=tuple(candidates),
             prompt_counts={AUTOMATIC_CANDIDATE_SOURCE: len(candidates)},
-            inference_seconds=inference_seconds,
-        )
-
-    def _predict_with_text_prompts(
-        self,
-        image: Image.Image,
-        prompts: Sequence[str],
-    ) -> Sam3Prediction:
-        normalized_prompts = [prompt.strip() for prompt in prompts]
-        if not normalized_prompts or any(not prompt for prompt in normalized_prompts):
-            raise ValueError("At least one non-empty SAM3 prompt is required")
-        if len(set(normalized_prompts)) != len(normalized_prompts):
-            raise ValueError("SAM3 prompts must be unique")
-        if self._processor is None:
-            self.load()
-
-        torch = self._torch
-        processor = self._processor
-        if torch is None or processor is None:
-            raise RuntimeError("SAM3 adapter failed to initialize")
-
-        candidates: list[RawSamCandidate] = []
-        prompt_counts: dict[str, int] = {}
-        inference_started = time.perf_counter()
-        with torch.inference_mode(), torch.autocast(
-            device_type="cuda", dtype=torch.bfloat16
-        ):
-            state = processor.set_image(image.convert("RGB"))
-            for prompt_index, prompt in enumerate(normalized_prompts):
-                output = processor.set_text_prompt(state=state, prompt=prompt)
-                prompt_candidates = self._extract_candidates(
-                    output,
-                    prompt=prompt,
-                    prompt_index=prompt_index,
-                )
-                prompt_counts[prompt] = len(prompt_candidates)
-                candidates.extend(prompt_candidates)
-        torch.cuda.synchronize()
-        inference_seconds = time.perf_counter() - inference_started
-        return Sam3Prediction(
-            candidates=tuple(candidates),
-            prompt_counts=prompt_counts,
             inference_seconds=inference_seconds,
         )
 
@@ -304,48 +256,6 @@ class Sam3Adapter:
             float(x_indices.max() + 1),
             float(y_indices.max() + 1),
         )
-
-    def _extract_candidates(
-        self,
-        output: dict[str, Any],
-        *,
-        prompt: str,
-        prompt_index: int,
-    ) -> list[RawSamCandidate]:
-        torch = self._torch
-        if torch is None:
-            raise RuntimeError("SAM3 adapter is not loaded")
-
-        masks = torch.as_tensor(output["masks"]).detach().cpu()
-        boxes = torch.as_tensor(output["boxes"]).detach().cpu().reshape(-1, 4)
-        scores = torch.as_tensor(output["scores"]).detach().cpu().flatten()
-        if masks.ndim == 4 and masks.shape[1] == 1:
-            masks = masks[:, 0]
-        if masks.ndim == 2:
-            masks = masks.unsqueeze(0)
-        if masks.ndim != 3:
-            raise ValueError(f"Unexpected SAM3 mask shape: {tuple(masks.shape)}")
-
-        count = int(masks.shape[0])
-        if int(boxes.shape[0]) != count or int(scores.shape[0]) != count:
-            raise ValueError(
-                "SAM3 returned different numbers of masks, boxes, and scores"
-            )
-
-        candidates: list[RawSamCandidate] = []
-        for candidate_index in range(count):
-            box = tuple(float(value) for value in boxes[candidate_index].tolist())
-            candidate = RawSamCandidate(
-                raw_candidate_id=(
-                    f"prompt_{prompt_index:03d}_candidate_{candidate_index:03d}"
-                ),
-                prompt=prompt,
-                score=float(scores[candidate_index].item()),
-                bbox_xyxy=box,
-                mask=(masks[candidate_index] > 0.5).numpy(),
-            )
-            candidates.append(candidate)
-        return candidates
 
     @property
     def peak_memory_mib(self) -> float:
