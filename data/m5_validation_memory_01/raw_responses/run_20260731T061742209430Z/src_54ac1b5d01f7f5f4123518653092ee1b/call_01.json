@@ -1,0 +1,190 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "image_batch_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_7c491bb8f8b24d30ae8f84ffbe11fe82",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "清晰的鼠标外形和按钮结构",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "浅灰色塑料鼠标，带圆形滚轮和侧边按钮，符合人体工学设计",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.92,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡中鼠标外形、颜色、材质完全匹配",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "浅灰色塑料鼠标，带圆形滚轮和侧边按钮，符合人体工学设计，与记忆卡中实例一致",
+          "annotation_confidence": 0.95
+        }
+      },
+      {
+        "proposal_id": "prop_4a76a325dca742439c676ab8c07214d2",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "仅包含背景表面，无独立物体",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "仅背景区域，无独立物体",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_9d2e12640308420c90f3bfe3d145f365",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "圆形凹陷结构，与记忆卡中容器部分匹配",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "unknown",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "dark"
+          ],
+          "shape": "rectangular",
+          "description": "深色长条形物体，表面光滑，可能是容器底部或边缘",
+          "annotation_confidence": 0.85
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c3ea64b70a104e668db2a6d86e46c29b",
+        "confidence": 0.88,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡中深色容器部分形状和材质匹配",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "unknown",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "dark"
+          ],
+          "shape": "rectangular",
+          "description": "深色长条形塑料容器部分，表面光滑，与记忆卡中实例一致",
+          "annotation_confidence": 0.85
+        }
+      },
+      {
+        "proposal_id": "prop_d8e76cf49c0142e0b90d67600aaa7ef6",
+        "validity": "valid",
+        "validity_confidence": 0.97,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "透明塑料瓶，带白色盖子和提手，内含液体",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white",
+            "clear"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料瓶，白色瓶盖，带提手，内含浅色液体",
+          "annotation_confidence": 0.96
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_04b48fc40db34973b596cffc25edb655",
+        "confidence": 0.94,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡中塑料瓶外形、颜色、材质完全匹配",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white",
+            "clear"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料瓶，白色瓶盖，带提手，内含浅色液体，与记忆卡中实例一致",
+          "annotation_confidence": 0.96
+        }
+      },
+      {
+        "proposal_id": "prop_44c4919dc9de456fb4bdb374a0042d47",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "仅包含背景表面，无独立物体",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "仅背景区域，无独立物体",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_759ea2679f624f0ca328588d02bee854",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "仅包含背景表面，无独立物体",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "仅背景区域，无独立物体",
+        "final_annotation": null
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 8,
+    "object_card_ids": [
+      "obj_9a792143c34d4a85886be4d7e6a2bde1",
+      "obj_c78b6944c3604d7ba49fc4549497fb76",
+      "obj_c3ea64b70a104e668db2a6d86e46c29b",
+      "obj_04b48fc40db34973b596cffc25edb655",
+      "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+      "obj_cf0844c8df3346fbb6b62b1c1ac738cc",
+      "obj_d2662fcf6a9f48cdaa72bf8d3cf00774",
+      "obj_6f416072296a47fc909be6a4d78e63ec"
+    ],
+    "reference_image_count": 13,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "stage": "image_batch_reasoning",
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_7c491bb8f8b24d30ae8f84ffbe11fe82\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"清晰的鼠标外形和按钮结构\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"浅灰色塑料鼠标，带圆形滚轮和侧边按钮，符合人体工学设计\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.92,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡中鼠标外形、颜色、材质完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"浅灰色塑料鼠标，带圆形滚轮和侧边按钮，符合人体工学设计，与记忆卡中实例一致\",\n        \"annotation_confidence\": 0.95\n      }\n    },\n    {\n      \"proposal_id\": \"prop_4a76a325dca742439c676ab8c07214d2\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"仅包含背景表面，无独立物体\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"仅背景区域，无独立物体\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_9d2e12640308420c90f3bfe3d145f365\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"圆形凹陷结构，与记忆卡中容器部分匹配\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"unknown\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"dark\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"深色长条形物体，表面光滑，可能是容器底部或边缘\",\n        \"annotation_confidence\": 0.85\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c3ea64b70a104e668db2a6d86e46c29b\",\n      \"confidence\": 0.88,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡中深色容器部分形状和材质匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"unknown\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"dark\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"深色长条形塑料容器部分，表面光滑，与记忆卡中实例一致\",\n        \"annotation_confidence\": 0.85\n      }\n    },\n    {\n      \"proposal_id\": \"prop_d8e76cf49c0142e0b90d67600aaa7ef6\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.97,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"透明塑料瓶，带白色盖子和提手，内含液体\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\", \"clear\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料瓶，白色瓶盖，带提手，内含浅色液体\",\n        \"annotation_confidence\": 0.96\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_04b48fc40db34973b596cffc25edb655\",\n      \"confidence\": 0.94,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡中塑料瓶外形、颜色、材质完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\", \"clear\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料瓶，白色瓶盖，带提手，内含浅色液体，与记忆卡中实例一致\",\n        \"annotation_confidence\": 0.96\n      }\n    },\n    {\n      \"proposal_id\": \"prop_44c4919dc9de456fb4bdb374a0042d47\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"仅包含背景表面，无独立物体\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"仅背景区域，无独立物体\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_759ea2679f624f0ca328588d02bee854\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"仅包含背景表面，无独立物体\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"仅背景区域，无独立物体\",\n      \"final_annotation\": null\n    }\n  ]\n}",
+      "input_tokens": 11473,
+      "generated_tokens": 1527,
+      "inference_seconds": 96.80923463404179
+    }
+  ]
+}

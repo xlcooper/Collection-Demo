@@ -1,0 +1,220 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "image_batch_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_392bc391c0b74682b5e78fceb7a8f45f",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "mask isolates only background and shadow, no independent object",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "no independent physical object",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_51ef8bef12cf4efc802dc3377e69be58",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "clear cylindrical container with water and bubbles, distinct base shape",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "glass",
+          "material": [
+            "glass"
+          ],
+          "color": [
+            "clear"
+          ],
+          "shape": "cylindrical",
+          "description": "transparent glass with water, small bubbles rising, rounded base with slight indentation",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_9a792143c34d4a85886be4d7e6a2bde1",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "matches card with clear glass, water, bubbles, and base shape",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "glass",
+          "material": [
+            "glass"
+          ],
+          "color": [
+            "clear"
+          ],
+          "shape": "cylindrical",
+          "description": "transparent glass with water, small bubbles rising, rounded base with slight indentation",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_9f8c5fc7d89b477cb6795d3698486ec7",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "white plastic object with circular button, distinct shape",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "matches card with light gray plastic mouse shape and features",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_2c2841fe3a7c4e54b012536b804215e1",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "white plastic object with curved shape, distinct from mouse",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "matches card with light gray plastic mouse shape and features",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_322e36b467a543b18cf7667539701af7",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "white plastic object with circular button, distinct shape",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "matches card with light gray plastic mouse shape and features",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "ergonomic computer mouse with scroll wheel, central seam, and side buttons",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_5542e4e8f33f4d8d9a0cb8b4c57f625e",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "dark, indistinct shape, no clear object identity or features",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "no identifiable object",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_9ba2a7ce370a49ef90d941aa92b0afbb",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "mask isolates only background and shadow, no independent object",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "no independent physical object",
+        "final_annotation": null
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 2,
+    "object_card_ids": [
+      "obj_9a792143c34d4a85886be4d7e6a2bde1",
+      "obj_c78b6944c3604d7ba49fc4549497fb76"
+    ],
+    "reference_image_count": 2,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "stage": "image_batch_reasoning",
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_392bc391c0b74682b5e78fceb7a8f45f\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"mask isolates only background and shadow, no independent object\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"no independent physical object\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_51ef8bef12cf4efc802dc3377e69be58\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"clear cylindrical container with water and bubbles, distinct base shape\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"glass\",\n        \"material\": [\"glass\"],\n        \"color\": [\"clear\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"transparent glass with water, small bubbles rising, rounded base with slight indentation\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_9a792143c34d4a85886be4d7e6a2bde1\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"matches card with clear glass, water, bubbles, and base shape\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"glass\",\n        \"material\": [\"glass\"],\n        \"color\": [\"clear\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"transparent glass with water, small bubbles rising, rounded base with slight indentation\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_9f8c5fc7d89b477cb6795d3698486ec7\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"white plastic object with circular button, distinct shape\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"matches card with light gray plastic mouse shape and features\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_2c2841fe3a7c4e54b012536b804215e1\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"white plastic object with curved shape, distinct from mouse\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"matches card with light gray plastic mouse shape and features\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_322e36b467a543b18cf7667539701af7\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"white plastic object with circular button, distinct shape\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"matches card with light gray plastic mouse shape and features\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"ergonomic computer mouse with scroll wheel, central seam, and side buttons\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_5542e4e8f33f4d8d9a0cb8b4c57f625e\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"dark, indistinct shape, no clear object identity or features\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"no identifiable object\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_9ba2a7ce370a49ef90d941aa92b0afbb\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"mask isolates only background and shadow, no independent object\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"no independent physical object\",\n      \"final_annotation\": null\n    }\n  ]\n}",
+      "input_tokens": 11008,
+      "generated_tokens": 1824,
+      "inference_seconds": 114.84742635861039
+    }
+  ]
+}

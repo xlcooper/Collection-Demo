@@ -1,0 +1,32 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "final_response": {
+    "decision": "new",
+    "matched_object_id": null,
+    "confidence": 0.95,
+    "reason_code": "new_object",
+    "short_reason": "valid object, no matching reference card",
+    "annotation": {
+      "coarse_category": "computer peripheral",
+      "fine_category": "computer mouse",
+      "material": [
+        "plastic"
+      ],
+      "color": [
+        "light gray"
+      ],
+      "shape": "ergonomic curved shape",
+      "description": "smooth light gray plastic computer mouse with a single scroll button and a central groove, viewed from a slight angle",
+      "annotation_confidence": 0.98
+    }
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"decision\": \"new\",\n  \"matched_object_id\": null,\n  \"confidence\": 0.95,\n  \"reason_code\": \"new_object\",\n  \"short_reason\": \"valid object, no matching reference card\",\n  \"annotation\": {\n    \"coarse_category\": \"computer peripheral\",\n    \"fine_category\": \"computer mouse\",\n    \"material\": [\"plastic\"],\n    \"color\": [\"light gray\"],\n    \"shape\": \"ergonomic curved shape\",\n    \"description\": \"smooth light gray plastic computer mouse with a single scroll button and a central groove, viewed from a slight angle\",\n    \"annotation_confidence\": 0.98\n  }\n}",
+      "input_tokens": 1931,
+      "generated_tokens": 142,
+      "inference_seconds": 9.729207523167133
+    }
+  ]
+}

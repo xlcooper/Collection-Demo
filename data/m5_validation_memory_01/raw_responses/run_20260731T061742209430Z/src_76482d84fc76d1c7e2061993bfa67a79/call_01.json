@@ -1,0 +1,247 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "image_batch_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_23acc5f3c42644f2a012ca390d492179",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "仅包含阴影和背景，无独立物体",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "无独立物体",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_929fac80a8cf47caa492eb356c0c8130",
+        "validity": "ignored",
+        "validity_confidence": 0.0,
+        "validity_reason_code": "invalid_candidate",
+        "validity_short_reason": "仅包含背景和模糊反射，无独立物体",
+        "temporary_annotation": null,
+        "decision": "ignored",
+        "matched_object_id": null,
+        "confidence": 0.0,
+        "reason_code": "invalid_candidate",
+        "short_reason": "无独立物体",
+        "final_annotation": null
+      },
+      {
+        "proposal_id": "prop_be72bf8fae404d5ba6ba03ab419be5bf",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "透明塑料瓶，带白色盖子，内有液体",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "clear",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料瓶，白色瓶盖，内含浅色液体，瓶身有刻度和标记",
+          "annotation_confidence": 0.95
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 0.95,
+        "reason_code": "new_object",
+        "short_reason": "无匹配记忆卡",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "clear",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料瓶，白色瓶盖，内含浅色液体，瓶身有刻度和标记",
+          "annotation_confidence": 0.95
+        }
+      },
+      {
+        "proposal_id": "prop_5edc9dd70bef4ad89d771b9297b5b33e",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "白色人体工学鼠标，带圆形按钮",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.98
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_f567004825bb4c2fba5e3bf886669fc7",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "白色塑料支架，带圆形按钮",
+        "temporary_annotation": {
+          "coarse_category": "accessory",
+          "fine_category": "monitor stand",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "rectangular",
+          "description": "白色塑料支架，带圆形按钮，用于固定显示器",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.95,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.95
+        }
+      },
+      {
+        "proposal_id": "prop_9a875f4f7b5f47188c593d0366596bbe",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "白色塑料支架，带圆形按钮",
+        "temporary_annotation": {
+          "coarse_category": "accessory",
+          "fine_category": "monitor stand",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "rectangular",
+          "description": "白色塑料支架，带圆形按钮，用于固定显示器",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.95,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.95
+        }
+      },
+      {
+        "proposal_id": "prop_20354f05786c459db439c98f52a54770",
+        "validity": "valid",
+        "validity_confidence": 0.9,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "深色长条形物体，表面光滑",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "unknown",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "dark"
+          ],
+          "shape": "rectangular",
+          "description": "深色长条形物体，表面光滑，可能是杯底或容器的一部分",
+          "annotation_confidence": 0.9
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c3ea64b70a104e668db2a6d86e46c29b",
+        "confidence": 0.9,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_c3ea64b70a104e668db2a6d86e46c29b视觉匹配",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "unknown",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "dark"
+          ],
+          "shape": "rectangular",
+          "description": "深色长条形物体，表面光滑，可能是杯底或容器的一部分",
+          "annotation_confidence": 0.9
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 3,
+    "object_card_ids": [
+      "obj_9a792143c34d4a85886be4d7e6a2bde1",
+      "obj_c78b6944c3604d7ba49fc4549497fb76",
+      "obj_c3ea64b70a104e668db2a6d86e46c29b"
+    ],
+    "reference_image_count": 5,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "stage": "image_batch_reasoning",
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_23acc5f3c42644f2a012ca390d492179\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"仅包含阴影和背景，无独立物体\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"无独立物体\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_929fac80a8cf47caa492eb356c0c8130\",\n      \"validity\": \"ignored\",\n      \"validity_confidence\": 0.0,\n      \"validity_reason_code\": \"invalid_candidate\",\n      \"validity_short_reason\": \"仅包含背景和模糊反射，无独立物体\",\n      \"temporary_annotation\": null,\n      \"decision\": \"ignored\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.0,\n      \"reason_code\": \"invalid_candidate\",\n      \"short_reason\": \"无独立物体\",\n      \"final_annotation\": null\n    },\n    {\n      \"proposal_id\": \"prop_be72bf8fae404d5ba6ba03ab419be5bf\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"透明塑料瓶，带白色盖子，内有液体\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"clear\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料瓶，白色瓶盖，内含浅色液体，瓶身有刻度和标记\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.95,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"无匹配记忆卡\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"clear\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料瓶，白色瓶盖，内含浅色液体，瓶身有刻度和标记\",\n        \"annotation_confidence\": 0.95\n      }\n    },\n    {\n      \"proposal_id\": \"prop_5edc9dd70bef4ad89d771b9297b5b33e\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"白色人体工学鼠标，带圆形按钮\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.98\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_f567004825bb4c2fba5e3bf886669fc7\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"白色塑料支架，带圆形按钮\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"accessory\",\n        \"fine_category\": \"monitor stand\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"白色塑料支架，带圆形按钮，用于固定显示器\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.95,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.95\n      }\n    },\n    {\n      \"proposal_id\": \"prop_9a875f4f7b5f47188c593d0366596bbe\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"白色塑料支架，带圆形按钮\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"accessory\",\n        \"fine_category\": \"monitor stand\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"白色塑料支架，带圆形按钮，用于固定显示器\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.95,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76视觉匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.95\n      }\n    },\n    {\n      \"proposal_id\": \"prop_20354f05786c459db439c98f52a54770\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.90,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"深色长条形物体，表面光滑\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"unknown\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"dark\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"深色长条形物体，表面光滑，可能是杯底或容器的一部分\",\n        \"annotation_confidence\": 0.90\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c3ea64b70a104e668db2a6d86e46c29b\",\n      \"confidence\": 0.90,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_c3ea64b70a104e668db2a6d86e46c29b视觉匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"unknown\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"dark\"],\n        \"shape\": \"rectangular\",\n        \"description\": \"深色长条形物体，表面光滑，可能是杯底或容器的一部分\",\n        \"annotation_confidence\": 0.90\n      }\n    }\n  ]\n}",
+      "input_tokens": 12244,
+      "generated_tokens": 2069,
+      "inference_seconds": 131.05869925767183
+    }
+  ]
+}

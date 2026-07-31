@@ -1,0 +1,262 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "image_batch_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_0aab033225d8487c9ecdf46abc32ff8c",
+        "validity": "valid",
+        "validity_confidence": 0.95,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "独立物体，有明确边界和表面纹理",
+        "temporary_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.92
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配",
+        "final_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_155526257adc42aa88f8c704b76758d0",
+        "validity": "valid",
+        "validity_confidence": 0.97,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "完整独立物体，有标签、二维码和吸管",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic cup",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_9a792143c34d4a85886be4d7e6a2bde1",
+        "confidence": 0.99,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_9a792143c34d4a85886be4d7e6a2bde1完全匹配",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic cup",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体",
+          "annotation_confidence": 0.99
+        }
+      },
+      {
+        "proposal_id": "prop_d475d62a3fbe4485bfc51f7e1ff733bd",
+        "validity": "valid",
+        "validity_confidence": 0.96,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "独立物体，有明确边界和表面纹理",
+        "temporary_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.93
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+        "confidence": 0.98,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配",
+        "final_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.98
+        }
+      },
+      {
+        "proposal_id": "prop_317ecf67ff8942d18fdd1d34f3cd47d1",
+        "validity": "valid",
+        "validity_confidence": 0.94,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "独立物体，有明确边界和表面纹理",
+        "temporary_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.91
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+        "confidence": 0.97,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配",
+        "final_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.97
+        }
+      },
+      {
+        "proposal_id": "prop_0203ed767cc54d7ab429aa5f2bfc4054",
+        "validity": "valid",
+        "validity_confidence": 0.93,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "独立物体，有明确边界和表面纹理",
+        "temporary_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.9
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+        "confidence": 0.96,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配",
+        "final_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.96
+        }
+      },
+      {
+        "proposal_id": "prop_78d46300eda74a87b6907ffe210bce6b",
+        "validity": "valid",
+        "validity_confidence": 0.92,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "独立物体，有明确边界和表面纹理",
+        "temporary_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.88
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+        "confidence": 0.95,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配",
+        "final_annotation": {
+          "coarse_category": "surface",
+          "fine_category": "foam board",
+          "material": [
+            "foam"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "flat with curved edge",
+          "description": "白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影",
+          "annotation_confidence": 0.95
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 8,
+    "object_card_ids": [
+      "obj_9a792143c34d4a85886be4d7e6a2bde1",
+      "obj_c78b6944c3604d7ba49fc4549497fb76",
+      "obj_c3ea64b70a104e668db2a6d86e46c29b",
+      "obj_04b48fc40db34973b596cffc25edb655",
+      "obj_8ff30c6f98c14e5c81e9ecb85fa8b886",
+      "obj_cf0844c8df3346fbb6b62b1c1ac738cc",
+      "obj_d2662fcf6a9f48cdaa72bf8d3cf00774",
+      "obj_6f416072296a47fc909be6a4d78e63ec"
+    ],
+    "reference_image_count": 13,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "stage": "image_batch_reasoning",
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_0aab033225d8487c9ecdf46abc32ff8c\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.95,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"独立物体，有明确边界和表面纹理\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.92\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_8ff30c6f98c14e5c81e9ecb85fa8b886\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_155526257adc42aa88f8c704b76758d0\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.97,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"完整独立物体，有标签、二维码和吸管\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic cup\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_9a792143c34d4a85886be4d7e6a2bde1\",\n      \"confidence\": 0.99,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_9a792143c34d4a85886be4d7e6a2bde1完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic cup\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体\",\n        \"annotation_confidence\": 0.99\n      }\n    },\n    {\n      \"proposal_id\": \"prop_d475d62a3fbe4485bfc51f7e1ff733bd\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.96,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"独立物体，有明确边界和表面纹理\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.93\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_8ff30c6f98c14e5c81e9ecb85fa8b886\",\n      \"confidence\": 0.98,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.98\n      }\n    },\n    {\n      \"proposal_id\": \"prop_317ecf67ff8942d18fdd1d34f3cd47d1\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.94,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"独立物体，有明确边界和表面纹理\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.91\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_8ff30c6f98c14e5c81e9ecb85fa8b886\",\n      \"confidence\": 0.97,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.97\n      }\n    },\n    {\n      \"proposal_id\": \"prop_0203ed767cc54d7ab429aa5f2bfc4054\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.93,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"独立物体，有明确边界和表面纹理\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.90\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_8ff30c6f98c14e5c81e9ecb85fa8b886\",\n      \"confidence\": 0.96,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.96\n      }\n    },\n    {\n      \"proposal_id\": \"prop_78d46300eda74a87b6907ffe210bce6b\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.92,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"独立物体，有明确边界和表面纹理\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.88\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_8ff30c6f98c14e5c81e9ecb85fa8b886\",\n      \"confidence\": 0.95,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_8ff30c6f98c14e5c81e9ecb85fa8b886完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"surface\",\n        \"fine_category\": \"foam board\",\n        \"material\": [\"foam\"],\n        \"color\": [\"white\"],\n        \"shape\": \"flat with curved edge\",\n        \"description\": \"白色泡沫板表面，有细微颗粒纹理，被物体遮挡形成阴影\",\n        \"annotation_confidence\": 0.95\n      }\n    }\n  ]\n}",
+      "input_tokens": 12398,
+      "generated_tokens": 2262,
+      "inference_seconds": 142.4981454834342
+    }
+  ]
+}

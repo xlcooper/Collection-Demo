@@ -1,0 +1,104 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "image_batch_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_59094960e3ac4ca2aa40bbdaddf70051",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "清晰的红色杯盖、吸管和卡通图案，独立完整物体",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "cup lid",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red"
+          ],
+          "shape": "circular",
+          "description": "红色圆形塑料杯盖，带卡通图案、二维码和红色吸管孔，表面有中文文字",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_9a792143c34d4a85886be4d7e6a2bde1",
+        "confidence": 0.92,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_9a792143c34d4a85886be4d7e6a2bde1的杯盖图案、颜色和吸管孔完全匹配",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic cup",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体",
+          "annotation_confidence": 0.95
+        }
+      },
+      {
+        "proposal_id": "prop_c5ec488694c348faa4b7f04ed2d2f5f4",
+        "validity": "valid",
+        "validity_confidence": 0.97,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "白色塑料物体，带圆形按钮，独立完整",
+        "temporary_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.93
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_c78b6944c3604d7ba49fc4549497fb76",
+        "confidence": 0.91,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76的白色塑料、圆形按钮和外形完全匹配",
+        "final_annotation": {
+          "coarse_category": "input device",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "light gray"
+          ],
+          "shape": "ergonomic",
+          "description": "白色塑料鼠标，符合人体工学设计，带圆形按钮",
+          "annotation_confidence": 0.93
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 4,
+    "object_card_ids": [
+      "obj_9a792143c34d4a85886be4d7e6a2bde1",
+      "obj_c78b6944c3604d7ba49fc4549497fb76",
+      "obj_c3ea64b70a104e668db2a6d86e46c29b",
+      "obj_04b48fc40db34973b596cffc25edb655"
+    ],
+    "reference_image_count": 7,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "stage": "image_batch_reasoning",
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_59094960e3ac4ca2aa40bbdaddf70051\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"清晰的红色杯盖、吸管和卡通图案，独立完整物体\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"cup lid\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\"],\n        \"shape\": \"circular\",\n        \"description\": \"红色圆形塑料杯盖，带卡通图案、二维码和红色吸管孔，表面有中文文字\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_9a792143c34d4a85886be4d7e6a2bde1\",\n      \"confidence\": 0.92,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_9a792143c34d4a85886be4d7e6a2bde1的杯盖图案、颜色和吸管孔完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic cup\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料杯，带红色盖子和吸管，杯身有标签和二维码，杯内有浅色液体\",\n        \"annotation_confidence\": 0.95\n      }\n    },\n    {\n      \"proposal_id\": \"prop_c5ec488694c348faa4b7f04ed2d2f5f4\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.97,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"白色塑料物体，带圆形按钮，独立完整\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.93\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_c78b6944c3604d7ba49fc4549497fb76\",\n      \"confidence\": 0.91,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_c78b6944c3604d7ba49fc4549497fb76的白色塑料、圆形按钮和外形完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"input device\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"light gray\"],\n        \"shape\": \"ergonomic\",\n        \"description\": \"白色塑料鼠标，符合人体工学设计，带圆形按钮\",\n        \"annotation_confidence\": 0.93\n      }\n    }\n  ]\n}",
+      "input_tokens": 5920,
+      "generated_tokens": 779,
+      "inference_seconds": 49.45249919965863
+    }
+  ]
+}

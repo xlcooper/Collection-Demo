@@ -1,0 +1,9 @@
+{
+  "coarse_category": "coffee",
+  "fine_category": "latte",
+  "material": ["ceramic"],
+  "color": ["white", "brown"],
+  "shape": "cup with handle",
+  "description": "一杯带有拉花图案的咖啡，盛放在白色陶瓷杯中，置于白色碟子上，杯旁有书本和猫形小摆件。",
+  "annotation_confidence": 0.98
+}

@@ -1,0 +1,20 @@
+{
+  "call_attempt": 1,
+  "error": null,
+  "final_response": {
+    "decision": "ignored",
+    "matched_object_id": null,
+    "confidence": 0.0,
+    "reason_code": "invalid_candidate",
+    "short_reason": "not a valid physical object",
+    "annotation": null
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"decision\": \"ignored\",\n  \"matched_object_id\": null,\n  \"confidence\": 0.0,\n  \"reason_code\": \"invalid_candidate\",\n  \"short_reason\": \"not a valid physical object\",\n  \"annotation\": null\n}",
+      "input_tokens": 2322,
+      "generated_tokens": 54,
+      "inference_seconds": 3.7266226075589657
+    }
+  ]
+}
