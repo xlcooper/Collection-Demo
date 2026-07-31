@@ -81,12 +81,12 @@ SAM3 与 Qwen3-VL 在单张 GPU 上分阶段驻留：Qwen 先完成新图场景�
 
 ## 数据与存储
 
-仓库保留一套固定输入和对应的完整对象记忆输出：
+仓库保留一套固定输入；对象记忆在运行时按以下结构完整生成：
 
 ```text
 data/
 ├─ input/                  # 固定 Demo 输入
-└─ memory/                 # 当前完整输出与增量记忆
+└─ memory/                 # 首次运行时生成的完整输出与增量记忆
    ├─ memory.sqlite
    ├─ sources/
    ├─ proposals/
@@ -95,9 +95,9 @@ data/
    └─ run_reports/
 ```
 
-`memory.sqlite` 保存运行、源图、候选、对象、观测和决策的结构化索引；图像资产使用相对路径与数据库关联，因此整个 `data/memory/` 可以作为一个完整单元迁移和审计。
+运行生成的 `memory.sqlite` 保存运行、源图、候选、对象、观测和决策的结构化索引；图像资产使用相对路径与数据库关联，因此整个 `data/memory/` 可以作为一个完整单元迁移和审计。
 
-当前 `data/memory/` 已包含一次端到端运行结果。继续加入新图片时可直接增量运行；若要使用同一输入从零比较新逻辑，应指定一个新的空记忆目录，避免已有哈希使图片被跳过。
+仓库当前只保留固定输入，默认 `data/memory/` 会在下一次运行时创建。成功运行后可继续加入新图片做增量处理；若要并排比较另一组实验，应指定独立的空记忆目录，避免不同结果互相污染。
 
 ## 运行方式
 
@@ -107,7 +107,7 @@ data/
 2. 将 SAM3 checkpoint 放在 `weights/sam3/sam3.pt`。
 3. 准备 Qwen3-VL 本地缓存，并让 `HF_HOME`、`HF_HUB_CACHE` 指向该缓存。
 
-在现有记忆上处理新增图片：
+使用默认记忆根运行；首次运行会创建记忆，之后自动增量处理：
 
 ```bash
 export HF_HOME="$PWD/weights/qwen"
@@ -118,7 +118,7 @@ python scripts/run_object_memory.py \
   --report environment/run_report.json
 ```
 
-使用相同输入从空记忆重新运行：
+使用相同输入在独立空记忆中运行：
 
 ```bash
 python scripts/run_object_memory.py \
@@ -136,10 +136,10 @@ Collection-Demo/
 ├─ config/                    # 当前业务配置
 ├─ data/
 │  ├─ input/                  # 固定输入图片
-│  ├─ memory/                 # 完整对象记忆输出
+│  ├─ memory/                 # 运行时生成的完整对象记忆输出
 │  └─ README.md               # 数据目录契约
 ├─ docs/                      # 环境与业务运行说明
-├─ environment/               # 当前服务器和 Demo 机器报告
+├─ environment/               # 服务器事实与运行时生成的 Demo 报告
 ├─ scripts/
 │  ├─ run_object_memory.py    # 正式端到端入口
 │  └─ check_server_env.py     # 服务器环境检查
