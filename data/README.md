@@ -50,4 +50,4 @@ data/
 - 模型权重、Hugging Face 缓存、Conda 环境和根目录隐藏真值不进入 Git。
 - 编辑器生成的 `.ipynb_checkpoints/` 不属于 Demo 数据。
 
-实验效果、当前问题和下一步以根目录 `PROGRESS.md` 为准。
+实验过程、结果与审计结论见根目录 `PROGRESS.md`；当前协作方向见 `AGENTS.md`。

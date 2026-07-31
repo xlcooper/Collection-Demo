@@ -139,7 +139,7 @@ Collection-Demo/
 ├─ src/object_memory/         # 对象记忆实现
 ├─ tests/                     # 当前功能回归测试
 ├─ AGENTS.md                  # AI 协作与项目管理规范
-├─ PROGRESS.md                # 当前执行状态与验收事实
+├─ PROGRESS.md                # 当前实验、审计分析与实验历史
 ├─ CHANGELOG.md               # 版本历史
 ├─ environment.yml
 ├─ requirements.txt
