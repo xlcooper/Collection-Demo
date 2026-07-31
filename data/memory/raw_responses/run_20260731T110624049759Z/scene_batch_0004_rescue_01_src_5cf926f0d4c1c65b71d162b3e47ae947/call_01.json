@@ -1,0 +1,20 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0004_rescue_01_src_5cf926f0d4c1c65b71d162b3e47ae947",
+  "batch_index": 4,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_5cf926f0d4c1c65b71d162b3e47ae947"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_5cf926f0d4c1c65b71d162b3e47ae947\",\n      \"scene_summary\": \"白色桌面上放置着一个透明水瓶和一个白色鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带提手的透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle with handle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动，瓶身透明便于识别内容物\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"白色无线鼠标\",\n          \"sam_text_prompt\": \"white computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动，是常见任务交互设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 1907,
+      "generated_tokens": 268,
+      "inference_seconds": 17.249108087271452
+    }
+  ]
+}

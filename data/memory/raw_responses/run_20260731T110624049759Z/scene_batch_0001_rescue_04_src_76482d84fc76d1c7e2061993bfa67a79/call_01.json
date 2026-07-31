@@ -1,0 +1,48 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0001_rescue_04_src_76482d84fc76d1c7e2061993bfa67a79",
+  "batch_index": 1,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_76482d84fc76d1c7e2061993bfa67a79"
+  ],
+  "error": null,
+  "scene_guidance_response": {
+    "images": [
+      {
+        "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+        "scene_summary": "白色桌面上有透明水瓶和白色鼠标",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "transparent water bottle",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的容器"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的输入设备"
+          }
+        ],
+        "no_target_reason": null
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_76482d84fc76d1c7e2061993bfa67a79\",\n      \"scene_summary\": \"白色桌面上有透明水瓶和白色鼠标\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动的容器\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"白色鼠标\",\n          \"sam_text_prompt\": \"white computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动的输入设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 1907,
+      "generated_tokens": 249,
+      "inference_seconds": 16.11201812699437
+    }
+  ]
+}

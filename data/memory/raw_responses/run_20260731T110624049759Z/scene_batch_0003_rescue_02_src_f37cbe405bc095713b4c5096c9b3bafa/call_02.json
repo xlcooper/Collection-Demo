@@ -1,0 +1,20 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0003_rescue_02_src_f37cbe405bc095713b4c5096c9b3bafa",
+  "batch_index": 3,
+  "call_attempt": 2,
+  "expected_source_ids": [
+    "src_f37cbe405bc095713b4c5096c9b3bafa"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_f37cbe405bc095713b4c5096c9b3bafa\",\n      \"scene_summary\": \"白色台面上放置一杯带吸管的奶茶\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带吸管的奶茶杯\",\n          \"sam_text_prompt\": \"plastic cup with straw\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动的完整饮品容器\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 1904,
+      "generated_tokens": 171,
+      "inference_seconds": 11.186434026807547
+    }
+  ]
+}

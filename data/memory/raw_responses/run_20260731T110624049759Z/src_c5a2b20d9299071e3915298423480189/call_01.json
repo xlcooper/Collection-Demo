@@ -1,0 +1,104 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v2",
+  "call_attempt": 1,
+  "expected_proposal_ids": [
+    "prop_c887d9dfb50f48b79bcb13e794d4a6f3",
+    "prop_8091f4f031654107b7f4837e92aecefd"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_c887d9dfb50f48b79bcb13e794d4a6f3",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "clearly segmented mouse with scroll wheel and ergonomic shape",
+        "temporary_annotation": {
+          "coarse_category": "computer peripheral",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "ergonomic curved body with central scroll wheel",
+          "description": "white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip, isolated on neutral background",
+          "annotation_confidence": 0.97
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 0.99,
+        "reason_code": "new_object",
+        "short_reason": "no memory cards available, valid candidate identified as new",
+        "final_annotation": {
+          "coarse_category": "computer peripheral",
+          "fine_category": "computer mouse",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white"
+          ],
+          "shape": "ergonomic curved body with central scroll wheel",
+          "description": "white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip",
+          "annotation_confidence": 0.99
+        }
+      },
+      {
+        "proposal_id": "prop_8091f4f031654107b7f4837e92aecefd",
+        "validity": "valid",
+        "validity_confidence": 0.97,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "clearly segmented transparent glass bottle with base and bubbles",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "water bottle",
+          "material": [
+            "glass"
+          ],
+          "color": [
+            "transparent"
+          ],
+          "shape": "cylindrical with rounded base",
+          "description": "transparent glass bottle with visible internal bubbles and a distinct base indentation, isolated on neutral background",
+          "annotation_confidence": 0.96
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 0.99,
+        "reason_code": "new_object",
+        "short_reason": "no memory cards available, valid candidate identified as new",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "water bottle",
+          "material": [
+            "glass"
+          ],
+          "color": [
+            "transparent"
+          ],
+          "shape": "cylindrical with rounded base",
+          "description": "transparent glass water bottle with visible internal bubbles and a distinct base indentation",
+          "annotation_confidence": 0.99
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 0,
+    "object_card_ids": [],
+    "reference_image_count": 0,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_c887d9dfb50f48b79bcb13e794d4a6f3\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"clearly segmented mouse with scroll wheel and ergonomic shape\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"computer peripheral\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\"],\n        \"shape\": \"ergonomic curved body with central scroll wheel\",\n        \"description\": \"white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip, isolated on neutral background\",\n        \"annotation_confidence\": 0.97\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.99,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"no memory cards available, valid candidate identified as new\",\n      \"final_annotation\": {\n        \"coarse_category\": \"computer peripheral\",\n        \"fine_category\": \"computer mouse\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\"],\n        \"shape\": \"ergonomic curved body with central scroll wheel\",\n        \"description\": \"white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip\",\n        \"annotation_confidence\": 0.99\n      }\n    },\n    {\n      \"proposal_id\": \"prop_8091f4f031654107b7f4837e92aecefd\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.97,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"clearly segmented transparent glass bottle with base and bubbles\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"glass\"],\n        \"color\": [\"transparent\"],\n        \"shape\": \"cylindrical with rounded base\",\n        \"description\": \"transparent glass bottle with visible internal bubbles and a distinct base indentation, isolated on neutral background\",\n        \"annotation_confidence\": 0.96\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.99,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"no memory cards available, valid candidate identified as new\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"glass\"],\n        \"color\": [\"transparent\"],\n        \"shape\": \"cylindrical with rounded base\",\n        \"description\": \"transparent glass water bottle with visible internal bubbles and a distinct base indentation\",\n        \"annotation_confidence\": 0.99\n      }\n    }\n  ]\n}",
+      "input_tokens": 3584,
+      "generated_tokens": 653,
+      "inference_seconds": 42.27019974216819
+    }
+  ]
+}

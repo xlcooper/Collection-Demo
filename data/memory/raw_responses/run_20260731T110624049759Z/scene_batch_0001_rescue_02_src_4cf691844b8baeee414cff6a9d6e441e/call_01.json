@@ -1,0 +1,20 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0001_rescue_02_src_4cf691844b8baeee414cff6a9d6e441e",
+  "batch_index": 1,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_4cf691844b8baeee414cff6a9d6e441e"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with markings', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_4cf691844b8baeee414cff6a9d6e441e\",\n      \"scene_summary\": \"白色桌面上立着一个装有水的透明水瓶，旁边有鼠标和支架。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明带刻度的水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle with markings\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动，含水量和刻度具任务相关性\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 1903,
+      "generated_tokens": 186,
+      "inference_seconds": 12.107031971216202
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0002",
+  "batch_index": 2,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_ebd9a7980e4eebecde06d3ab3317d51c",
+    "src_11b171cb7b25e04e37560c8a76630baf",
+    "src_cd11b8f53eee5bf00b87e637aa6c481f",
+    "src_01577d5285c9315307e807b77e802c81"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_ebd9a7980e4eebecde06d3ab3317d51c\",\n      \"scene_summary\": \"白色桌面上的红色茶饮杯盖与吸管\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带卡通图案的红色杯盖\",\n          \"sam_text_prompt\": \"red cup lid with cartoon\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的独立杯盖，含吸管\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_11b171cb7b25e04e37560c8a76630baf\",\n      \"scene_summary\": \"白色桌面上的透明水瓶\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带白色盖子的透明水瓶\",\n          \"sam_text_prompt\": \"white capped transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的完整水瓶，含盖子\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_cd11b8f53eee5bf00b87e637aa6c481f\",\n      \"scene_summary\": \"白色桌面上的水瓶与鼠标\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带白色盖子的透明水瓶\",\n          \"sam_text_prompt\": \"white capped transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的完整水瓶，含盖子\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"银灰色无线鼠标\",\n          \"sam_text_prompt\": \"silver wireless mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的独立鼠标\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_01577d5285c9315307e807b77e802c81\",\n      \"scene_summary\": \"白色桌面上的透明茶饮杯\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带红色文字的透明茶杯\",\n          \"sam_text_prompt\": \"transparent tea cup with red text\",\n          \"priority\": \"high\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的完整茶杯，含吸管\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 4975,
+      "generated_tokens": 753,
+      "inference_seconds": 49.219777554273605
+    }
+  ]
+}

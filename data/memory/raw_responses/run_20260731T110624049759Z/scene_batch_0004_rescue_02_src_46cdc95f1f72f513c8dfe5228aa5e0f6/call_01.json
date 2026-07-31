@@ -1,0 +1,20 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0004_rescue_02_src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+  "batch_index": 4,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_46cdc95f1f72f513c8dfe5228aa5e0f6"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_46cdc95f1f72f513c8dfe5228aa5e0f6\",\n      \"scene_summary\": \"白色桌面上放置着一个透明水瓶和一个白色鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明带盖水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle with cap\",\n          \"priority\": \"high\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动的独立容器\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"白色电脑鼠标\",\n          \"sam_text_prompt\": \"white computer mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.92,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动的独立外设\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 1905,
+      "generated_tokens": 257,
+      "inference_seconds": 16.52382230386138
+    }
+  ]
+}

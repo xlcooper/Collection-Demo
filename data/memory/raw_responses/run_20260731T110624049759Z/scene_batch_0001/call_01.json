@@ -1,0 +1,23 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v1",
+  "scope_id": "scene_batch_0001",
+  "batch_index": 1,
+  "call_attempt": 1,
+  "expected_source_ids": [
+    "src_c5a2b20d9299071e3915298423480189",
+    "src_4cf691844b8baeee414cff6a9d6e441e",
+    "src_38f13969e802dc30e46f45461efef2ac",
+    "src_76482d84fc76d1c7e2061993bfa67a79"
+  ],
+  "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+  "scene_guidance_response": null,
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_c5a2b20d9299071e3915298423480189\",\n      \"scene_summary\": \"白色桌面上的无线鼠标和透明水瓶\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"白色无线鼠标\",\n          \"sam_text_prompt\": \"white wireless mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取操作的独立设备\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"task_relevant\",\n          \"selection_short_reason\": \"任务相关容器，可移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_4cf691844b8baeee414cff6a9d6e441e\",\n      \"scene_summary\": \"透明水瓶和白色鼠标在桌面上\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"task_relevant\",\n          \"selection_short_reason\": \"任务相关容器，可移动\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"白色鼠标\",\n          \"sam_text_prompt\": \"white wireless mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取操作的独立设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_38f13969e802dc30e46f45461efef2ac\",\n      \"scene_summary\": \"带红色吸管的奶茶杯\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带吸管的奶茶杯\",\n          \"sam_text_prompt\": \"plastic tea cup with straw\",\n          \"priority\": \"high\",\n          \"confidence\": 0.96,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取操作的独立饮品容器\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_76482d84fc76d1c7e2061993bfa67a79\",\n      \"scene_summary\": \"透明水瓶和白色鼠标在桌面上\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"task_relevant\",\n          \"selection_short_reason\": \"任务相关容器，可移动\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"白色鼠标\",\n          \"sam_text_prompt\": \"white wireless mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取操作的独立设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 4977,
+      "generated_tokens": 880,
+      "inference_seconds": 58.27586983516812
+    }
+  ]
+}

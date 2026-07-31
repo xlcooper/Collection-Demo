@@ -1,0 +1,1427 @@
+{
+  "schema_version": 3,
+  "generated_at_utc": "2026-07-31T11:21:42.223854+00:00",
+  "test": "object_memory_demo_batch",
+  "status": "failed",
+  "run": {
+    "run_id": "run_20260731T110624049759Z",
+    "status": "completed_with_errors",
+    "source_counts": {
+      "pending": 0,
+      "processing": 0,
+      "completed": 3,
+      "failed": 11
+    },
+    "proposal_counts": {
+      "pending": 0,
+      "filtered": 0,
+      "decided": 6,
+      "failed": 0
+    },
+    "decision_counts": {
+      "new": 2,
+      "existing": 4,
+      "ignored": 0,
+      "uncertain": 0
+    },
+    "observations_added": 6,
+    "active_objects_total": 2,
+    "duplicate_sources_skipped": 14,
+    "external_errors": 0
+  },
+  "checks": {
+    "input_images_nonempty": true,
+    "every_input_accounted_for": true,
+    "qwen_then_sam_then_qwen_sequential_boundary": true,
+    "every_processed_source_has_scene_guidance": true,
+    "no_source_left_processing": true,
+    "registered_sources_match_nonduplicates": true,
+    "all_qwen_candidates_have_persisted_status": true
+  },
+  "strategy": {
+    "prompt_strategy": "qwen_scene_guidance_to_sam3_text_concepts",
+    "external_category_prompts": false,
+    "model_generated_category_prompts": true,
+    "scene_guidance_batch_size": 4,
+    "max_scene_targets_per_image": 12,
+    "scope": "robot-oriented scene triage followed by open-vocabulary concept segmentation; first-pass recall must be audited",
+    "model_residency": "Qwen scene guidance then release; SAM3 text guidance then release; Qwen candidate reasoning then release",
+    "qwen_call_policy": "one scene-guidance call per configured source-image batch, then one detailed call per source image containing every retained candidate and every active memory object card",
+    "scene_guidance_memory_context": "none; discovery is driven only by each new scene view",
+    "scene_batch_failure_policy": "bounded batch retry, then isolated single-source rescue; never silently fall back to point-grid discovery",
+    "sam_candidate_semantics": "SAM3 detections already above the processor text-confidence threshold, followed by script area, duplicate, same-prompt containment, and fair per-prompt capacity filtering",
+    "object_card_selection": "all active cards with configured recent reference views; no script-side similarity ranking or shortlist",
+    "uncertain_policy": "persist pending; do not immediately repeat",
+    "error_attempts": 2,
+    "scene_prompt_version": "robot-scene-guidance-v1",
+    "candidate_prompt_version": "guided-image-batch-memory-reasoning-v2"
+  },
+  "models": {
+    "sam3": {
+      "loaded": true,
+      "model_load_seconds": 8.137,
+      "inference_seconds": 0.521,
+      "peak_memory_mib": 5100.71
+    },
+    "qwen": {
+      "loaded": true,
+      "load_count": 2,
+      "model_load_seconds": 6.118,
+      "inference_seconds": 895.767,
+      "input_tokens": 95800,
+      "generated_tokens": 13779,
+      "scene_batch_calls": 33,
+      "candidate_reasoning_calls": 3,
+      "total_calls": 36,
+      "peak_memory_mib": 11540.56,
+      "placement": [
+        "0"
+      ],
+      "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45",
+      "phases": {
+        "scene_guidance": {
+          "loaded": true,
+          "model_load_seconds": 3.571,
+          "inference_seconds": 755.628,
+          "input_tokens": 83342,
+          "generated_tokens": 11609,
+          "scene_batch_calls": 33,
+          "primary_batches": 4,
+          "rescue_sources": 14,
+          "images_analyzed": 3,
+          "peak_memory_mib": 11540.56,
+          "placement": [
+            "0"
+          ],
+          "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45"
+        },
+        "candidate_reasoning": {
+          "loaded": true,
+          "model_load_seconds": 2.547,
+          "inference_seconds": 140.139,
+          "input_tokens": 12458,
+          "generated_tokens": 2170,
+          "candidate_reasoning_calls": 3,
+          "peak_memory_mib": 11440.24,
+          "placement": [
+            "0"
+          ],
+          "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45"
+        }
+      }
+    }
+  },
+  "images": [
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0001.jpg",
+      "source_id": "src_c5a2b20d9299071e3915298423480189",
+      "sha256": "c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8",
+      "stored_source": "sources/c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001_rescue_01_src_c5a2b20d9299071e3915298423480189",
+        "rescued_from_scope": "scene_batch_0001",
+        "scene_summary": "白色桌面上的无线鼠标和透明水瓶",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "白色无线鼠标",
+            "sam_text_prompt": "white wireless mouse",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的独立任务对象"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "透明玻璃水瓶",
+            "sam_text_prompt": "transparent glass water bottle",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的独立任务对象"
+          }
+        ],
+        "no_target_reason": null,
+        "scope_calls": 1,
+        "scope_pipeline_attempts": 1,
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_01_src_c5a2b20d9299071e3915298423480189/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_01_src_c5a2b20d9299071e3915298423480189/call_01.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 2,
+        "kept": 2,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "white wireless mouse": 1,
+          "transparent glass water bottle": 1
+        },
+        "inference_seconds": 0.222
+      },
+      "candidate_reasoning": {
+        "candidate_count": 2,
+        "object_card_count": 0,
+        "object_card_ids": [],
+        "reference_image_count": 0,
+        "qwen_calls": 1,
+        "pipeline_attempts": 1,
+        "raw_response": "raw_responses/run_20260731T110624049759Z/src_c5a2b20d9299071e3915298423480189/call_01.json",
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/src_c5a2b20d9299071e3915298423480189/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/src_c5a2b20d9299071e3915298423480189/call_01.json"
+        ],
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_c887d9dfb50f48b79bcb13e794d4a6f3",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "white wireless mouse",
+            "score": 0.9453125,
+            "bbox": {
+              "x_min": 145.70875549316406,
+              "y_min": 276.296875,
+              "x_max": 565.2266845703125,
+              "y_max": 727.4796142578125
+            },
+            "mask_area_ratio": 0.11536051432291666,
+            "crop": "proposals/run_20260731T110624049759Z/prop_c887d9dfb50f48b79bcb13e794d4a6f3/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_c887d9dfb50f48b79bcb13e794d4a6f3/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_c887d9dfb50f48b79bcb13e794d4a6f3/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_98f791eee6e747c09c7b209b722c64bb",
+          "confidence": 0.99,
+          "reason_code": "new_object",
+          "short_reason": "no memory cards available, valid candidate identified as new",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "clearly segmented mouse with scroll wheel and ergonomic shape",
+          "temporary_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white"
+            ],
+            "shape": "ergonomic curved body with central scroll wheel",
+            "description": "white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip, isolated on neutral background",
+            "annotation_confidence": 0.97
+          },
+          "final_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white"
+            ],
+            "shape": "ergonomic curved body with central scroll wheel",
+            "description": "white plastic computer mouse with textured scroll wheel, visible seam lines, and side grip",
+            "annotation_confidence": 0.99
+          },
+          "matched_object_id": null,
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_c5a2b20d9299071e3915298423480189/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_8091f4f031654107b7f4837e92aecefd",
+          "candidate": {
+            "raw_candidate_id": "text_001_candidate_000",
+            "sam_text_prompt": "transparent glass water bottle",
+            "score": 0.9375,
+            "bbox": {
+              "x_min": 429.0792541503906,
+              "y_min": 0.0,
+              "x_max": 793.729736328125,
+              "y_max": 413.9932556152344
+            },
+            "mask_area_ratio": 0.1025634765625,
+            "crop": "proposals/run_20260731T110624049759Z/prop_8091f4f031654107b7f4837e92aecefd/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_8091f4f031654107b7f4837e92aecefd/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_8091f4f031654107b7f4837e92aecefd/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_f73e90e913574834875698b232c9d1f9",
+          "confidence": 0.99,
+          "reason_code": "new_object",
+          "short_reason": "no memory cards available, valid candidate identified as new",
+          "validity": "valid",
+          "validity_confidence": 0.97,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "clearly segmented transparent glass bottle with base and bubbles",
+          "temporary_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "glass"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "transparent glass bottle with visible internal bubbles and a distinct base indentation, isolated on neutral background",
+            "annotation_confidence": 0.96
+          },
+          "final_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "glass"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "transparent glass water bottle with visible internal bubbles and a distinct base indentation",
+            "annotation_confidence": 0.99
+          },
+          "matched_object_id": null,
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_c5a2b20d9299071e3915298423480189/call_01.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0002.jpg",
+      "source_id": "src_c5a2b20d9299071e3915298423480189",
+      "sha256": "c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8",
+      "stored_source": "sources/c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0003.jpg",
+      "source_id": "src_4cf691844b8baeee414cff6a9d6e441e",
+      "sha256": "4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2",
+      "stored_source": "sources/4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001_rescue_02_src_4cf691844b8baeee414cff6a9d6e441e",
+        "rescued_from_scope": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_02_src_4cf691844b8baeee414cff6a9d6e441e/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_02_src_4cf691844b8baeee414cff6a9d6e441e/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with markings', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with markings', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with markings', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0004.jpg",
+      "source_id": "src_38f13969e802dc30e46f45461efef2ac",
+      "sha256": "38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939",
+      "stored_source": "sources/38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001_rescue_03_src_38f13969e802dc30e46f45461efef2ac",
+        "rescued_from_scope": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_03_src_38f13969e802dc30e46f45461efef2ac/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_03_src_38f13969e802dc30e46f45461efef2ac/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with red straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with red straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with red straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0005.jpg",
+      "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+      "sha256": "76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6",
+      "stored_source": "sources/76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001_rescue_04_src_76482d84fc76d1c7e2061993bfa67a79",
+        "rescued_from_scope": "scene_batch_0001",
+        "scene_summary": "白色桌面上有透明水瓶和白色鼠标",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "transparent water bottle",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的容器"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动的输入设备"
+          }
+        ],
+        "no_target_reason": null,
+        "scope_calls": 1,
+        "scope_pipeline_attempts": 1,
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_04_src_76482d84fc76d1c7e2061993bfa67a79/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0001_rescue_04_src_76482d84fc76d1c7e2061993bfa67a79/call_01.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic tea cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 2,
+        "kept": 2,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle": 1,
+          "white computer mouse": 1
+        },
+        "inference_seconds": 0.148
+      },
+      "candidate_reasoning": {
+        "candidate_count": 2,
+        "object_card_count": 2,
+        "object_card_ids": [
+          "obj_98f791eee6e747c09c7b209b722c64bb",
+          "obj_f73e90e913574834875698b232c9d1f9"
+        ],
+        "reference_image_count": 2,
+        "qwen_calls": 1,
+        "pipeline_attempts": 1,
+        "raw_response": "raw_responses/run_20260731T110624049759Z/src_76482d84fc76d1c7e2061993bfa67a79/call_01.json",
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/src_76482d84fc76d1c7e2061993bfa67a79/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/src_76482d84fc76d1c7e2061993bfa67a79/call_01.json"
+        ],
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_6489163f49934de090e7b1dd1c20cde1",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle",
+            "score": 0.96484375,
+            "bbox": {
+              "x_min": 150.8223114013672,
+              "y_min": 0.0,
+              "x_max": 417.17779541015625,
+              "y_max": 748.995849609375
+            },
+            "mask_area_ratio": 0.13526253100437824,
+            "crop": "proposals/run_20260731T110624049759Z/prop_6489163f49934de090e7b1dd1c20cde1/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_6489163f49934de090e7b1dd1c20cde1/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_6489163f49934de090e7b1dd1c20cde1/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_f73e90e913574834875698b232c9d1f9",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "matches object card with visible bubbles and base indentation",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "clear transparent bottle with water and distinct base indentation",
+          "temporary_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "transparent plastic bottle with white cap, containing clear liquid, visible internal bubbles and base indentation",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "transparent plastic water bottle with white cap, containing clear liquid, visible internal bubbles and base indentation; matches reference view with similar shape and material",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_f73e90e913574834875698b232c9d1f9",
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_76482d84fc76d1c7e2061993bfa67a79/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_ea80bbab560a4aecbbc883d89103e64d",
+          "candidate": {
+            "raw_candidate_id": "text_001_candidate_000",
+            "sam_text_prompt": "white computer mouse",
+            "score": 0.96484375,
+            "bbox": {
+              "x_min": 418.8925476074219,
+              "y_min": 548.1243286132812,
+              "x_max": 597.4212646484375,
+              "y_max": 693.2093505859375
+            },
+            "mask_area_ratio": 0.017063860838607076,
+            "crop": "proposals/run_20260731T110624049759Z/prop_ea80bbab560a4aecbbc883d89103e64d/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_ea80bbab560a4aecbbc883d89103e64d/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_ea80bbab560a4aecbbc883d89103e64d/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_98f791eee6e747c09c7b209b722c64bb",
+          "confidence": 0.91,
+          "reason_code": "visual_instance_match",
+          "short_reason": "matches object card with similar shape and material",
+          "validity": "valid",
+          "validity_confidence": 0.97,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "white ergonomic mouse with curved body",
+          "temporary_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white"
+            ],
+            "shape": "ergonomic curved body",
+            "description": "white plastic computer mouse with smooth surface, curved ergonomic body, and visible seam lines",
+            "annotation_confidence": 0.93
+          },
+          "final_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white"
+            ],
+            "shape": "ergonomic curved body with central scroll wheel",
+            "description": "white plastic computer mouse with smooth surface, curved ergonomic body, visible seam lines, and side grip; matches reference view with similar shape and material",
+            "annotation_confidence": 0.94
+          },
+          "matched_object_id": "obj_98f791eee6e747c09c7b209b722c64bb",
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_76482d84fc76d1c7e2061993bfa67a79/call_01.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0006.jpg",
+      "source_id": "src_ebd9a7980e4eebecde06d3ab3317d51c",
+      "sha256": "ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9",
+      "stored_source": "sources/ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002_rescue_01_src_ebd9a7980e4eebecde06d3ab3317d51c",
+        "rescued_from_scope": "scene_batch_0002",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_01_src_ebd9a7980e4eebecde06d3ab3317d51c/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_01_src_ebd9a7980e4eebecde06d3ab3317d51c/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red tea lid with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red tea lid with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red tea lid with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0007.jpg",
+      "source_id": "src_38f13969e802dc30e46f45461efef2ac",
+      "sha256": "38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939",
+      "stored_source": "sources/38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0008.jpg",
+      "source_id": "src_11b171cb7b25e04e37560c8a76630baf",
+      "sha256": "11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0",
+      "stored_source": "sources/11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002_rescue_02_src_11b171cb7b25e04e37560c8a76630baf",
+        "rescued_from_scope": "scene_batch_0002",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_02_src_11b171cb7b25e04e37560c8a76630baf/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_02_src_11b171cb7b25e04e37560c8a76630baf/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white plastic water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white plastic water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white plastic water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0009.jpg",
+      "source_id": "src_cd11b8f53eee5bf00b87e637aa6c481f",
+      "sha256": "cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b",
+      "stored_source": "sources/cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002_rescue_03_src_cd11b8f53eee5bf00b87e637aa6c481f",
+        "rescued_from_scope": "scene_batch_0002",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_03_src_cd11b8f53eee5bf00b87e637aa6c481f/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_03_src_cd11b8f53eee5bf00b87e637aa6c481f/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0010.jpg",
+      "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+      "sha256": "76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6",
+      "stored_source": "sources/76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0011.jpg",
+      "source_id": "src_01577d5285c9315307e807b77e802c81",
+      "sha256": "01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31",
+      "stored_source": "sources/01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002_rescue_04_src_01577d5285c9315307e807b77e802c81",
+        "rescued_from_scope": "scene_batch_0002",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_04_src_01577d5285c9315307e807b77e802c81/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0002_rescue_04_src_01577d5285c9315307e807b77e802c81/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='red cup lid with cartoon', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent tea cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent plastic cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent plastic cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent plastic cup with red text', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0012.jpg",
+      "source_id": "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+      "sha256": "3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c",
+      "stored_source": "sources/3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003_rescue_01_src_3cea6b6ee098e81455d929f6f2ca3aa2",
+        "rescued_from_scope": "scene_batch_0003",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_01_src_3cea6b6ee098e81455d929f6f2ca3aa2/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_01_src_3cea6b6ee098e81455d929f6f2ca3aa2/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white container with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white container with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='white container with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0013.jpg",
+      "source_id": "src_f37cbe405bc095713b4c5096c9b3bafa",
+      "sha256": "f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a",
+      "stored_source": "sources/f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003_rescue_02_src_f37cbe405bc095713b4c5096c9b3bafa",
+        "rescued_from_scope": "scene_batch_0003",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_02_src_f37cbe405bc095713b4c5096c9b3bafa/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_02_src_f37cbe405bc095713b4c5096c9b3bafa/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='plastic cup with straw', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0014.jpg",
+      "source_id": "src_4cf691844b8baeee414cff6a9d6e441e",
+      "sha256": "4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2",
+      "stored_source": "sources/4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0015.jpg",
+      "source_id": "src_54ac1b5d01f7f5f4123518653092ee1b",
+      "sha256": "54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a",
+      "stored_source": "sources/54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003_rescue_03_src_54ac1b5d01f7f5f4123518653092ee1b",
+        "rescued_from_scope": "scene_batch_0003",
+        "scene_summary": "白色桌面上放置着一个透明水瓶和一个白色鼠标。",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "transparent water bottle",
+            "priority": "high",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动、可抓取的容器，适合后续操作"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的便携设备，具有明确任务相关性"
+          }
+        ],
+        "no_target_reason": null,
+        "scope_calls": 1,
+        "scope_pipeline_attempts": 1,
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_03_src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_03_src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 2,
+        "kept": 2,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle": 1,
+          "white computer mouse": 1
+        },
+        "inference_seconds": 0.15
+      },
+      "candidate_reasoning": {
+        "candidate_count": 2,
+        "object_card_count": 2,
+        "object_card_ids": [
+          "obj_98f791eee6e747c09c7b209b722c64bb",
+          "obj_f73e90e913574834875698b232c9d1f9"
+        ],
+        "reference_image_count": 4,
+        "qwen_calls": 1,
+        "pipeline_attempts": 1,
+        "raw_response": "raw_responses/run_20260731T110624049759Z/src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json",
+        "accepted_raw_response": "raw_responses/run_20260731T110624049759Z/src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json",
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json"
+        ],
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_a50ae0d3d9004f45801a6118aa683fde",
+          "candidate": {
+            "raw_candidate_id": "text_001_candidate_000",
+            "sam_text_prompt": "white computer mouse",
+            "score": 0.9765625,
+            "bbox": {
+              "x_min": 498.2108154296875,
+              "y_min": 740.2716674804688,
+              "x_max": 810.8504638671875,
+              "y_max": 969.9349975585938
+            },
+            "mask_area_ratio": 0.02390844683655536,
+            "crop": "proposals/run_20260731T110624049759Z/prop_a50ae0d3d9004f45801a6118aa683fde/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_a50ae0d3d9004f45801a6118aa683fde/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_a50ae0d3d9004f45801a6118aa683fde/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_98f791eee6e747c09c7b209b722c64bb",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡中白色鼠标在形状、材质和结构上匹配，当前为粉色实例",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰显示电脑鼠标外形、滚轮和侧边设计",
+          "temporary_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic curved body with central scroll wheel",
+            "description": "粉色塑料电脑鼠标，表面光滑，有滚轮和侧边握持结构，位于桌面上",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic curved body with central scroll wheel",
+            "description": "粉色塑料电脑鼠标，表面光滑，有滚轮和侧边握持结构，位于桌面上，与记忆卡中白色鼠标为同一类物品",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_98f791eee6e747c09c7b209b722c64bb",
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_af5c04a0c0974ac49897b45a5245d572",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle",
+            "score": 0.93359375,
+            "bbox": {
+              "x_min": 423.1921081542969,
+              "y_min": 0.0,
+              "x_max": 937.656982421875,
+              "y_max": 761.3603515625
+            },
+            "mask_area_ratio": 0.09163920620972467,
+            "crop": "proposals/run_20260731T110624049759Z/prop_af5c04a0c0974ac49897b45a5245d572/crop.png",
+            "mask": "proposals/run_20260731T110624049759Z/prop_af5c04a0c0974ac49897b45a5245d572/mask.png",
+            "overlay": "proposals/run_20260731T110624049759Z/prop_af5c04a0c0974ac49897b45a5245d572/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_f73e90e913574834875698b232c9d1f9",
+          "confidence": 0.91,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡中透明水瓶在形状、材质和结构上匹配，当前为透明实例",
+          "validity": "valid",
+          "validity_confidence": 0.97,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰显示透明水瓶结构、瓶盖和内部液体",
+          "temporary_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "透明塑料水瓶，瓶盖为白色，内含清水，可见气泡和底部凹陷，位于桌面上",
+            "annotation_confidence": 0.94
+          },
+          "final_annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent"
+            ],
+            "shape": "cylindrical with rounded base",
+            "description": "透明塑料水瓶，瓶盖为白色，内含清水，可见气泡和底部凹陷，位于桌面上，与记忆卡中透明水瓶为同一类物品",
+            "annotation_confidence": 0.94
+          },
+          "matched_object_id": "obj_f73e90e913574834875698b232c9d1f9",
+          "raw_response": "raw_responses/run_20260731T110624049759Z/src_54ac1b5d01f7f5f4123518653092ee1b/call_01.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0016.jpg",
+      "source_id": "src_ebd9a7980e4eebecde06d3ab3317d51c",
+      "sha256": "ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9",
+      "stored_source": "sources/ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0017.jpg",
+      "source_id": "src_3c29806ddef097e7d2dff530f49d18e4",
+      "sha256": "3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba",
+      "stored_source": "sources/3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003_rescue_04_src_3c29806ddef097e7d2dff530f49d18e4",
+        "rescued_from_scope": "scene_batch_0003",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_04_src_3c29806ddef097e7d2dff530f49d18e4/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0003_rescue_04_src_3c29806ddef097e7d2dff530f49d18e4/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 7 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带提手的白色容器', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.0.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='带吸管的奶茶杯', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.2.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='透明水瓶', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.3.targets.1.sam_text_prompt\n  Value error, sam_text_prompt must be a short lowercase English noun phrase [type=value_error, input_value='白色鼠标', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with white cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with white cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with white cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0018.jpg",
+      "source_id": "src_11b171cb7b25e04e37560c8a76630baf",
+      "sha256": "11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0",
+      "stored_source": "sources/11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0019.jpg",
+      "source_id": "src_5cf926f0d4c1c65b71d162b3e47ae947",
+      "sha256": "5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41",
+      "stored_source": "sources/5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 4,
+        "scope_id": "scene_batch_0004_rescue_01_src_5cf926f0d4c1c65b71d162b3e47ae947",
+        "rescued_from_scope": "scene_batch_0004",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004_rescue_01_src_5cf926f0d4c1c65b71d162b3e47ae947/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004_rescue_01_src_5cf926f0d4c1c65b71d162b3e47ae947/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0020.jpg",
+      "source_id": "src_cd11b8f53eee5bf00b87e637aa6c481f",
+      "sha256": "cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b",
+      "stored_source": "sources/cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0021.jpg",
+      "source_id": "src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+      "sha256": "46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908",
+      "stored_source": "sources/46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v1",
+        "batch_index": 4,
+        "scope_id": "scene_batch_0004_rescue_02_src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+        "rescued_from_scope": "scene_batch_0004",
+        "target_count": null,
+        "targets": null,
+        "scope_calls": 2,
+        "scope_pipeline_attempts": 2,
+        "accepted_raw_response": null,
+        "attempt_raw_responses": [
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004/call_02.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004_rescue_02_src_46cdc95f1f72f513c8dfe5228aa5e0f6/call_01.json",
+          "raw_responses/run_20260731T110624049759Z/scene_batch_0004_rescue_02_src_46cdc95f1f72f513c8dfe5228aa5e0f6/call_02.json"
+        ],
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 2 validation errors for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error\nimages.1.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with handle', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.0.targets.0.sam_text_prompt\n  Value error, sam_text_prompt is too generic for SAM3 [type=value_error, input_value='transparent water bottle with cap', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0022.jpg",
+      "source_id": "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+      "sha256": "3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c",
+      "stored_source": "sources/3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0023.jpg",
+      "source_id": "src_54ac1b5d01f7f5f4123518653092ee1b",
+      "sha256": "54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a",
+      "stored_source": "sources/54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0024.jpg",
+      "source_id": "src_3c29806ddef097e7d2dff530f49d18e4",
+      "sha256": "3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba",
+      "stored_source": "sources/3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0025.jpg",
+      "source_id": "src_5cf926f0d4c1c65b71d162b3e47ae947",
+      "sha256": "5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41",
+      "stored_source": "sources/5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0026.jpg",
+      "source_id": "src_01577d5285c9315307e807b77e802c81",
+      "sha256": "01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31",
+      "stored_source": "sources/01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0027.jpg",
+      "source_id": "src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+      "sha256": "46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908",
+      "stored_source": "sources/46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0028.jpg",
+      "source_id": "src_f37cbe405bc095713b4c5096c9b3bafa",
+      "sha256": "f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a",
+      "stored_source": "sources/f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    }
+  ],
+  "external_errors": [],
+  "core_counts": {
+    "runs": 1,
+    "source_images": 14,
+    "proposals": 6,
+    "objects": 2,
+    "observations": 6,
+    "decisions": 6
+  },
+  "run_report": "run_reports/run_20260731T110624049759Z.json",
+  "demo_coverage": {
+    "at_least_two_new_object_archives": true,
+    "same_object_observation_was_merged": true,
+    "exact_duplicate_image_was_skipped": true,
+    "invalid_or_duplicate_mask_was_filtered": false,
+    "no_pending_or_failed_proposals": true
+  },
+  "pipeline_status": "completed_with_errors"
+}
