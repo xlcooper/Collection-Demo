@@ -23,6 +23,7 @@ venv/
 
 # Runtime data and model assets
 /data/
+/temp/
 /models/
 /weights/
 /runs/
