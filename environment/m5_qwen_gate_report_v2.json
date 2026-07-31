@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-31T02:59:56.723187+00:00",
+  "test": "m5_end_to_end_batch",
+  "status": "passed",
+  "run": {
+    "run_id": "run_20260731T025850232062Z",
+    "status": "completed",
+    "source_counts": {
+      "pending": 0,
+      "processing": 0,
+      "completed": 1,
+      "failed": 0
+    },
+    "proposal_counts": {
+      "pending": 0,
+      "filtered": 249,
+      "decided": 7,
+      "failed": 0
+    },
+    "decision_counts": {
+      "new": 2,
+      "existing": 0,
+      "ignored": 5,
+      "uncertain": 0
+    },
+    "observations_added": 2,
+    "active_objects_total": 2,
+    "duplicate_sources_skipped": 0,
+    "external_errors": 0
+  },
+  "checks": {
+    "input_images_nonempty": true,
+    "every_input_accounted_for": true,
+    "sam_then_qwen_sequential_boundary": true,
+    "no_source_left_processing": true,
+    "registered_sources_match_nonduplicates": true,
+    "all_qwen_candidates_have_persisted_status": true
+  },
+  "strategy": {
+    "prompt_strategy": "automatic_point_grid",
+    "external_category_prompts": false,
+    "points_per_side": 16,
+    "points_per_batch": 32,
+    "scope": "class-agnostic point-grid candidates; candidate coverage must be verified empirically",
+    "model_residency": "SAM3 then release; Qwen then release",
+    "qwen_call_unit": "one call per candidate per object-card batch",
+    "uncertain_policy": "persist pending; do not immediately repeat",
+    "error_attempts": 2
+  },
+  "models": {
+    "sam3": {
+      "loaded": true,
+      "model_load_seconds": 8.974,
+      "inference_seconds": 7.317,
+      "peak_memory_mib": 5390.59
+    },
+    "qwen": {
+      "loaded": true,
+      "model_load_seconds": 3.349,
+      "inference_seconds": 41.389,
+      "input_tokens": 17757,
+      "generated_tokens": 591,
+      "peak_memory_mib": 11536.39,
+      "placement": [
+        "0"
+      ],
+      "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45"
+    }
+  },
+  "images": [
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/m5_qwen_gate_input/m5a.jpg",
+      "source_id": "src_2bdc673815db2371a4ceed0cdbd4b832",
+      "sha256": "2bdc673815db2371a4ceed0cdbd4b8325d01d3742300d509025f36e755b02155",
+      "stored_source": "sources/2bdc673815db2371a4ceed0cdbd4b8325d01d3742300d509025f36e755b02155.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "sam": {
+        "raw_candidates": 256,
+        "kept": 7,
+        "filtered": 249,
+        "candidate_source_counts": {
+          "automatic_point_grid": 256
+        },
+        "inference_seconds": 7.317
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_30cf255f904c4aee9d55330c8f00f291",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000131",
+            "source": "automatic_point_grid",
+            "score": 0.98828125,
+            "bbox": {
+              "x_min": 38.0,
+              "y_min": 751.0,
+              "x_max": 444.0,
+              "y_max": 1048.0
+            },
+            "mask_area_ratio": 0.040329342413591096,
+            "crop": "proposals/run_20260731T025850232062Z/prop_30cf255f904c4aee9d55330c8f00f291/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_30cf255f904c4aee9d55330c8f00f291/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_30cf255f904c4aee9d55330c8f00f291/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_af535c6272334ac8a57d555c42e57aa5",
+          "confidence": 0.95,
+          "reason_code": "new_object",
+          "short_reason": "valid object, no matching reference card",
+          "annotation": {
+            "coarse_category": "computer peripheral",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "light gray"
+            ],
+            "shape": "ergonomic curved shape",
+            "description": "smooth light gray plastic computer mouse with a single scroll button and a central groove, viewed from a slight angle",
+            "annotation_confidence": 0.98
+          },
+          "qwen_call_attempts": 1,
+          "object_cards": 0,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_30cf255f904c4aee9d55330c8f00f291/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_4337df94f06149388a7e27767c30f733",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000067",
+            "source": "automatic_point_grid",
+            "score": 0.96875,
+            "bbox": {
+              "x_min": 243.0,
+              "y_min": 0.0,
+              "x_max": 662.0,
+              "y_max": 633.0
+            },
+            "mask_area_ratio": 0.06584651435266549,
+            "crop": "proposals/run_20260731T025850232062Z/prop_4337df94f06149388a7e27767c30f733/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_4337df94f06149388a7e27767c30f733/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_4337df94f06149388a7e27767c30f733/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "ignored",
+          "object_id": null,
+          "confidence": 0.0,
+          "reason_code": "invalid_candidate",
+          "short_reason": "candidate is a beverage cup, not a computer mouse",
+          "annotation": null,
+          "qwen_call_attempts": 1,
+          "object_cards": 1,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_4337df94f06149388a7e27767c30f733/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_9f840d4e4205423f8e634bd93ef3db4f",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000155",
+            "source": "automatic_point_grid",
+            "score": 0.96875,
+            "bbox": {
+              "x_min": 509.0,
+              "y_min": 879.0,
+              "x_max": 1280.0,
+              "y_max": 1301.0
+            },
+            "mask_area_ratio": 0.11370322568834212,
+            "crop": "proposals/run_20260731T025850232062Z/prop_9f840d4e4205423f8e634bd93ef3db4f/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_9f840d4e4205423f8e634bd93ef3db4f/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_9f840d4e4205423f8e634bd93ef3db4f/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_aff24a21ad624f439d6619671bf85955",
+          "confidence": 0.98,
+          "reason_code": "new_object",
+          "short_reason": "valid physical object, no match with reference card",
+          "annotation": {
+            "coarse_category": "container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "light gray"
+            ],
+            "shape": "cylindrical with curved handle",
+            "description": "transparent plastic bottle with water droplets, measurement markings, and a curved handle on the side",
+            "annotation_confidence": 0.98
+          },
+          "qwen_call_attempts": 1,
+          "object_cards": 1,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_9f840d4e4205423f8e634bd93ef3db4f/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_15104eb85c3a4fbca6c7b6a7222e8887",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000208",
+            "source": "automatic_point_grid",
+            "score": 0.96484375,
+            "bbox": {
+              "x_min": 0.0,
+              "y_min": 1336.0,
+              "x_max": 118.0,
+              "y_max": 1707.0
+            },
+            "mask_area_ratio": 0.01153568028705331,
+            "crop": "proposals/run_20260731T025850232062Z/prop_15104eb85c3a4fbca6c7b6a7222e8887/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_15104eb85c3a4fbca6c7b6a7222e8887/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_15104eb85c3a4fbca6c7b6a7222e8887/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "ignored",
+          "object_id": null,
+          "confidence": 0.0,
+          "reason_code": "invalid_candidate",
+          "short_reason": "仅显示模糊轮廓，无独立物体特征",
+          "annotation": null,
+          "qwen_call_attempts": 1,
+          "object_cards": 2,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_15104eb85c3a4fbca6c7b6a7222e8887/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_a3b77a19a2d7461bb3bdaea7a12be1ce",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000006",
+            "source": "automatic_point_grid",
+            "score": 0.94140625,
+            "bbox": {
+              "x_min": 456.0,
+              "y_min": 0.0,
+              "x_max": 572.0,
+              "y_max": 263.0
+            },
+            "mask_area_ratio": 0.004130052724077329,
+            "crop": "proposals/run_20260731T025850232062Z/prop_a3b77a19a2d7461bb3bdaea7a12be1ce/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_a3b77a19a2d7461bb3bdaea7a12be1ce/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_a3b77a19a2d7461bb3bdaea7a12be1ce/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "ignored",
+          "object_id": null,
+          "confidence": 0.0,
+          "reason_code": "invalid_candidate",
+          "short_reason": "candidate is a thin, solid-colored stick-like object, not a complete or independent physical object",
+          "annotation": null,
+          "qwen_call_attempts": 1,
+          "object_cards": 2,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_a3b77a19a2d7461bb3bdaea7a12be1ce/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_16cc8967ae454ea99ac8b22dfce51771",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000100",
+            "source": "automatic_point_grid",
+            "score": 0.9296875,
+            "bbox": {
+              "x_min": 213.0,
+              "y_min": 468.0,
+              "x_max": 509.0,
+              "y_max": 719.0
+            },
+            "mask_area_ratio": 0.012710530169888693,
+            "crop": "proposals/run_20260731T025850232062Z/prop_16cc8967ae454ea99ac8b22dfce51771/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_16cc8967ae454ea99ac8b22dfce51771/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_16cc8967ae454ea99ac8b22dfce51771/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "ignored",
+          "object_id": null,
+          "confidence": 0.0,
+          "reason_code": "invalid_candidate",
+          "short_reason": "candidate is a fragmented, non-identifiable object part",
+          "annotation": null,
+          "qwen_call_attempts": 1,
+          "object_cards": 2,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_16cc8967ae454ea99ac8b22dfce51771/call_01.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_63095b8ed45e43b3bd4829bef1ace91a",
+          "candidate": {
+            "raw_candidate_id": "grid_point_000046",
+            "source": "automatic_point_grid",
+            "score": 0.92578125,
+            "bbox": {
+              "x_min": 1007.0,
+              "y_min": 0.0,
+              "x_max": 1280.0,
+              "y_max": 894.0
+            },
+            "mask_area_ratio": 0.08910918277680141,
+            "crop": "proposals/run_20260731T025850232062Z/prop_63095b8ed45e43b3bd4829bef1ace91a/crop.png",
+            "mask": "proposals/run_20260731T025850232062Z/prop_63095b8ed45e43b3bd4829bef1ace91a/mask.png",
+            "overlay": "proposals/run_20260731T025850232062Z/prop_63095b8ed45e43b3bd4829bef1ace91a/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "ignored",
+          "object_id": null,
+          "confidence": 0.0,
+          "reason_code": "invalid_candidate",
+          "short_reason": "candidate is a shadow or reflection, not a physical object",
+          "annotation": null,
+          "qwen_call_attempts": 1,
+          "object_cards": 2,
+          "raw_response": "raw_responses/run_20260731T025850232062Z/prop_63095b8ed45e43b3bd4829bef1ace91a/call_01.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    }
+  ],
+  "external_errors": [],
+  "core_counts": {
+    "runs": 1,
+    "source_images": 1,
+    "proposals": 256,
+    "objects": 2,
+    "observations": 2,
+    "decisions": 7
+  },
+  "run_report": "run_reports/run_20260731T025850232062Z.json"
+}
