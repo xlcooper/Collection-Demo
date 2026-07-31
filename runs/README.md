@@ -4,20 +4,22 @@
 
 当前 Demo 数据规模有限，本目录全量进入 Git。这样本地可以检查服务器实际生成的候选图、mask、overlay、模型响应和历史实验目录，并依据代码引用判断哪些仍是最终 Demo 所需依赖、哪些只是可以清理的过往测试遗迹。
 
-已知代码入口包括：
+当前服务器快照共91个文件、52个子目录、约18.17 MiB。实际目录和用途如下：
 
-| 路径模式 | 生成入口 | 主要内容 |
-|---|---|---|
-| `runs/smoke/` | `scripts/run_server_smoke_tests.sh`、`smoke_sam3.py`、`smoke_qwen.py` | SAM3/Qwen 冒烟输出、响应和可视化 |
-| `runs/m2/` | `scripts/verify_m2.py` | 候选 crop、mask、overlay，供 M2 检查并可被 M3 复用 |
-| `runs/m3/` | `scripts/verify_m3.py` | 空记忆与同视图身份验证的 Qwen 原始响应 |
-| `runs/m5_auto_candidates_v2/` | `scripts/verify_m2.py` 的 M5-A 校准命令 | 无类别点网格候选及可视化 |
+| 路径 | 文件 / 体积 | 生成入口与用途 | 当前分类 |
+|---|---:|---|---|
+| `runs/m2/` | 4 / 0.88 MiB | `scripts/verify_m2.py` 生成候选 crop/mask/overlay；`verify_m3.py` 默认读取 | 代码仍引用且体积小，暂留 |
+| `runs/m3/` | 2 / <0.01 MiB | `scripts/verify_m3.py` 保存空记忆 new 与同视图 existing 原始响应 | 阶段证据，暂留 |
+| `runs/m5_auto_candidates/` | 52 / 13.99 MiB | M5-A v1 的12个候选和可视化，已由 v2 替代 | 列入待确认清理 |
+| `runs/m5_auto_candidates_v2/` | 28 / 3.29 MiB | M5-A v2 的7个候选和可视化 | 当前候选校准证据，暂留 |
+| `runs/smoke/` | 4 / <0.01 MiB | 冒烟脚本输出；带时间戳与无时间戳两套文件逐字节相同 | 重复历史输出，列入待确认清理 |
 
-以上只依据当前代码入口说明目录类型，不代表服务器一定只有这些目录，也不代表所有历史内容都应保留。服务器完成首次全量提交后，应进一步建立实际文件清单，并按以下四类审计：
+## 重复与清理边界
 
-1. 最终 Demo 运行所需；
-2. 验收或问题解释所需；
-3. 可由代码稳定再生、且不再需要的历史产物；
-4. 来源或依赖暂不能确认。
+- `runs/` 中13个 `.ipynb_checkpoints/` 目录包含21个重复文件，全部与正式同级资产逐字节相同，应在确认后的清洗提交中删除并加入忽略规则。
+- `runs/m5_auto_candidates/` v1 已被 v2 替代；根目录另有 `m5_candidate_preview.tar.gz`，内容对应同一 v1 预览资产，也列入待确认清理。
+- `runs/m2/` 当前仍被 `verify_m3.py` 默认读取，不应在未同步修改验证入口时删除。
+- `runs/m5_auto_candidates_v2/` 是已接受的 M5-A 候选校准可视证据；M5-B 问题关闭后可再决定是否只保留精选图和报告。
+- 端到端记忆库不在 `runs/`，而在 `data/<memory_root>/`。不要将 `runs/` 目录存在与否当作 M5-B 通过证据。
 
-在首次快照完成前不删除任何未知目录。当前验收状态仍以 `PROGRESS.md` 和 `environment/*.json` 为准，不能依据 `runs/` 是否存在判断通过。
+本轮只完成盘点，没有删除任何资产。当前实验结论、清理审批和下一动作以根目录 `PROGRESS.md` 为准。
