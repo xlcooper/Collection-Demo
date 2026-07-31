@@ -92,6 +92,12 @@ class M2PostprocessTests(unittest.TestCase):
             reasons = [proposal.filter_reason or "" for proposal in result.filtered]
             self.assertTrue(any(reason.startswith("duplicate_mask:") for reason in reasons))
 
+            assert kept.crop_path is not None
+            with Image.open(paths.resolve_asset(kept.crop_path)) as crop:
+                crop_pixels = np.asarray(crop.convert("RGB"))
+            self.assertEqual(tuple(crop_pixels[0, 0]), (127, 127, 127))
+            self.assertEqual(tuple(crop_pixels[5, 5]), (220, 220, 220))
+
     def test_mask_iou_is_deterministic(self) -> None:
         first = np.array([[True, True], [False, False]])
         second = np.array([[True, False], [True, False]])

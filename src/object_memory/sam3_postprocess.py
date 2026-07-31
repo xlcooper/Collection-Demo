@@ -230,7 +230,13 @@ def _save_candidate_assets(
         image.height,
         settings.crop_padding_pixels,
     )
-    _save_image_atomic(image.crop(crop_box), crop_path, "PNG")
+    isolated_crop = _make_mask_isolated_crop(
+        image,
+        candidate.raw.mask,
+        crop_box,
+        settings.crop_background_color,
+    )
+    _save_image_atomic(isolated_crop, crop_path, "PNG")
 
     overlay = _make_overlay(
         image,
@@ -258,6 +264,23 @@ def _crop_box(
     right = min(width, math.ceil(bbox.x_max) + padding)
     bottom = min(height, math.ceil(bbox.y_max) + padding)
     return left, top, right, bottom
+
+
+def _make_mask_isolated_crop(
+    image: Image.Image,
+    mask: np.ndarray,
+    crop_box: tuple[int, int, int, int],
+    background_color: tuple[int, int, int],
+) -> Image.Image:
+    """Keep source pixels inside the mask and neutralize nearby crop content."""
+
+    left, top, right, bottom = crop_box
+    source = np.asarray(image, dtype=np.uint8)[top:bottom, left:right]
+    crop_mask = mask[top:bottom, left:right]
+    isolated = np.empty_like(source)
+    isolated[:] = np.asarray(background_color, dtype=np.uint8)
+    isolated[crop_mask] = source[crop_mask]
+    return Image.fromarray(isolated, mode="RGB")
 
 
 def _make_overlay(

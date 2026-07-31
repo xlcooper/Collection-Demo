@@ -35,6 +35,14 @@ class ConfigTests(unittest.TestCase):
             config.models.qwen_model_id,
             "Qwen/Qwen3-VL-8B-Instruct-FP8",
         )
+        self.assertEqual(
+            config.mllm_pipeline.prompt_version,
+            "m3-object-identity-v3",
+        )
+        self.assertEqual(
+            config.sam3_pipeline.crop_background_color,
+            (127, 127, 127),
+        )
         self.assertEqual(len(config_digest(config)), 64)
 
 

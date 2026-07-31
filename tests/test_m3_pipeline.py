@@ -137,6 +137,9 @@ class M3IdentityPipelineTests(unittest.TestCase):
             )
             self.assertIn("No category hint was supplied", all_text)
             self.assertIn("infer its category only from pixels", all_text)
+            self.assertIn("mask-isolated", all_text)
+            self.assertIn("uniform neutral gray", all_text)
+            self.assertIn("Reject shadows, reflections", all_text)
 
     def test_messages_map_reference_image_to_object_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

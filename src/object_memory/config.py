@@ -71,6 +71,7 @@ class Sam3PipelineConfig(BaseModel):
     )
     max_candidates_per_image: int = Field(default=24, ge=1, le=256)
     crop_padding_pixels: int = Field(default=8, ge=0)
+    crop_background_color: tuple[int, int, int] = (127, 127, 127)
     overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)
     overlay_color: tuple[int, int, int] = (255, 64, 64)
 
@@ -84,13 +85,13 @@ class Sam3PipelineConfig(BaseModel):
             raise ValueError("SAM3 prompts must be unique")
         return normalized
 
-    @field_validator("overlay_color")
+    @field_validator("crop_background_color", "overlay_color")
     @classmethod
-    def validate_overlay_color(
+    def validate_rgb_color(
         cls, value: tuple[int, int, int]
     ) -> tuple[int, int, int]:
         if any(channel < 0 or channel > 255 for channel in value):
-            raise ValueError("overlay_color channels must be between 0 and 255")
+            raise ValueError("RGB color channels must be between 0 and 255")
         return value
 
     @model_validator(mode="after")
@@ -115,7 +116,10 @@ class MllmPipelineConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    prompt_version: Literal["m3-object-identity-v2"] = "m3-object-identity-v2"
+    prompt_version: Literal[
+        "m3-object-identity-v2",
+        "m3-object-identity-v3",
+    ] = "m3-object-identity-v3"
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=512, gt=0)
     object_card_batch_size: int = Field(default=8, gt=0)
