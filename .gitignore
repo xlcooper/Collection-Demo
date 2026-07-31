@@ -22,7 +22,8 @@ venv/
 /.cache/
 
 # Runtime data and model assets
-/data/
+/data/*
+!/data/README.md
 /temp/
 /models/
 /weights/

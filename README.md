@@ -235,6 +235,8 @@ SAM3 加载与候选生成
 
 默认记忆根目录由 `config/default.yaml` 配置。运行后形成类似结构：
 
+### 记忆库内部结构
+
 ```text
 data/memory/
 ├─ memory.sqlite
@@ -260,6 +262,21 @@ SQLite 核心表包括：
 - `decisions`
 
 图像资产与 SQLite 通过安全相对路径关联。新建或归并对象时，观测资产复制和数据库写入位于同一业务事务边界；数据库失败会清理本次提升的资产，避免留下半完成记录。
+
+### 服务器 `data/` 工作区
+
+服务器的 `data/` 同时容纳输入图片和彼此隔离的实验记忆库：
+
+| 目录模式 | 作用 | 示例 |
+|---|---|---|
+| `memory/` | 默认或正式 Demo 使用的持久对象记忆 | `data/memory/` |
+| `<purpose>_input/` | 某次实验的只读输入图片 | `data/m5_input/` |
+| `<purpose>_memory_<NN>/` | 某次独立实验的完整 SQLite 与资产根目录 | `data/m5_validation_memory_01/` |
+| `smoke/` | 环境和模型冒烟测试图片 | `data/smoke/` |
+
+每个 `<purpose>_memory_<NN>/` 都包含自己的 `memory.sqlite`、`sources/`、`proposals/`、`objects/`、`raw_responses/` 和 `run_reports/`。目录存在只代表实验曾创建或运行，是否通过仍需依据 Git 中的 `environment/*.json` 报告。
+
+真实图片、SQLite 和生成资产体积大、变化频繁且无法可靠合并，因此继续由 Git 忽略；Git 只跟踪目录说明和精选的机器可读报告。服务器现有各目录的具体来源、内部结构和清理原则见 [`data/README.md`](data/README.md)。
 
 ## 运行入口
 
@@ -291,6 +308,8 @@ python scripts/run_object_memory.py \
 ```text
 Collection-Demo/
 ├─ config/                    # 默认业务配置
+├─ data/
+│  └─ README.md               # 服务器运行数据目录说明；其他内容忽略
 ├─ docs/                      # 环境、运行与验证文档
 ├─ environment/               # 服务器生成的机器可读报告
 ├─ scripts/                   # 环境检查、冒烟、验证和总入口
@@ -320,6 +339,7 @@ Collection-Demo/
 | 文档 | 适合的读者与用途 |
 |---|---|
 | [`README.md`](README.md) | 第一次了解项目：背景、愿景、架构、环境和使用方式 |
+| [`data/README.md`](data/README.md) | 服务器 data 目录、记忆库内部结构、Git 边界和清理原则 |
 | [`AGENTS.md`](AGENTS.md) | AI 协作、开发规范、项目管理和文档维护 |
 | [`PROGRESS.md`](PROGRESS.md) | 当前里程碑、服务器证据、风险、计划和验收状态 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变化与历史记录 |
