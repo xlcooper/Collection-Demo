@@ -9,13 +9,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 from PIL import Image
-
-
-AUTOMATIC_CANDIDATE_SOURCE = "automatic_point_grid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,20 +51,15 @@ class Sam3Prediction:
 
 
 class Sam3Adapter:
-    """Load SAM3 once and expose class-agnostic CPU candidates."""
+    """Load SAM3 once and expose text-guided candidates on the CPU."""
 
     def __init__(
         self,
         checkpoint: str | Path,
         confidence_threshold: float,
-        *,
-        points_per_side: int = 16,
-        points_per_batch: int = 32,
     ) -> None:
         self.checkpoint = Path(checkpoint).expanduser().resolve()
         self.confidence_threshold = confidence_threshold
-        self.points_per_side = points_per_side
-        self.points_per_batch = points_per_batch
         self.model_load_seconds = 0.0
         self._model: Any | None = None
         self._processor: Any | None = None
@@ -78,10 +70,6 @@ class Sam3Adapter:
             return
         if not 0.0 <= self.confidence_threshold <= 1.0:
             raise ValueError("confidence_threshold must be between 0 and 1")
-        if self.points_per_side < 2:
-            raise ValueError("points_per_side must be at least 2")
-        if self.points_per_batch < 1:
-            raise ValueError("points_per_batch must be positive")
         if not self.checkpoint.is_file():
             raise FileNotFoundError(f"SAM3 checkpoint not found: {self.checkpoint}")
 
@@ -104,7 +92,7 @@ class Sam3Adapter:
             "load_from_HF": False,
             "device": "cuda",
             "eval_mode": True,
-            "enable_inst_interactivity": True,
+            "enable_inst_interactivity": False,
         }.items():
             if name in builder_parameters:
                 builder_kwargs[name] = value
@@ -124,138 +112,108 @@ class Sam3Adapter:
         self._processor = processor
         self._torch = torch
 
-    def predict(self, image: Image.Image) -> Sam3Prediction:
-        """Generate class-agnostic candidates from an automatic point grid."""
+    def predict(
+        self,
+        image: Image.Image,
+        prompts: Sequence[str],
+    ) -> Sam3Prediction:
+        """Segment all instances matching validated scene-guidance concepts."""
 
-        return self._predict_automatic(image)
-
-    def _predict_automatic(self, image: Image.Image) -> Sam3Prediction:
+        normalized_prompts = [
+            " ".join(prompt.strip().lower().split()) for prompt in prompts
+        ]
+        if not normalized_prompts or any(not prompt for prompt in normalized_prompts):
+            raise ValueError("At least one non-empty SAM3 text prompt is required")
+        if len(normalized_prompts) != len(set(normalized_prompts)):
+            raise ValueError("SAM3 text prompts must be unique")
         if self._processor is None:
             self.load()
 
         torch = self._torch
         processor = self._processor
-        model = self._model
-        if torch is None or processor is None or model is None:
+        if torch is None or processor is None:
             raise RuntimeError("SAM3 adapter failed to initialize")
-        if not hasattr(model, "predict_inst"):
-            raise RuntimeError(
-                "Installed SAM3 model does not expose interactive point prediction"
-            )
+        if not hasattr(processor, "set_text_prompt"):
+            raise RuntimeError("Installed SAM3 processor lacks text-prompt inference")
 
         rgb_image = image.convert("RGB")
-        grid_points = self._point_grid(rgb_image.width, rgb_image.height)
         candidates: list[RawSamCandidate] = []
+        prompt_counts: dict[str, int] = {}
         inference_started = time.perf_counter()
         with torch.inference_mode(), torch.autocast(
             device_type="cuda", dtype=torch.bfloat16
         ):
             state = processor.set_image(rgb_image)
-            for batch_start in range(0, len(grid_points), self.points_per_batch):
-                point_batch = grid_points[
-                    batch_start : batch_start + self.points_per_batch
-                ]
-                point_coords = point_batch[:, None, :]
-                point_labels = np.ones((len(point_batch), 1), dtype=np.int64)
-                masks, scores, _ = model.predict_inst(
-                    state,
-                    point_coords=point_coords,
-                    point_labels=point_labels,
-                    multimask_output=True,
+            for prompt_index, prompt in enumerate(normalized_prompts):
+                output = processor.set_text_prompt(
+                    state=state,
+                    prompt=prompt,
                 )
-                candidates.extend(
-                    self._extract_point_candidates(
-                        masks,
-                        scores,
-                        batch_start=batch_start,
-                        expected_count=len(point_batch),
-                    )
+                prompt_candidates = self._extract_text_candidates(
+                    output,
+                    prompt=prompt,
+                    prompt_index=prompt_index,
                 )
+                prompt_counts[prompt] = len(prompt_candidates)
+                candidates.extend(prompt_candidates)
         torch.cuda.synchronize()
         inference_seconds = time.perf_counter() - inference_started
         return Sam3Prediction(
             candidates=tuple(candidates),
-            prompt_counts={AUTOMATIC_CANDIDATE_SOURCE: len(candidates)},
+            prompt_counts=prompt_counts,
             inference_seconds=inference_seconds,
         )
 
-    def _point_grid(self, width: int, height: int) -> np.ndarray:
-        if width <= 0 or height <= 0:
-            raise ValueError("Image dimensions must be positive")
-        x_coords = (
-            np.arange(self.points_per_side, dtype=np.float32) + 0.5
-        ) * (width / self.points_per_side)
-        y_coords = (
-            np.arange(self.points_per_side, dtype=np.float32) + 0.5
-        ) * (height / self.points_per_side)
-        grid_x, grid_y = np.meshgrid(x_coords, y_coords)
-        return np.stack((grid_x.ravel(), grid_y.ravel()), axis=1)
-
-    def _extract_point_candidates(
-        self,
-        masks: Any,
-        scores: Any,
-        *,
-        batch_start: int,
-        expected_count: int,
-    ) -> list[RawSamCandidate]:
-        mask_array = np.asarray(masks)
-        score_array = np.asarray(scores)
-        if mask_array.ndim == 3:
-            mask_array = mask_array[None, ...]
-        if score_array.ndim == 1:
-            score_array = score_array[None, ...]
-        if mask_array.ndim != 4 or score_array.ndim != 2:
-            raise ValueError(
-                "Unexpected SAM3 point-prediction mask or score dimensions"
-            )
+    @staticmethod
+    def _to_cpu_array(value: Any) -> np.ndarray:
+        if hasattr(value, "detach"):
+            value = value.detach()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
         if (
-            mask_array.shape[0] != expected_count
-            or score_array.shape[0] != expected_count
-            or mask_array.shape[1] != score_array.shape[1]
+            hasattr(value, "is_floating_point")
+            and value.is_floating_point()
+            and hasattr(value, "float")
         ):
-            raise ValueError(
-                "SAM3 returned a different number of point prompts, masks, or scores"
-            )
+            value = value.float()
+        return np.asarray(value)
+
+    def _extract_text_candidates(
+        self,
+        output: dict[str, Any],
+        *,
+        prompt: str,
+        prompt_index: int,
+    ) -> list[RawSamCandidate]:
+        mask_array = self._to_cpu_array(output["masks"])
+        box_array = self._to_cpu_array(output["boxes"]).reshape(-1, 4)
+        score_array = self._to_cpu_array(output["scores"]).reshape(-1)
+        if mask_array.ndim == 4 and mask_array.shape[1] == 1:
+            mask_array = mask_array[:, 0]
+        if mask_array.ndim == 2:
+            mask_array = mask_array[None, ...]
+        if mask_array.ndim != 3:
+            raise ValueError(f"Unexpected SAM3 mask shape: {mask_array.shape}")
+        count = int(mask_array.shape[0])
+        if box_array.shape[0] != count or score_array.shape[0] != count:
+            raise ValueError("SAM3 returned different mask, box, and score counts")
 
         candidates: list[RawSamCandidate] = []
-        for point_offset in range(expected_count):
-            best_mask_index = int(np.argmax(score_array[point_offset]))
-            score = float(
-                np.clip(score_array[point_offset, best_mask_index], 0.0, 1.0)
-            )
-            mask = np.asarray(
-                mask_array[point_offset, best_mask_index],
-                dtype=bool,
-            )
-            bbox = self._mask_bbox(mask)
-            if bbox is None:
-                bbox = (0.0, 0.0, 0.0, 0.0)
-            point_index = batch_start + point_offset
+        for candidate_index in range(count):
             candidates.append(
                 RawSamCandidate(
-                    raw_candidate_id=f"grid_point_{point_index:06d}",
-                    prompt=AUTOMATIC_CANDIDATE_SOURCE,
-                    score=score,
-                    bbox_xyxy=bbox,
-                    mask=mask,
+                    raw_candidate_id=(
+                        f"text_{prompt_index:03d}_candidate_{candidate_index:03d}"
+                    ),
+                    prompt=prompt,
+                    score=float(np.clip(score_array[candidate_index], 0.0, 1.0)),
+                    bbox_xyxy=tuple(
+                        float(value) for value in box_array[candidate_index]
+                    ),
+                    mask=np.asarray(mask_array[candidate_index] > 0.5, dtype=bool),
                 )
             )
         return candidates
-
-    @staticmethod
-    def _mask_bbox(
-        mask: np.ndarray,
-    ) -> tuple[float, float, float, float] | None:
-        y_indices, x_indices = np.nonzero(mask)
-        if not len(x_indices):
-            return None
-        return (
-            float(x_indices.min()),
-            float(y_indices.min()),
-            float(x_indices.max() + 1),
-            float(y_indices.max() + 1),
-        )
 
     @property
     def peak_memory_mib(self) -> float:

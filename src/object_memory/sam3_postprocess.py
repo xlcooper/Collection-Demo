@@ -98,11 +98,11 @@ def process_candidates(
             continue
         prepared.append(_PreparedCandidate(raw=raw, proposal=proposal))
 
-    kept_prepared: list[_PreparedCandidate] = []
+    deduplicated_prepared: list[_PreparedCandidate] = []
     for candidate in prepared:
         duplicate_of: Proposal | None = None
         contained_by: Proposal | None = None
-        for kept_candidate in kept_prepared:
+        for kept_candidate in deduplicated_prepared:
             intersection = int(
                 np.count_nonzero(candidate.raw.mask & kept_candidate.raw.mask)
             )
@@ -117,6 +117,7 @@ def process_candidates(
                 break
             if (
                 contained_by is None
+                and candidate.raw.prompt == kept_candidate.raw.prompt
                 and candidate.proposal.mask_area_pixels
                 < kept_candidate.proposal.mask_area_pixels
                 and intersection / candidate.proposal.mask_area_pixels
@@ -135,12 +136,40 @@ def process_candidates(
             filtered.append(candidate.proposal)
             filter_counts["contained_mask"] += 1
             continue
-        if len(kept_prepared) >= settings.max_candidates_per_image:
-            _mark_filtered(candidate.proposal, "candidate_limit")
-            filtered.append(candidate.proposal)
-            filter_counts["candidate_limit"] += 1
+        deduplicated_prepared.append(candidate)
+
+    # Reserve the best surviving mask for every requested concept before using
+    # remaining capacity by global score. This prevents a high-frequency prompt
+    # from starving another concept selected by the scene-guidance stage.
+    prompt_order = list(dict.fromkeys(candidate.prompt for candidate in candidates))
+    selected_ids: set[str] = set()
+    for prompt in prompt_order:
+        best_for_prompt = next(
+            (
+                candidate
+                for candidate in deduplicated_prepared
+                if candidate.raw.prompt == prompt
+            ),
+            None,
+        )
+        if best_for_prompt is None:
             continue
-        kept_prepared.append(candidate)
+        if len(selected_ids) >= settings.max_candidates_per_image:
+            break
+        selected_ids.add(best_for_prompt.proposal.id)
+    for candidate in deduplicated_prepared:
+        if len(selected_ids) >= settings.max_candidates_per_image:
+            break
+        selected_ids.add(candidate.proposal.id)
+
+    kept_prepared: list[_PreparedCandidate] = []
+    for candidate in deduplicated_prepared:
+        if candidate.proposal.id in selected_ids:
+            kept_prepared.append(candidate)
+            continue
+        _mark_filtered(candidate.proposal, "candidate_limit")
+        filtered.append(candidate.proposal)
+        filter_counts["candidate_limit"] += 1
 
     kept: list[Proposal] = []
     for candidate in kept_prepared:

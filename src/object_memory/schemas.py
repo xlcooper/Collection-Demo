@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import PurePosixPath
+import re
 from typing import Annotated
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    field_validator,
     model_validator,
 )
 
@@ -94,6 +96,115 @@ class DecisionReasonCode(str, Enum):
 class CandidateValidity(str, Enum):
     VALID = "valid"
     IGNORED = "ignored"
+
+
+class SceneTargetPriority(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+
+
+class SceneTargetReasonCode(str, Enum):
+    MANIPULABLE = "manipulable"
+    TASK_RELEVANT = "task_relevant"
+    IDENTITY_WORTHY = "identity_worthy"
+    UNCERTAIN_STANDALONE = "uncertain_standalone"
+
+
+class SceneTarget(StrictModel):
+    """One first-pass object concept that may be sent to SAM3."""
+
+    target_id: Identifier
+    object_name_zh: NonEmptyText
+    sam_text_prompt: NonEmptyText
+    priority: SceneTargetPriority
+    confidence: Confidence
+    selection_reason_code: SceneTargetReasonCode
+    selection_short_reason: NonEmptyText
+
+    @field_validator("sam_text_prompt")
+    @classmethod
+    def validate_sam_text_prompt(cls, value: str) -> str:
+        normalized = " ".join(value.strip().lower().split())
+        if not 2 <= len(normalized) <= 64:
+            raise ValueError("sam_text_prompt must contain 2 to 64 characters")
+        words = normalized.split()
+        if len(words) > 6:
+            raise ValueError("sam_text_prompt must contain at most 6 words")
+        if not re.fullmatch(r"[a-z][a-z0-9]*(?:[ '][a-z0-9]+)*", normalized):
+            raise ValueError(
+                "sam_text_prompt must be a short lowercase English noun phrase"
+            )
+        forbidden_words = {
+            "and",
+            "or",
+            "with",
+            "left",
+            "right",
+            "upper",
+            "lower",
+            "top",
+            "bottom",
+            "front",
+            "rear",
+            "near",
+            "on",
+            "in",
+            "under",
+            "above",
+            "below",
+            "behind",
+            "beside",
+            "between",
+            "next",
+            "to",
+            "by",
+            "from",
+            "of",
+            "object",
+            "objects",
+            "item",
+            "items",
+            "thing",
+            "things",
+            "stuff",
+            "scene",
+            "region",
+            "area",
+            "background",
+            "foreground",
+        }
+        if forbidden_words.intersection(words):
+            raise ValueError("sam_text_prompt is too generic for SAM3")
+        return normalized
+
+
+class SceneImageGuidance(StrictModel):
+    """First-pass scene survey for one exact source image."""
+
+    source_id: Identifier
+    scene_summary: NonEmptyText
+    targets: list[SceneTarget] = Field(default_factory=list)
+    no_target_reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_scene_targets(self) -> "SceneImageGuidance":
+        target_ids = [target.target_id for target in self.targets]
+        prompts = [target.sam_text_prompt for target in self.targets]
+        if len(target_ids) != len(set(target_ids)):
+            raise ValueError("scene target IDs must be unique within one image")
+        if len(prompts) != len(set(prompts)):
+            raise ValueError("SAM3 text prompts must be unique within one image")
+        if self.targets and self.no_target_reason is not None:
+            raise ValueError("no_target_reason is only valid when targets is empty")
+        if not self.targets and not (self.no_target_reason or "").strip():
+            raise ValueError("an empty target list requires no_target_reason")
+        return self
+
+
+class SceneGuidanceBatchResponse(StrictModel):
+    """One Qwen response covering a batch of source-scene images."""
+
+    images: list[SceneImageGuidance] = Field(min_length=1)
 
 
 class BoundingBox(StrictModel):

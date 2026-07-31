@@ -230,7 +230,7 @@ class BatchPromptTests(unittest.TestCase):
                         proposal_id=f"prop_{index}",
                         crop_path=crop,
                         overlay_path=overlay,
-                        sam_prompt="automatic_point_grid",
+                        sam_prompt="coffee cup",
                     )
                 )
             references: list[str] = []
@@ -266,6 +266,11 @@ class BatchPromptTests(unittest.TestCase):
             self.assertIn("obj_one", all_text)
             self.assertIn("obj_two", all_text)
             self.assertIn("No script-side similarity ranking", all_text)
+            self.assertIn("retrieval hypothesis", all_text)
+            self.assertLess(
+                all_text.index("MASK_ISOLATED_CROP"),
+                all_text.index("retrieval hypothesis"),
+            )
             self.assertIn("temporary_annotation", all_text)
             self.assertIn("final_annotation", all_text)
             self.assertEqual(reference_count, 2)
@@ -285,7 +290,7 @@ class BatchPromptTests(unittest.TestCase):
                         proposal_id=f"prop_{index}",
                         crop_path=crop,
                         overlay_path=overlay,
-                        sam_prompt="automatic_point_grid",
+                        sam_prompt="coffee cup",
                     )
                 )
             predictor = QueuePredictor(

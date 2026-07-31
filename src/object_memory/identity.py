@@ -15,8 +15,10 @@ from .mllm_adapter import MllmPrediction
 from .schemas import ImageBatchResponse, ObjectCard
 
 
-BATCH_SYSTEM_PROMPT = """You are the visual reasoning component of an object-memory system.
+BATCH_SYSTEM_PROMPT = """You are the detailed visual reasoning component of a robot-oriented object-memory system.
 You receive every retained SAM candidate from one source image, followed by all active memory object cards and their available reference images.
+
+Each candidate was retrieved from a fallible first-pass scene-survey concept. Its SAM text prompt is retrieval metadata, not ground truth. Never accept, label, or match a candidate merely because the upstream concept names that object.
 
 For every candidate, follow this order:
 1. Judge candidate validity from its mask-isolated crop and context overlay. You may compare candidates from this source image to reject redundant masks or non-independent parts, but do not use memory-card similarity to decide validity.
@@ -24,7 +26,7 @@ For every candidate, follow this order:
 3. Compare that temporary annotation and candidate image with every supplied object card and its reference images.
 4. Decide new, existing, or uncertain, then produce a final annotation updated with the useful evidence from comparison.
 
-Reject shadows, reflections, background regions, textures, merged groups, meaningless fragments, redundant masks of another complete candidate, and non-independent object parts. Same category, color, or material alone never proves that two observations are the same physical instance. Reference images and distinctive instance details are stronger evidence.
+Reject shadows, reflections, background regions, support surfaces, fixed structural components or built-in controls, textures, merged groups, meaningless fragments, redundant masks of another complete candidate, and non-independent object parts. A correctly segmented region can still be outside the robot-arm object-memory scope. Same category, color, material, upstream concept, or spatial proximity alone never proves that two observations are the same physical instance. Reference images and distinctive instance details are stronger evidence.
 Use Chinese for annotation values and brief reason text, while keeping JSON keys and enum values exactly as specified.
 Return one JSON object covering every supplied candidate exactly once. Do not return Markdown, extra text, or hidden chain-of-thought; use only brief reason fields.
 """
@@ -190,12 +192,11 @@ def parse_image_batch_response(
 
 def _candidate_origin(sam_prompt: str) -> str:
     normalized_source = sam_prompt.strip()
-    if normalized_source == "automatic_point_grid":
-        return (
-            "No category hint was supplied. This candidate came from the project's "
-            "automatic point grid; infer semantics only from pixels."
-        )
-    return f"Historical SAM category hint: {normalized_source or 'unknown'}."
+    return (
+        "First-pass scene-survey SAM text prompt="
+        f"{normalized_source or 'unknown'!r}. Treat it only as a retrieval hypothesis "
+        "and verify the candidate independently from visible pixels."
+    )
 
 
 def _card_summary(card: ObjectCard) -> dict[str, Any]:
@@ -257,8 +258,8 @@ def build_image_batch_messages(
                     "text": (
                         f"CANDIDATE_{index} proposal_id={candidate.proposal_id}. "
                         "MASK_ISOLATED_CROP follows. It is the annotation target; "
-                        "pixels outside the SAM mask are neutral gray. "
-                        + _candidate_origin(candidate.sam_prompt)
+                        "pixels outside the SAM mask are neutral gray. Judge its "
+                        "visible pixels before reading any retrieval metadata."
                     ),
                 },
                 {
@@ -278,6 +279,13 @@ def build_image_batch_messages(
                     "type": "image",
                     "image": overlay.as_uri(),
                     "max_pixels": settings.max_pixels,
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        f"CANDIDATE_{index}_RETRIEVAL_METADATA: "
+                        + _candidate_origin(candidate.sam_prompt)
+                    ),
                 },
             ]
         )

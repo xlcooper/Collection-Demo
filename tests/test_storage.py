@@ -13,7 +13,12 @@ from pydantic import ValidationError
 
 from object_memory.assets import MemoryPaths
 from object_memory.cli import main as cli_main
-from object_memory.config import DEFAULT_CONFIG_PATH, config_digest, load_config
+from object_memory.config import (
+    AppConfig,
+    DEFAULT_CONFIG_PATH,
+    config_digest,
+    load_config,
+)
 from object_memory.memory_store import CORE_TABLES, SCHEMA_VERSION, MemoryStore
 from object_memory.schemas import (
     BoundingBox,
@@ -30,15 +35,16 @@ from object_memory.schemas import (
 class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self) -> None:
         config = load_config(DEFAULT_CONFIG_PATH)
-        self.assertEqual(config.schema_version, 1)
+        self.assertEqual(config.schema_version, 2)
         self.assertEqual(
             config.models.qwen_model_id,
             "Qwen/Qwen3-VL-8B-Instruct-FP8",
         )
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "image-batch-memory-reasoning-v1",
+            "guided-image-batch-memory-reasoning-v2",
         )
+        self.assertEqual(config.mllm_pipeline.scene_batch_size, 4)
         self.assertEqual(
             config.mllm_pipeline.max_new_tokens,
             4096,
@@ -48,6 +54,14 @@ class ConfigTests(unittest.TestCase):
             (127, 127, 127),
         )
         self.assertEqual(len(config_digest(config)), 64)
+
+    def test_scene_target_count_cannot_exceed_candidate_capacity(self) -> None:
+        payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
+        payload["mllm_pipeline"]["max_scene_targets_per_image"] = 13
+        payload["sam3_pipeline"]["max_candidates_per_image"] = 12
+
+        with self.assertRaises(ValidationError):
+            AppConfig.model_validate(payload)
 
 
 class SchemaTests(unittest.TestCase):

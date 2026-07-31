@@ -76,10 +76,10 @@ class MemoryPaths:
         observation_id = _validate_segment(observation_id, "observation_id")
         return self.objects / object_id / "observations" / observation_id
 
-    def raw_response_dir(self, run_id: str, proposal_id: str) -> Path:
+    def raw_response_dir(self, run_id: str, scope_id: str) -> Path:
         run_id = _validate_segment(run_id, "run_id")
-        proposal_id = _validate_segment(proposal_id, "proposal_id")
-        return self.raw_responses / run_id / proposal_id
+        scope_id = _validate_segment(scope_id, "scope_id")
+        return self.raw_responses / run_id / scope_id
 
     def resolve_asset(self, relative_path: str) -> Path:
         """Resolve a stored POSIX relative path and prevent root traversal."""

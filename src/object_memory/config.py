@@ -47,13 +47,11 @@ class ModelConfig(BaseModel):
 
 
 class Sam3PipelineConfig(BaseModel):
-    """Deterministic settings for class-agnostic SAM3 candidate generation."""
+    """Deterministic settings for text-guided SAM3 candidate generation."""
 
     model_config = ConfigDict(extra="forbid")
 
-    points_per_side: int = Field(default=16, ge=2, le=64)
-    points_per_batch: int = Field(default=32, ge=1, le=256)
-    confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
     max_mask_area_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
     duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
@@ -87,13 +85,18 @@ class Sam3PipelineConfig(BaseModel):
 
 
 class MllmPipelineConfig(BaseModel):
-    """Settings for constrained Qwen object annotation and identity checks."""
+    """Settings for scene guidance and constrained object-memory reasoning."""
 
     model_config = ConfigDict(extra="forbid")
 
+    scene_prompt_version: Literal[
+        "robot-scene-guidance-v1"
+    ] = "robot-scene-guidance-v1"
     prompt_version: Literal[
-        "image-batch-memory-reasoning-v1"
-    ] = "image-batch-memory-reasoning-v1"
+        "guided-image-batch-memory-reasoning-v2"
+    ] = "guided-image-batch-memory-reasoning-v2"
+    scene_batch_size: int = Field(default=4, ge=1, le=8)
+    max_scene_targets_per_image: int = Field(default=12, ge=1, le=24)
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=4096, gt=0)
     max_reference_views_per_object: int = Field(default=2, gt=0)
@@ -106,11 +109,23 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)
     mllm_pipeline: MllmPipelineConfig = Field(default_factory=MllmPipelineConfig)
+
+    @model_validator(mode="after")
+    def validate_scene_target_capacity(self) -> "AppConfig":
+        if (
+            self.mllm_pipeline.max_scene_targets_per_image
+            > self.sam3_pipeline.max_candidates_per_image
+        ):
+            raise ValueError(
+                "max_scene_targets_per_image must not exceed "
+                "max_candidates_per_image"
+            )
+        return self
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:

@@ -86,7 +86,7 @@ def validate_directory_separation(input_root: Path, memory_root: Path) -> None:
 
 def failure_report(exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 3,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "object_memory_demo_batch",
         "status": "failed",
@@ -139,8 +139,6 @@ def main() -> int:
         sam_runtime = Sam3Adapter(
             checkpoint,
             config.sam3_pipeline.confidence_threshold,
-            points_per_side=config.sam3_pipeline.points_per_side,
-            points_per_batch=config.sam3_pipeline.points_per_batch,
         )
         mllm_runtime = QwenMllmAdapter(
             config.models.qwen_model_id,
