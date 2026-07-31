@@ -86,6 +86,18 @@ def annotation() -> ObjectAnnotation:
     )
 
 
+def updated_annotation() -> ObjectAnnotation:
+    return ObjectAnnotation(
+        coarse_category="容器",
+        fine_category="马克杯",
+        material=["陶瓷"],
+        color=["白色", "蓝色杯沿"],
+        shape="带把手的圆柱形",
+        description="白色陶瓷马克杯，新增观测确认蓝色细杯沿",
+        annotation_confidence=0.97,
+    )
+
+
 class M4MemoryLoopTests(unittest.TestCase):
     def test_new_existing_duplicate_and_card_query(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -136,7 +148,7 @@ class M4MemoryLoopTests(unittest.TestCase):
                     confidence=0.98,
                     reason_code=DecisionReasonCode.VISUAL_INSTANCE_MATCH,
                     short_reason="视觉实例一致",
-                    annotation=annotation(),
+                    annotation=updated_annotation(),
                 ),
                 prompt_version="m3-object-identity-v2",
             )
@@ -150,11 +162,6 @@ class M4MemoryLoopTests(unittest.TestCase):
             duplicate_summary = loop.complete_run(duplicate_run.id)
 
             cards = loop.object_cards(max_reference_views=2)
-            text_cards = loop.object_card_texts()
-            hydrated_cards = loop.object_cards_by_ids(
-                [new_result.object_id],
-                max_reference_views=1,
-            )
             counts = store.status().counts
             self.assertFalse(first_registration.duplicate)
             self.assertTrue(duplicate_registration.duplicate)
@@ -170,12 +177,12 @@ class M4MemoryLoopTests(unittest.TestCase):
             self.assertEqual(counts["decisions"], 2)
             self.assertEqual(len(cards), 1)
             self.assertEqual(cards[0].object_id, new_result.object_id)
-            self.assertEqual(len(cards[0].representative_view_paths), 2)
-            self.assertEqual(text_cards[0].representative_view_paths, [])
             self.assertEqual(
-                len(hydrated_cards[0].representative_view_paths),
-                1,
+                cards[0].description,
+                "白色陶瓷马克杯，新增观测确认蓝色细杯沿",
             )
+            self.assertEqual(cards[0].color, ["白色", "蓝色杯沿"])
+            self.assertEqual(len(cards[0].representative_view_paths), 2)
             for relative_path in cards[0].representative_view_paths:
                 self.assertTrue(paths.resolve_asset(relative_path).is_file())
 

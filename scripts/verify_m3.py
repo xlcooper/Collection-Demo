@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify real Qwen annotation and same-object card matching on M2 assets."""
+"""Verify real Qwen image-batch reasoning on existing M2 candidate assets."""
 
 from __future__ import annotations
 
@@ -18,17 +18,20 @@ if str(SRC_ROOT) not in sys.path:
 
 from object_memory.assets import MemoryPaths  # noqa: E402
 from object_memory.config import DEFAULT_CONFIG_PATH, load_config  # noqa: E402
-from object_memory.identity import evaluate_candidate  # noqa: E402
+from object_memory.identity import (  # noqa: E402
+    BatchCandidateInput,
+    evaluate_image_batch,
+)
 from object_memory.mllm_adapter import QwenMllmAdapter  # noqa: E402
 from object_memory.schemas import DecisionType, ObjectAnnotation, ObjectCard  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify the real M3 Qwen pipeline.")
+    parser = argparse.ArgumentParser(description="Verify the real M3 Qwen interface.")
     parser.add_argument(
         "--m2-report",
         default="environment/m2_sam3_pipeline_report.json",
-        help="Passed M2 report used to locate one kept candidate.",
+        help="Passed M2 report used to locate one retained candidate.",
     )
     parser.add_argument(
         "--m2-output-dir",
@@ -89,7 +92,6 @@ def load_kept_candidate(
     proposals = report.get("proposals")
     if not isinstance(proposals, list):
         raise ValueError("M2 report has no proposal list")
-
     kept = next(
         (
             proposal
@@ -99,14 +101,14 @@ def load_kept_candidate(
         None,
     )
     if kept is None:
-        raise ValueError("M2 report contains no kept candidate")
+        raise ValueError("M2 report contains no retained candidate")
     assets = kept.get("assets")
     if not isinstance(assets, dict):
-        raise ValueError("Kept M2 candidate has no assets")
+        raise ValueError("Retained M2 candidate has no assets")
     crop_relative = assets.get("crop")
     overlay_relative = assets.get("overlay")
     if not isinstance(crop_relative, str) or not isinstance(overlay_relative, str):
-        raise ValueError("Kept M2 candidate lacks crop or overlay path")
+        raise ValueError("Retained M2 candidate lacks crop or overlay path")
     crop = asset_paths.resolve_asset(crop_relative)
     overlay = asset_paths.resolve_asset(overlay_relative)
     if not crop.is_file() or not overlay.is_file():
@@ -126,6 +128,8 @@ def annotation_targets_object(
         f"{annotation.coarse_category} {annotation.fine_category}"
     ).casefold()
     normalized_prompt = sam_prompt.strip().casefold()
+    if normalized_prompt == "automatic_point_grid":
+        return bool(annotation.coarse_category and annotation.fine_category)
     aliases = {
         "cup": ("cup", "mug", "杯"),
         "mug": ("cup", "mug", "杯"),
@@ -136,30 +140,18 @@ def annotation_targets_object(
 
 def evaluation_summary(evaluation: Any) -> dict[str, Any]:
     return {
-        "analysis": evaluation.analysis.model_dump(mode="json"),
-        "memory_lookup_performed": evaluation.memory_lookup_performed,
-        "available_object_cards": evaluation.available_object_cards,
-        "shortlisted": [
-            item.as_dict() for item in evaluation.retrieved_cards
-        ],
-        "identity_confirmation": (
-            evaluation.identity_response.model_dump(mode="json")
-            if evaluation.identity_response is not None
-            else None
-        ),
-        "predictions": [
-            {
-                "stage": (
-                    "candidate_analysis"
-                    if index == 0
-                    else "identity_confirmation"
-                ),
-                "input_tokens": prediction.input_tokens,
-                "generated_tokens": prediction.generated_tokens,
-                "inference_seconds": round(prediction.inference_seconds, 3),
-            }
-            for index, prediction in enumerate(evaluation.predictions)
-        ],
+        "response": evaluation.response.model_dump(mode="json"),
+        "object_card_count": evaluation.object_card_count,
+        "object_card_ids": list(evaluation.object_card_ids),
+        "reference_image_count": evaluation.reference_image_count,
+        "prediction": {
+            "input_tokens": evaluation.prediction.input_tokens,
+            "generated_tokens": evaluation.prediction.generated_tokens,
+            "inference_seconds": round(
+                evaluation.prediction.inference_seconds,
+                3,
+            ),
+        },
     }
 
 
@@ -172,7 +164,14 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         m2_report_path,
         m2_asset_paths,
     )
+    proposal_id = str(kept.get("id") or "prop_m3_candidate")
     sam_prompt = str(kept.get("prompt") or "unknown")
+    candidate = BatchCandidateInput(
+        proposal_id=proposal_id,
+        crop_path=crop,
+        overlay_path=overlay,
+        sam_prompt=sam_prompt,
+    )
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     model_id = args.model or config.models.qwen_model_id
@@ -184,7 +183,7 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         max_pixels=settings.max_pixels,
         max_new_tokens=settings.max_new_tokens,
     )
-    empty_memory_evaluation = None
+    empty_evaluation = None
     same_view_evaluation = None
     peak_memory_mib = 0.0
     model_load_seconds = 0.0
@@ -192,58 +191,43 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     snapshot: str | None = None
     try:
         adapter.load()
-        empty_memory_evaluation = evaluate_candidate(
+        empty_evaluation = evaluate_image_batch(
             adapter,
-            candidate_crop=crop,
-            candidate_overlay=overlay,
-            sam_prompt=sam_prompt,
-            get_card_texts=lambda: [],
-            get_reference_cards=lambda object_ids: [],
+            candidates=[candidate],
+            cards=[],
             card_assets=m2_asset_paths,
             settings=settings,
         )
         write_raw(
-            output_dir / "empty_memory_analysis_response.txt",
-            empty_memory_evaluation.analysis_prediction.raw_text,
+            output_dir / "empty_memory_batch_response.txt",
+            empty_evaluation.prediction.raw_text,
         )
 
-        annotation = empty_memory_evaluation.final_response.annotation
-        if annotation is not None:
+        first_result = empty_evaluation.response.candidates[0]
+        final_annotation = first_result.final_annotation
+        if final_annotation is not None:
             reference_object_id = "obj_m3_same_view_reference"
-            crop_relative = str(kept["assets"]["crop"])
             reference_card = ObjectCard(
                 object_id=reference_object_id,
-                coarse_category=annotation.coarse_category,
-                fine_category=annotation.fine_category,
-                material=annotation.material,
-                color=annotation.color,
-                shape=annotation.shape,
-                description=annotation.description,
-                representative_view_paths=[crop_relative],
+                coarse_category=final_annotation.coarse_category,
+                fine_category=final_annotation.fine_category,
+                material=final_annotation.material,
+                color=final_annotation.color,
+                shape=final_annotation.shape,
+                description=final_annotation.description,
+                representative_view_paths=[str(kept["assets"]["crop"])],
             )
-            same_view_evaluation = evaluate_candidate(
+            same_view_evaluation = evaluate_image_batch(
                 adapter,
-                candidate_crop=crop,
-                candidate_overlay=overlay,
-                sam_prompt=sam_prompt,
-                get_card_texts=lambda: [
-                    reference_card.model_copy(
-                        update={"representative_view_paths": []}
-                    )
-                ],
-                get_reference_cards=lambda object_ids: [reference_card],
+                candidates=[candidate],
+                cards=[reference_card],
                 card_assets=m2_asset_paths,
                 settings=settings,
             )
             write_raw(
-                output_dir / "same_view_analysis_response.txt",
-                same_view_evaluation.analysis_prediction.raw_text,
+                output_dir / "same_view_batch_response.txt",
+                same_view_evaluation.prediction.raw_text,
             )
-            if same_view_evaluation.identity_prediction is not None:
-                write_raw(
-                    output_dir / "same_view_identity_response.txt",
-                    same_view_evaluation.identity_prediction.raw_text,
-                )
 
         peak_memory_mib = adapter.peak_memory_mib
         model_load_seconds = adapter.model_load_seconds
@@ -252,36 +236,43 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
     finally:
         adapter.close()
 
-    assert empty_memory_evaluation is not None
-    empty_response = empty_memory_evaluation.final_response
-    same_response = (
-        same_view_evaluation.final_response
+    assert empty_evaluation is not None
+    empty_result = empty_evaluation.response.candidates[0]
+    same_result = (
+        same_view_evaluation.response.candidates[0]
         if same_view_evaluation is not None
         else None
     )
     checks = {
         "m2_report_passed": m2_report.get("status") == "passed",
-        "two_stage_prompt_configured": (
-            settings.prompt_version
-            == "m5-semantic-retrieval-visual-confirmation-v1"
+        "image_batch_prompt_configured": (
+            settings.prompt_version == "m5-image-batch-memory-reasoning-v1"
         ),
-        "empty_memory_decision_new": empty_response.decision is DecisionType.NEW,
-        "new_annotation_complete": empty_response.annotation is not None,
+        "empty_memory_decision_new": empty_result.decision is DecisionType.NEW,
+        "new_temporary_annotation_complete": (
+            empty_result.temporary_annotation is not None
+        ),
+        "new_final_annotation_complete": empty_result.final_annotation is not None,
         "annotation_targets_physical_object": annotation_targets_object(
-            empty_response.annotation,
+            empty_result.final_annotation,
             sam_prompt,
         ),
         "same_view_decision_existing": (
-            same_response is not None
-            and same_response.decision is DecisionType.EXISTING
+            same_result is not None
+            and same_result.decision is DecisionType.EXISTING
         ),
         "same_view_match_id_valid": (
-            same_response is not None
-            and same_response.matched_object_id == "obj_m3_same_view_reference"
+            same_result is not None
+            and same_result.matched_object_id == "obj_m3_same_view_reference"
         ),
         "all_outputs_schema_valid": True,
         "database_unchanged_by_m3": True,
     }
+    evaluations = [
+        evaluation
+        for evaluation in (empty_evaluation, same_view_evaluation)
+        if evaluation is not None
+    ]
     return {
         "status": "passed" if all(checks.values()) else "failed",
         "checks": checks,
@@ -294,80 +285,52 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
         },
         "input": {
             "m2_report": portable_report_path(m2_report_path),
-            "proposal_id": kept.get("id"),
+            "proposal_id": proposal_id,
             "sam_prompt": sam_prompt,
             "crop": str(kept["assets"]["crop"]),
             "overlay": str(kept["assets"]["overlay"]),
         },
         "settings": settings.model_dump(mode="json"),
         "interface": {
-            "ordered_stages": [
-                "candidate_validity_and_temporary_annotation",
-                "structured_text_shortlist",
-                "reference_image_identity_confirmation",
+            "call_unit": "one source image with all retained candidates",
+            "ordered_reasoning": [
+                "candidate_validity",
+                "temporary_structured_annotation",
+                "compare_all_memory_cards_and_reference_images",
+                "final_decision_and_updated_annotation",
             ],
-            "qwen_calls": (
-                "one analysis call; one additional identity call only when the "
-                "candidate is valid and memory cards exist"
+            "object_card_selection": "all active cards; no script similarity ranking",
+            "persistence": (
+                "M3 validates only; M4 writes final decisions, annotations, "
+                "objects, and observations to SQLite"
             ),
-            "image_roles": {
-                "IMAGE_A_CANDIDATE": "validity input and temporary annotation target",
-                "REFERENCE_IMAGE": "known-object identity evidence",
-                "IMAGE_Z_CONTEXT_OVERLAY": "analysis-stage SAM location context",
-            },
-            "output_contract": {
-                "decision": ["new", "existing", "ignored", "uncertain"],
-                "matched_object_id": "required only for existing",
-                "annotation": "required for new and existing",
-            },
-            "persistence": "M3 validates only; M4 will write decisions, objects, and observations to SQLite",
         },
-        "empty_memory": {
-            "final_response": empty_response.model_dump(mode="json"),
-            "evaluation": evaluation_summary(empty_memory_evaluation),
-        },
+        "empty_memory": evaluation_summary(empty_evaluation),
         "same_view_card": (
-            {
-                "reference_object_id": "obj_m3_same_view_reference",
-                "final_response": same_response.model_dump(mode="json"),
-                "evaluation": evaluation_summary(same_view_evaluation),
-            }
-            if same_response is not None and same_view_evaluation is not None
+            evaluation_summary(same_view_evaluation)
+            if same_view_evaluation is not None
             else None
         ),
         "timing_seconds": {
             "model_load": round(model_load_seconds, 3),
             "inference_total": round(
                 sum(
-                    prediction.inference_seconds
-                    for evaluation in (
-                        empty_memory_evaluation,
-                        same_view_evaluation,
-                    )
-                    if evaluation is not None
-                    for prediction in evaluation.predictions
+                    evaluation.prediction.inference_seconds
+                    for evaluation in evaluations
                 ),
                 3,
             ),
         },
         "cuda": {"peak_memory_mib": round(peak_memory_mib, 2)},
         "raw_responses": {
-            "empty_memory_analysis": portable_report_path(
-                output_dir / "empty_memory_analysis_response.txt"
+            "empty_memory_batch": portable_report_path(
+                output_dir / "empty_memory_batch_response.txt"
             ),
-            "same_view_analysis": (
+            "same_view_batch": (
                 portable_report_path(
-                    output_dir / "same_view_analysis_response.txt"
+                    output_dir / "same_view_batch_response.txt"
                 )
                 if same_view_evaluation is not None
-                else None
-            ),
-            "same_view_identity": (
-                portable_report_path(
-                    output_dir / "same_view_identity_response.txt"
-                )
-                if same_view_evaluation is not None
-                and same_view_evaluation.identity_prediction is not None
                 else None
             ),
         },
@@ -377,7 +340,7 @@ def run_verification(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     args = parse_args()
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "m3_mllm_pipeline",
         "status": "failed",

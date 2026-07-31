@@ -15,13 +15,17 @@ from PIL import Image
 
 from .assets import MemoryPaths
 from .config import AppConfig, config_digest
-from .identity import CandidateEvaluation, evaluate_candidate
+from .identity import (
+    BatchCandidateInput,
+    ImageBatchEvaluation,
+    evaluate_image_batch,
+)
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
 from .mllm_adapter import MllmPrediction
 from .sam3_adapter import Sam3Prediction
 from .sam3_postprocess import process_candidates
-from .schemas import ObjectCard, Proposal, Run, SourceImage
+from .schemas import BatchCandidateDecision, Proposal, Run, SourceImage
 
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -73,6 +77,7 @@ class ImageWork:
     candidate_source_counts: dict[str, int] = field(default_factory=dict)
     sam_inference_seconds: float = 0.0
     decisions: list[dict[str, Any]] = field(default_factory=list)
+    qwen_batch: dict[str, Any] | None = None
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -90,6 +95,7 @@ class ImageWork:
                 "candidate_source_counts": self.candidate_source_counts,
                 "inference_seconds": round(self.sam_inference_seconds, 3),
             },
+            "qwen_batch": self.qwen_batch,
             "decisions": self.decisions,
             "error": self.error,
         }
@@ -212,7 +218,7 @@ class ObjectMemoryPipeline:
         else:
             report_status = summary.status.value
         report = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "test": "m5_end_to_end_batch",
             "status": report_status,
@@ -229,15 +235,12 @@ class ObjectMemoryPipeline:
                 ),
                 "model_residency": "SAM3 then release; Qwen then release",
                 "qwen_call_policy": (
-                    "one analysis call per candidate; one identity call only for "
-                    "valid candidates when memory cards exist"
+                    "one shared Qwen call per source image containing every retained "
+                    "candidate and every active memory object card"
                 ),
                 "object_card_selection": (
-                    "rank all card text locally, then send only the top semantic "
-                    "shortlist with reference images"
-                ),
-                "object_card_shortlist_size": (
-                    self.config.mllm_pipeline.object_card_shortlist_size
+                    "all active cards with configured recent reference views; "
+                    "no script-side similarity ranking or shortlist"
                 ),
                 "uncertain_policy": "persist pending; do not immediately repeat",
                 "error_attempts": self.config.mllm_pipeline.max_error_attempts,
@@ -422,8 +425,7 @@ class ObjectMemoryPipeline:
             "inference_seconds": 0.0,
             "input_tokens": 0,
             "generated_tokens": 0,
-            "analysis_calls": 0,
-            "identity_calls": 0,
+            "image_batch_calls": 0,
             "peak_memory_mib": 0.0,
             "placement": [],
             "snapshot": None,
@@ -477,9 +479,133 @@ class ObjectMemoryPipeline:
         metrics: dict[str, Any],
     ) -> None:
         assert work.source is not None
-        for proposal in work.kept:
-            outcome = self._process_proposal_with_qwen(run, proposal, metrics)
-            work.decisions.append(outcome)
+        errors: list[str] = []
+        evaluation: ImageBatchEvaluation | None = None
+        raw_path: str | None = None
+        try:
+            cards = self.loop.object_cards(
+                max_reference_views=(
+                    self.config.mllm_pipeline.max_reference_views_per_object
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
+            metrics["external_errors"].append(
+                f"load object cards for {work.source.id}: {message}"
+            )
+            self._fail_qwen_work(work, message, metrics)
+            return
+        try:
+            candidates = [
+                BatchCandidateInput(
+                    proposal_id=proposal.id,
+                    crop_path=self.paths.resolve_asset(proposal.crop_path or ""),
+                    overlay_path=self.paths.resolve_asset(
+                        proposal.overlay_path or ""
+                    ),
+                    sam_prompt=proposal.prompt,
+                )
+                for proposal in work.kept
+            ]
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
+            metrics["external_errors"].append(
+                f"resolve candidate assets for {work.source.id}: {message}"
+            )
+            self._fail_qwen_work(work, message, metrics)
+            return
+        attempts_used = 0
+        qwen_calls = 0
+        for call_attempt in range(
+            1,
+            self.config.mllm_pipeline.max_error_attempts + 1,
+        ):
+            attempts_used = call_attempt
+            recorder = RecordingPredictor(self.mllm_runtime)
+            try:
+                evaluation = evaluate_image_batch(
+                    recorder,
+                    candidates=candidates,
+                    cards=cards,
+                    card_assets=self.paths,
+                    settings=self.config.mllm_pipeline,
+                )
+                self._add_prediction_metrics(recorder.predictions, metrics)
+                qwen_calls += len(recorder.predictions)
+                raw_path = self._write_batch_raw_response(
+                    run.id,
+                    work.source.id,
+                    call_attempt,
+                    recorder.predictions,
+                    evaluation=evaluation,
+                    error=None,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - bounded model retry
+                self._add_prediction_metrics(recorder.predictions, metrics)
+                qwen_calls += len(recorder.predictions)
+                message = f"{type(exc).__name__}: {exc}"
+                errors.append(message)
+                self._write_batch_raw_response(
+                    run.id,
+                    work.source.id,
+                    call_attempt,
+                    recorder.predictions,
+                    evaluation=None,
+                    error=message,
+                )
+
+        if evaluation is None:
+            error_message = (
+                errors[-1] if errors else "Qwen produced no usable batch response"
+            )
+            work.qwen_batch = {
+                "candidate_count": len(work.kept),
+                "object_card_count": len(cards),
+                "object_card_ids": [card.object_id for card in cards],
+                "reference_image_count": sum(
+                    len(card.representative_view_paths) for card in cards
+                ),
+                "qwen_calls": qwen_calls,
+                "pipeline_attempts": attempts_used,
+                "raw_response": None,
+                "errors": errors,
+            }
+            for proposal in work.kept:
+                work.decisions.append(
+                    self._record_failed_proposal(
+                        proposal,
+                        error_message,
+                        errors=errors,
+                        metrics=metrics,
+                    )
+                )
+        else:
+            results_by_id = {
+                item.proposal_id: item for item in evaluation.response.candidates
+            }
+            work.qwen_batch = {
+                "candidate_count": len(work.kept),
+                "object_card_count": evaluation.object_card_count,
+                "object_card_ids": list(evaluation.object_card_ids),
+                "reference_image_count": evaluation.reference_image_count,
+                "qwen_calls": qwen_calls,
+                "pipeline_attempts": attempts_used,
+                "raw_response": raw_path,
+                "errors": errors,
+            }
+            for proposal in work.kept:
+                result = results_by_id[proposal.id]
+                work.decisions.append(
+                    self._persist_batch_candidate(
+                        proposal,
+                        result,
+                        raw_path=raw_path,
+                        errors=errors,
+                        metrics=metrics,
+                    )
+                )
+
         try:
             self.loop.complete_source(work.source.id)
             work.status = "completed"
@@ -497,107 +623,71 @@ class ObjectMemoryPipeline:
                     f"fail source {work.source.id}: {fail_exc}"
                 )
 
-    def _process_proposal_with_qwen(
+    def _persist_batch_candidate(
         self,
-        run: Run,
         proposal: Proposal,
+        result: BatchCandidateDecision,
+        *,
+        raw_path: str | None,
+        errors: list[str],
         metrics: dict[str, Any],
     ) -> dict[str, Any]:
-        errors: list[str] = []
-        total_qwen_calls = 0
-        for call_attempt in range(
-            1,
-            self.config.mllm_pipeline.max_error_attempts + 1,
-        ):
-            recorder = RecordingPredictor(self.mllm_runtime)
-            evaluation: CandidateEvaluation | None = None
-            metrics_added = False
-            try:
-                evaluation = evaluate_candidate(
-                    recorder,
-                    candidate_crop=self.paths.resolve_asset(proposal.crop_path or ""),
-                    candidate_overlay=self.paths.resolve_asset(
-                        proposal.overlay_path or ""
-                    ),
-                    sam_prompt=proposal.prompt,
-                    get_card_texts=self.loop.object_card_texts,
-                    get_reference_cards=self._reference_cards,
-                    card_assets=self.paths,
-                    settings=self.config.mllm_pipeline,
-                )
-                self._add_prediction_metrics(recorder.predictions, metrics)
-                total_qwen_calls += len(recorder.predictions)
-                metrics_added = True
-                raw_path = self._write_raw_response(
-                    run.id,
-                    proposal.id,
-                    call_attempt,
-                    recorder.predictions,
-                    evaluation=evaluation,
-                    error=None,
-                )
-                write_result = self.loop.apply_response(
-                    proposal=proposal,
-                    response=evaluation.final_response,
-                    prompt_version=self.config.mllm_pipeline.prompt_version,
-                    raw_response_path=raw_path,
-                    attempt=1,
-                )
-                response = evaluation.final_response
-                return {
-                    "proposal_id": proposal.id,
-                    "candidate": self._candidate_report(proposal),
-                    "status": write_result.proposal_status.value,
-                    "decision": write_result.decision.value,
-                    "object_id": write_result.object_id,
-                    "confidence": response.confidence,
-                    "reason_code": response.reason_code.value,
-                    "short_reason": response.short_reason,
-                    "annotation": (
-                        response.annotation.model_dump(mode="json")
-                        if response.annotation is not None
-                        else None
-                    ),
-                    "candidate_analysis": evaluation.analysis.model_dump(mode="json"),
-                    "retrieval": {
-                        "memory_lookup_performed": (
-                            evaluation.memory_lookup_performed
-                        ),
-                        "available_object_cards": (
-                            evaluation.available_object_cards
-                        ),
-                        "shortlisted": [
-                            item.as_dict() for item in evaluation.retrieved_cards
-                        ],
-                    },
-                    "identity_confirmation": (
-                        evaluation.identity_response.model_dump(mode="json")
-                        if evaluation.identity_response is not None
-                        else None
-                    ),
-                    "qwen_calls": total_qwen_calls,
-                    "pipeline_attempts": call_attempt,
-                    "raw_response": raw_path,
-                    "errors": errors,
-                }
-            except Exception as exc:  # noqa: BLE001 - bounded model retry
-                if not metrics_added:
-                    self._add_prediction_metrics(recorder.predictions, metrics)
-                    total_qwen_calls += len(recorder.predictions)
-                message = f"{type(exc).__name__}: {exc}"
-                errors.append(message)
-                self._write_raw_response(
-                    run.id,
-                    proposal.id,
-                    call_attempt,
-                    recorder.predictions,
-                    evaluation=evaluation,
-                    error=message,
-                )
-                if evaluation is not None:
-                    break
+        try:
+            response = result.to_mllm_response()
+            write_result = self.loop.apply_response(
+                proposal=proposal,
+                response=response,
+                prompt_version=self.config.mllm_pipeline.prompt_version,
+                raw_response_path=raw_path,
+                attempt=1,
+            )
+            return {
+                "proposal_id": proposal.id,
+                "candidate": self._candidate_report(proposal),
+                "status": write_result.proposal_status.value,
+                "decision": write_result.decision.value,
+                "object_id": write_result.object_id,
+                "confidence": response.confidence,
+                "reason_code": response.reason_code.value,
+                "short_reason": response.short_reason,
+                "validity": result.validity.value,
+                "validity_confidence": result.validity_confidence,
+                "validity_reason_code": result.validity_reason_code.value,
+                "validity_short_reason": result.validity_short_reason,
+                "temporary_annotation": (
+                    result.temporary_annotation.model_dump(mode="json")
+                    if result.temporary_annotation is not None
+                    else None
+                ),
+                "final_annotation": (
+                    result.final_annotation.model_dump(mode="json")
+                    if result.final_annotation is not None
+                    else None
+                ),
+                "matched_object_id": result.matched_object_id,
+                "raw_response": raw_path,
+                "errors": errors,
+            }
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
+            metrics["external_errors"].append(
+                f"persist batch candidate {proposal.id}: {message}"
+            )
+            return self._record_failed_proposal(
+                proposal,
+                message,
+                errors=[*errors, message],
+                metrics=metrics,
+            )
 
-        error_message = errors[-1] if errors else "Qwen produced no usable response"
+    def _record_failed_proposal(
+        self,
+        proposal: Proposal,
+        error_message: str,
+        *,
+        errors: Sequence[str],
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
         try:
             self.loop.record_proposal_failure(proposal, error_message)
         except Exception as exc:  # noqa: BLE001
@@ -613,13 +703,15 @@ class ObjectMemoryPipeline:
             "confidence": None,
             "reason_code": None,
             "short_reason": None,
-            "annotation": None,
-            "candidate_analysis": None,
-            "retrieval": None,
-            "identity_confirmation": None,
-            "qwen_calls": total_qwen_calls,
-            "pipeline_attempts": len(errors),
-            "errors": errors,
+            "validity": None,
+            "validity_confidence": None,
+            "validity_reason_code": None,
+            "validity_short_reason": None,
+            "temporary_annotation": None,
+            "final_annotation": None,
+            "matched_object_id": None,
+            "raw_response": None,
+            "errors": list(errors),
         }
 
     @staticmethod
@@ -635,17 +727,6 @@ class ObjectMemoryPipeline:
             "overlay": proposal.overlay_path,
         }
 
-    def _reference_cards(
-        self,
-        object_ids: Sequence[str],
-    ) -> list[ObjectCard]:
-        return self.loop.object_cards_by_ids(
-            list(object_ids),
-            max_reference_views=(
-                self.config.mllm_pipeline.max_reference_views_per_object
-            ),
-        )
-
     @staticmethod
     def _add_prediction_metrics(
         predictions: Sequence[MllmPrediction],
@@ -660,69 +741,49 @@ class ObjectMemoryPipeline:
         metrics["generated_tokens"] += sum(
             prediction.generated_tokens for prediction in predictions
         )
-        if predictions:
-            metrics["analysis_calls"] += 1
-            metrics["identity_calls"] += max(0, len(predictions) - 1)
+        metrics["image_batch_calls"] += len(predictions)
 
-    def _write_raw_response(
+    def _write_batch_raw_response(
         self,
         run_id: str,
-        proposal_id: str,
+        source_id: str,
         call_attempt: int,
         predictions: Sequence[MllmPrediction],
         *,
-        evaluation: CandidateEvaluation | None,
+        evaluation: ImageBatchEvaluation | None,
         error: str | None,
     ) -> str | None:
         path = (
-            self.paths.raw_response_dir(run_id, proposal_id)
+            self.paths.raw_response_dir(run_id, source_id)
             / f"call_{call_attempt:02d}.json"
         )
         payload = {
             "call_attempt": call_attempt,
             "error": error,
-            "final_response": (
-                evaluation.final_response.model_dump(mode="json")
+            "image_batch_response": (
+                evaluation.response.model_dump(mode="json")
                 if evaluation is not None
                 else None
             ),
-            "candidate_analysis": (
-                evaluation.analysis.model_dump(mode="json")
-                if evaluation is not None
-                else None
-            ),
-            "retrieval": (
+            "memory_context": (
                 {
-                    "memory_lookup_performed": (
-                        evaluation.memory_lookup_performed
-                    ),
-                    "available_object_cards": evaluation.available_object_cards,
-                    "shortlisted": [
-                        item.as_dict() for item in evaluation.retrieved_cards
-                    ],
+                    "object_card_count": evaluation.object_card_count,
+                    "object_card_ids": list(evaluation.object_card_ids),
+                    "reference_image_count": evaluation.reference_image_count,
+                    "selection": "all_active_objects",
                 }
                 if evaluation is not None
                 else None
             ),
-            "identity_confirmation": (
-                evaluation.identity_response.model_dump(mode="json")
-                if evaluation is not None
-                and evaluation.identity_response is not None
-                else None
-            ),
             "predictions": [
                 {
-                    "stage": (
-                        "candidate_analysis"
-                        if index == 0
-                        else "identity_confirmation"
-                    ),
+                    "stage": "image_batch_reasoning",
                     "raw_text": prediction.raw_text,
                     "input_tokens": prediction.input_tokens,
                     "generated_tokens": prediction.generated_tokens,
                     "inference_seconds": prediction.inference_seconds,
                 }
-                for index, prediction in enumerate(predictions)
+                for prediction in predictions
             ],
         }
         try:
@@ -738,32 +799,25 @@ class ObjectMemoryPipeline:
         metrics: dict[str, Any],
     ) -> None:
         assert work.source is not None
+        work.qwen_batch = {
+            "candidate_count": len(work.kept),
+            "object_card_count": None,
+            "object_card_ids": None,
+            "reference_image_count": None,
+            "qwen_calls": 0,
+            "pipeline_attempts": 0,
+            "raw_response": None,
+            "errors": [message],
+        }
         for proposal in work.kept:
-            try:
-                self.loop.record_proposal_failure(proposal, message)
-                work.decisions.append(
-                    {
-                        "proposal_id": proposal.id,
-                        "candidate": self._candidate_report(proposal),
-                        "status": "failed",
-                        "decision": None,
-                        "object_id": None,
-                        "confidence": None,
-                        "reason_code": None,
-                        "short_reason": None,
-                        "annotation": None,
-                        "candidate_analysis": None,
-                        "retrieval": None,
-                        "identity_confirmation": None,
-                        "qwen_calls": 0,
-                        "pipeline_attempts": 0,
-                        "errors": [message],
-                    }
+            work.decisions.append(
+                self._record_failed_proposal(
+                    proposal,
+                    message,
+                    errors=[message],
+                    metrics=metrics,
                 )
-            except Exception as exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    f"record proposal failure {proposal.id}: {exc}"
-                )
+            )
         try:
             self.loop.complete_source(work.source.id)
             work.status = "completed"

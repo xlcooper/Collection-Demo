@@ -191,49 +191,54 @@ class ObjectCard(StrictModel):
     representative_view_paths: list[RelativeAssetPath] = Field(default_factory=list)
 
 
-class CandidateAnalysis(StrictModel):
-    """Validity decision and temporary annotation produced before memory lookup."""
+class BatchCandidateDecision(StrictModel):
+    """One candidate's ordered validity, annotation, and memory decision."""
 
+    proposal_id: Identifier
     validity: CandidateValidity
-    confidence: Confidence
-    reason_code: DecisionReasonCode
-    short_reason: NonEmptyText
-    annotation: ObjectAnnotation | None = None
-
-    @model_validator(mode="after")
-    def validate_analysis_payload(self) -> "CandidateAnalysis":
-        if self.validity is CandidateValidity.VALID:
-            if self.reason_code is not DecisionReasonCode.VALID_CANDIDATE:
-                raise ValueError("valid candidates require valid_candidate reason")
-            if self.annotation is None:
-                raise ValueError("valid candidates require a temporary annotation")
-        else:
-            if self.reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
-                raise ValueError("ignored candidates require invalid_candidate reason")
-            if self.annotation is not None:
-                raise ValueError("ignored candidates must not include an annotation")
-        return self
-
-
-class IdentityMatchResponse(StrictModel):
-    """Identity-only result after semantic retrieval and visual confirmation."""
-
+    validity_confidence: Confidence
+    validity_reason_code: DecisionReasonCode
+    validity_short_reason: NonEmptyText
+    temporary_annotation: ObjectAnnotation | None
     decision: DecisionType
-    matched_object_id: Identifier | None = None
+    matched_object_id: Identifier | None
     confidence: Confidence
     reason_code: DecisionReasonCode
     short_reason: NonEmptyText
+    final_annotation: ObjectAnnotation | None
 
     @model_validator(mode="after")
-    def validate_identity_payload(self) -> "IdentityMatchResponse":
-        if self.decision is DecisionType.IGNORED:
-            raise ValueError("identity confirmation cannot ignore a valid candidate")
-        if self.decision is DecisionType.EXISTING and self.matched_object_id is None:
-            raise ValueError("existing identity responses require matched_object_id")
-        if self.decision is not DecisionType.EXISTING and self.matched_object_id:
+    def validate_batch_candidate(self) -> "BatchCandidateDecision":
+        if self.validity is CandidateValidity.IGNORED:
+            if self.validity_reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
+                raise ValueError("ignored validity requires invalid_candidate")
+            if self.decision is not DecisionType.IGNORED:
+                raise ValueError("ignored validity requires ignored decision")
+            if self.reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
+                raise ValueError("ignored decision requires invalid_candidate")
+            if (
+                self.temporary_annotation is not None
+                or self.final_annotation is not None
+                or self.matched_object_id is not None
+            ):
+                raise ValueError(
+                    "ignored candidates cannot carry annotations or object IDs"
+                )
+            return self
+
+        if self.validity_reason_code is not DecisionReasonCode.VALID_CANDIDATE:
+            raise ValueError("valid candidates require valid_candidate")
+        if self.temporary_annotation is None or self.final_annotation is None:
             raise ValueError(
-                "matched_object_id is only valid for existing identity responses"
+                "valid candidates require temporary and final annotations"
             )
+        if self.decision is DecisionType.IGNORED:
+            raise ValueError("valid candidates cannot be ignored")
+        if self.decision is DecisionType.EXISTING:
+            if self.matched_object_id is None:
+                raise ValueError("existing requires matched_object_id")
+        elif self.matched_object_id is not None:
+            raise ValueError("only existing may carry matched_object_id")
         allowed_reasons = {
             DecisionType.NEW: {DecisionReasonCode.NEW_OBJECT},
             DecisionType.EXISTING: {DecisionReasonCode.VISUAL_INSTANCE_MATCH},
@@ -243,8 +248,24 @@ class IdentityMatchResponse(StrictModel):
             },
         }
         if self.reason_code not in allowed_reasons[self.decision]:
-            raise ValueError("reason_code does not agree with identity decision")
+            raise ValueError("reason_code does not agree with decision")
         return self
+
+    def to_mllm_response(self) -> "MllmResponse":
+        return MllmResponse(
+            decision=self.decision,
+            matched_object_id=self.matched_object_id,
+            confidence=self.confidence,
+            reason_code=self.reason_code,
+            short_reason=self.short_reason,
+            annotation=self.final_annotation,
+        )
+
+
+class ImageBatchResponse(StrictModel):
+    """One Qwen response covering all retained candidates from one source image."""
+
+    candidates: list[BatchCandidateDecision] = Field(min_length=1)
 
 
 class MllmResponse(StrictModel):

@@ -37,11 +37,11 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "m5-semantic-retrieval-visual-confirmation-v1",
+            "m5-image-batch-memory-reasoning-v1",
         )
         self.assertEqual(
-            config.mllm_pipeline.object_card_shortlist_size,
-            8,
+            config.mllm_pipeline.max_new_tokens,
+            4096,
         )
         self.assertEqual(
             config.sam3_pipeline.crop_background_color,

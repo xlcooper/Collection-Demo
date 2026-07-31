@@ -64,20 +64,6 @@ class MemoryLoop:
             max_reference_views=max_reference_views
         )
 
-    def object_card_texts(self) -> list[ObjectCard]:
-        return self.store.list_object_card_texts()
-
-    def object_cards_by_ids(
-        self,
-        object_ids: list[str],
-        *,
-        max_reference_views: int = 2,
-    ) -> list[ObjectCard]:
-        return self.store.get_object_cards(
-            object_ids,
-            max_reference_views=max_reference_views,
-        )
-
     def apply_response(
         self,
         *,
@@ -141,6 +127,11 @@ class MemoryLoop:
                 proposal=proposal,
                 decision=decision,
                 memory_object=memory_object,
+                object_annotation=(
+                    response.annotation
+                    if response.decision is DecisionType.EXISTING
+                    else None
+                ),
                 observation=observation,
             )
         except Exception:
