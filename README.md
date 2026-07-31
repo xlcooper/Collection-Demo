@@ -276,7 +276,7 @@ SQLite 核心表包括：
 
 每个 `<purpose>_memory_<NN>/` 都包含自己的 `memory.sqlite`、`sources/`、`proposals/`、`objects/`、`raw_responses/` 和 `run_reports/`。目录存在只代表实验曾创建或运行，是否通过仍需依据 Git 中的 `environment/*.json` 报告。
 
-真实图片、SQLite 和生成资产体积大、变化频繁且无法可靠合并，因此继续由 Git 忽略；Git 只跟踪目录说明和精选的机器可读报告。服务器现有各目录的具体来源、内部结构和清理原则见 [`data/README.md`](data/README.md)。
+当前 Demo 固定在二十余张图片的小规模范围内。为保证输入、SQLite、中间处理图和最终判断可以跨机器复核，`data/` 与 `runs/` 随仓库版本化；模型权重、缓存和本地隐藏真值仍不进入 Git。服务器现有各目录的具体来源、内部结构和清理原则见 [`data/README.md`](data/README.md)。
 
 ## 运行入口
 
@@ -308,10 +308,10 @@ python scripts/run_object_memory.py \
 ```text
 Collection-Demo/
 ├─ config/                    # 默认业务配置
-├─ data/
-│  └─ README.md               # 服务器运行数据目录说明；其他内容忽略
+├─ data/                      # Demo 输入、对象记忆库与运行资产
 ├─ docs/                      # 环境、运行与验证文档
 ├─ environment/               # 服务器生成的机器可读报告
+├─ runs/                      # 冒烟和分阶段验证过程产物
 ├─ scripts/                   # 环境检查、冒烟、验证和总入口
 ├─ src/object_memory/         # 对象记忆业务实现
 ├─ tests/                     # 确定性回归测试
@@ -324,15 +324,15 @@ Collection-Demo/
 └─ pyproject.toml             # Python 项目元数据
 ```
 
-本地或服务器运行时还会使用以下 Git 忽略目录：
+本地或服务器运行时还会使用以下目录：
 
-| 路径 | 内容 |
-|---|---|
-| `data/` | 输入图片、SQLite 和对象记忆资产 |
-| `weights/` | SAM3 与 Qwen 模型权重 |
-| `runs/` | 临时验证产物 |
-| `temp/` | 本地测试数据和隐藏真值 |
-| `.conda/` | 项目内 Conda 环境 |
+| 路径 | 内容 | 版本管理 |
+|---|---|---|
+| `data/` | Demo 输入、SQLite 和对象记忆资产 | 跟踪 |
+| `runs/` | 冒烟、候选校准和分阶段验证产物 | 跟踪 |
+| `weights/` | SAM3 与 Qwen 模型权重和缓存 | 忽略 |
+| `temp/` | 本地测试数据和隐藏真值 | 忽略 |
+| `.conda/` | 项目内 Conda 环境 | 忽略 |
 
 ## 文档导航
 
@@ -340,6 +340,7 @@ Collection-Demo/
 |---|---|
 | [`README.md`](README.md) | 第一次了解项目：背景、愿景、架构、环境和使用方式 |
 | [`data/README.md`](data/README.md) | 服务器 data 目录、记忆库内部结构、Git 边界和清理原则 |
+| [`runs/README.md`](runs/README.md) | 冒烟与阶段验证产物、证据边界和清洗说明 |
 | [`AGENTS.md`](AGENTS.md) | AI 协作、开发规范、项目管理和文档维护 |
 | [`PROGRESS.md`](PROGRESS.md) | 当前里程碑、服务器证据、风险、计划和验收状态 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本变化与历史记录 |

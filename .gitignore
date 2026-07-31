@@ -21,16 +21,10 @@ venv/
 /.conda/
 /.cache/
 
-# Runtime data and model assets
-/data/*
-!/data/README.md
+# Model assets and local-only truth
 /temp/
 /models/
 /weights/
-/runs/
-*.sqlite
-*.sqlite3
-*.db
 
 # Generated temporary files
 /environment/*.tmp
