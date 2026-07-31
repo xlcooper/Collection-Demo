@@ -27,6 +27,7 @@ Prioritize:
 - unfamiliar, transparent, partially occluded, or category-uncertain regions when they still plausibly form one independent physical object.
 
 Prefer the complete object. Do not separately select an attached cap, handle, label, button, straw, or other part. Select such a part only when it is visibly detached and independently manipulable.
+When an attached part is the most visible region of a partially visible object, name the whole object concept, for example `plastic drink cup with straw`, rather than the lid or straw alone.
 
 Exclude:
 - floors, walls, desktops, shelves, support boards, structural partitions, and other scene-support surfaces;
@@ -39,7 +40,7 @@ Recall policy:
 This stage gates downstream discovery. Do not restrict selection to familiar categories, previously known objects, or only the most obvious items. When a bounded foreground region plausibly represents an independent task-relevant object, include it with a concrete but not overly narrow category rather than silently omitting it.
 
 SAM3 prompt policy:
-For each target, return exactly one short lowercase English concrete noun phrase of at most six words. Prefer a stable category noun; add one visible attribute only when it materially distinguishes the concept. Never use position, punctuation-separated alternatives, conjunctions, or vague words such as object, item, thing, stuff, region, foreground, or background. If multiple visible instances share the same concept, one prompt is enough because SAM3 returns matching instances.
+For each target, return exactly one short lowercase English concrete noun phrase of at most six words. Prefer a stable category noun; add one visible attribute only when it materially distinguishes the concept. A phrase such as `water bottle with handle` is valid when `with` describes a visible feature of that same object; never use `with` to join separate objects. Never use scene-relative position, punctuation-separated alternatives, conjunctions such as `and` or `or`, or vague words such as object, item, thing, stuff, region, foreground, or background. If multiple visible instances share the same concept, one prompt is enough because SAM3 returns matching instances.
 
 Use Chinese for scene summaries, object names, and brief reasons. Keep JSON keys and enum values exactly as specified. Return one JSON object covering every supplied source_id exactly once. Do not return Markdown, extra text, or hidden chain-of-thought.
 """

@@ -232,7 +232,7 @@ class MemoryLoopTests(unittest.TestCase):
                     decision=DecisionType.IGNORED,
                     confidence=0.85,
                     reason_code=DecisionReasonCode.INVALID_CANDIDATE,
-                    short_reason="重试后确认不是独立物体",
+                    short_reason="再次人工复核后确认不是独立物体",
                 ),
                 prompt_version="test-object-identity-v1",
                 attempt=2,

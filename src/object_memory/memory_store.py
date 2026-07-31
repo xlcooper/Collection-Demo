@@ -589,7 +589,7 @@ class MemoryStore:
         )
 
     def record_proposal_failure(self, proposal: Proposal, error_message: str) -> None:
-        """Record a candidate that exhausted processing or validation retries."""
+        """Record a candidate whose processing or validation failed."""
 
         if proposal.status is not ProposalStatus.PENDING:
             raise MemoryStoreError("Only pending input proposals can fail.")
@@ -888,7 +888,7 @@ class MemoryStore:
         proposal: Proposal,
         decision: Decision,
     ) -> None:
-        """Insert a first attempt or reopen one pending proposal for retry."""
+        """Insert the first or an explicit later decision for a pending proposal."""
 
         if proposal.status is not ProposalStatus.PENDING:
             raise MemoryStoreError("Qwen decisions require a pending proposal.")
@@ -933,11 +933,11 @@ class MemoryStore:
             or str(existing["raw_candidate_id"]) != proposal.raw_candidate_id
         ):
             raise MemoryStoreError(
-                "Stored proposal identity does not match the retry request."
+                "Stored proposal identity does not match the decision request."
             )
         if str(existing["status"]) != ProposalStatus.PENDING.value:
             raise MemoryStoreError(
-                f"Only pending proposals can be retried: {proposal.id}"
+                f"Only pending proposals can receive another decision: {proposal.id}"
             )
         expected_attempt = int(existing["last_attempt"]) + 1
         if decision.attempt != expected_attempt:

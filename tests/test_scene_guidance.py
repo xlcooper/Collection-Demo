@@ -101,6 +101,39 @@ class SceneGuidanceResponseTests(unittest.TestCase):
                 max_targets_per_image=12,
             )
 
+    def test_response_allows_with_for_features_of_the_same_object(self) -> None:
+        for prompt in (
+            "plastic cup with red straw",
+            "transparent water bottle with handle",
+            "white plastic water bottle with handle",
+            "bottle of water",
+        ):
+            with self.subTest(prompt=prompt):
+                raw = json.dumps(
+                    {
+                        "images": [
+                            guidance_payload(
+                                "src_one",
+                                targets=[
+                                    target_payload(
+                                        "target_001",
+                                        sam_text_prompt=prompt,
+                                    )
+                                ],
+                            )
+                        ]
+                    }
+                )
+                response = parse_scene_guidance_response(
+                    raw,
+                    expected_source_ids=["src_one"],
+                    max_targets_per_image=12,
+                )
+                self.assertEqual(
+                    response.images[0].targets[0].sam_text_prompt,
+                    prompt,
+                )
+
     def test_response_rejects_duplicate_or_generic_sam_prompts(self) -> None:
         duplicate = guidance_payload(
             "src_one",
@@ -189,6 +222,9 @@ class SceneGuidancePromptTests(unittest.TestCase):
                 self.assertIn(f"src_{index}", all_text)
             self.assertIn("robot-oriented observation plan", all_text)
             self.assertIn("only from its own visible pixels", all_text)
+            self.assertIn("water bottle with handle", all_text)
+            self.assertIn("never use `with` to join separate objects", all_text)
+            self.assertIn("name the whole object concept", all_text)
             self.assertEqual(image_count, 4)
 
     def test_evaluation_uses_one_call_for_multiple_source_images(self) -> None:

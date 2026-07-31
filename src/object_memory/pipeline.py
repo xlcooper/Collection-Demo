@@ -129,16 +129,14 @@ class RecordingPredictor:
 
 
 @dataclass(frozen=True, slots=True)
-class SceneGuidanceAttemptResult:
-    """One audited primary-batch or single-source guidance attempt group."""
+class SceneGuidanceCallResult:
+    """One audited scene-guidance model call for one configured batch."""
 
     scope_id: str
     evaluation: SceneGuidanceEvaluation | None
-    attempted_calls: int
-    pipeline_attempts: int
-    raw_responses: tuple[str, ...]
+    qwen_calls: int
+    raw_response: str | None
     errors: tuple[str, ...]
-    storage_failed: bool
 
 
 def discover_images(input_directory: str | Path) -> list[Path]:
@@ -248,7 +246,7 @@ class ObjectMemoryPipeline:
         else:
             report_status = summary.status.value
         report = {
-            "schema_version": 3,
+            "schema_version": 4,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "test": "object_memory_demo_batch",
             "status": report_status,
@@ -280,9 +278,10 @@ class ObjectMemoryPipeline:
                 "scene_guidance_memory_context": (
                     "none; discovery is driven only by each new scene view"
                 ),
-                "scene_batch_failure_policy": (
-                    "bounded batch retry, then isolated single-source rescue; "
-                    "never silently fall back to point-grid discovery"
+                "qwen_error_policy": (
+                    "one model call per logical scope; persist the raw result "
+                    "and fail the affected scope without automatic retry, "
+                    "single-source rescue, normalization, or fallback"
                 ),
                 "sam_candidate_semantics": (
                     "SAM3 detections already above the processor text-confidence "
@@ -294,7 +293,6 @@ class ObjectMemoryPipeline:
                     "no script-side similarity ranking or shortlist"
                 ),
                 "uncertain_policy": "persist pending; do not immediately repeat",
-                "error_attempts": self.config.mllm_pipeline.max_error_attempts,
                 "scene_prompt_version": (
                     self.config.mllm_pipeline.scene_prompt_version
                 ),
@@ -390,8 +388,7 @@ class ObjectMemoryPipeline:
             "input_tokens": 0,
             "generated_tokens": 0,
             "scene_batch_calls": 0,
-            "primary_batches": 0,
-            "rescue_sources": 0,
+            "scene_batches": 0,
             "images_analyzed": 0,
             "peak_memory_mib": 0.0,
             "placement": [],
@@ -463,79 +460,32 @@ class ObjectMemoryPipeline:
             return
         if any(work.source is None for work in batch):
             raise ValueError("Scene-guidance work requires registered sources")
-        primary_scope = f"scene_batch_{batch_index:04d}"
-        metrics["primary_batches"] += 1
-        primary = self._attempt_scene_guidance_scope(
+        scope_id = f"scene_batch_{batch_index:04d}"
+        metrics["scene_batches"] += 1
+        result = self._call_scene_guidance_scope(
             run,
             batch,
-            scope_id=primary_scope,
+            scope_id=scope_id,
             batch_index=batch_index,
             metrics=metrics,
         )
-        if primary.evaluation is not None:
+        if result.evaluation is not None:
             self._apply_scene_guidance(
                 batch,
-                primary,
+                result,
                 batch_index=batch_index,
                 metrics=metrics,
-                rescued_from=None,
             )
             return
-
-        if primary.storage_failed:
-            for work in batch:
-                self._record_scene_guidance_failure(
-                    work,
-                    primary,
-                    batch_index=batch_index,
-                    metrics=metrics,
-                    rescued_from=None,
-                )
-            return
-
-        if len(batch) == 1:
+        for work in batch:
             self._record_scene_guidance_failure(
-                batch[0],
-                primary,
+                work,
+                result,
                 batch_index=batch_index,
                 metrics=metrics,
-                rescued_from=None,
-            )
-            return
-
-        # A malformed multi-image response must not discard the other sources.
-        # Retry each source independently, while preserving the failed batch raw data.
-        metrics["rescue_sources"] += len(batch)
-        for rescue_index, work in enumerate(batch, start=1):
-            assert work.source is not None
-            rescue = self._attempt_scene_guidance_scope(
-                run,
-                [work],
-                scope_id=(
-                    f"{primary_scope}_rescue_{rescue_index:02d}_"
-                    f"{work.source.id}"
-                ),
-                batch_index=batch_index,
-                metrics=metrics,
-            )
-            if rescue.evaluation is None:
-                self._record_scene_guidance_failure(
-                    work,
-                    rescue,
-                    batch_index=batch_index,
-                    metrics=metrics,
-                    rescued_from=primary,
-                )
-                continue
-            self._apply_scene_guidance(
-                [work],
-                rescue,
-                batch_index=batch_index,
-                metrics=metrics,
-                rescued_from=primary,
             )
 
-    def _attempt_scene_guidance_scope(
+    def _call_scene_guidance_scope(
         self,
         run: Run,
         works: Sequence[ImageWork],
@@ -543,7 +493,7 @@ class ObjectMemoryPipeline:
         scope_id: str,
         batch_index: int,
         metrics: dict[str, Any],
-    ) -> SceneGuidanceAttemptResult:
+    ) -> SceneGuidanceCallResult:
         scene_inputs = [
             SceneImageInput(
                 source_id=work.source.id,
@@ -553,85 +503,62 @@ class ObjectMemoryPipeline:
             if work.source is not None
         ]
         errors: list[str] = []
-        raw_responses: list[str] = []
+        recorder = RecordingPredictor(self.mllm_runtime)
         evaluation: SceneGuidanceEvaluation | None = None
-        attempted_calls = 0
-        attempts_used = 0
-        storage_failed = False
-        for call_attempt in range(
-            1,
-            self.config.mllm_pipeline.max_error_attempts + 1,
-        ):
-            attempts_used = call_attempt
-            recorder = RecordingPredictor(self.mllm_runtime)
-            current_evaluation: SceneGuidanceEvaluation | None = None
-            call_error: str | None = None
-            try:
-                current_evaluation = evaluate_scene_guidance_batch(
-                    recorder,
-                    images=scene_inputs,
-                    settings=self.config.mllm_pipeline,
-                )
-            except Exception as exc:  # noqa: BLE001 - bounded model retry
-                call_error = f"{type(exc).__name__}: {exc}"
-
-            attempted_calls += recorder.attempted_calls
-            self._add_prediction_metrics(
-                recorder.predictions,
-                metrics,
-                call_field="scene_batch_calls",
-                attempted_calls=recorder.attempted_calls,
+        call_error: str | None = None
+        try:
+            evaluation = evaluate_scene_guidance_batch(
+                recorder,
+                images=scene_inputs,
+                settings=self.config.mllm_pipeline,
             )
-            try:
-                raw_path = self._write_scene_guidance_raw_response(
-                    run.id,
-                    scope_id,
-                    batch_index,
-                    call_attempt,
-                    scene_inputs,
-                    recorder.predictions,
-                    evaluation=current_evaluation,
-                    error=call_error,
-                )
-                raw_responses.append(raw_path)
-            except Exception as exc:  # noqa: BLE001 - audit data is mandatory
-                storage_error = (
-                    "raw response persistence failed: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-                metrics["external_errors"].append(
-                    f"Qwen scene-guidance {scope_id}: {storage_error}"
-                )
-                if call_error is not None:
-                    errors.append(call_error)
-                errors.append(storage_error)
-                storage_failed = True
-                current_evaluation = None
-                break
+        except Exception as exc:  # noqa: BLE001 - expose the model/protocol failure
+            call_error = f"{type(exc).__name__}: {exc}"
+            errors.append(call_error)
 
-            if call_error is None and current_evaluation is not None:
-                evaluation = current_evaluation
-                break
-            errors.append(call_error or "Qwen produced no usable scene guidance")
+        self._add_prediction_metrics(
+            recorder.predictions,
+            metrics,
+            call_field="scene_batch_calls",
+            attempted_calls=recorder.attempted_calls,
+        )
+        raw_response: str | None = None
+        try:
+            raw_response = self._write_scene_guidance_raw_response(
+                run.id,
+                scope_id,
+                batch_index,
+                scene_inputs,
+                recorder.predictions,
+                evaluation=evaluation,
+                error=call_error,
+            )
+        except Exception as exc:  # noqa: BLE001 - audit data is mandatory
+            storage_error = (
+                "raw response persistence failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            metrics["external_errors"].append(
+                f"Qwen scene-guidance {scope_id}: {storage_error}"
+            )
+            errors.append(storage_error)
+            evaluation = None
 
-        return SceneGuidanceAttemptResult(
+        return SceneGuidanceCallResult(
             scope_id=scope_id,
             evaluation=evaluation,
-            attempted_calls=attempted_calls,
-            pipeline_attempts=attempts_used,
-            raw_responses=tuple(raw_responses),
+            qwen_calls=recorder.attempted_calls,
+            raw_response=raw_response,
             errors=tuple(errors),
-            storage_failed=storage_failed,
         )
 
     def _apply_scene_guidance(
         self,
         works: Sequence[ImageWork],
-        result: SceneGuidanceAttemptResult,
+        result: SceneGuidanceCallResult,
         *,
         batch_index: int,
         metrics: dict[str, Any],
-        rescued_from: SceneGuidanceAttemptResult | None,
     ) -> None:
         assert result.evaluation is not None
         guidance_by_source = {
@@ -649,9 +576,6 @@ class ObjectMemoryPipeline:
                 "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
                 "batch_index": batch_index,
                 "scope_id": result.scope_id,
-                "rescued_from_scope": (
-                    rescued_from.scope_id if rescued_from is not None else None
-                ),
                 "scene_summary": guidance.scene_summary,
                 "target_count": len(guidance.targets),
                 "targets": [
@@ -659,19 +583,9 @@ class ObjectMemoryPipeline:
                     for target in guidance.targets
                 ],
                 "no_target_reason": guidance.no_target_reason,
-                "scope_calls": result.attempted_calls,
-                "scope_pipeline_attempts": result.pipeline_attempts,
-                "accepted_raw_response": (
-                    result.raw_responses[-1] if result.raw_responses else None
-                ),
-                "attempt_raw_responses": [
-                    *(rescued_from.raw_responses if rescued_from else ()),
-                    *result.raw_responses,
-                ],
-                "errors": [
-                    *(rescued_from.errors if rescued_from else ()),
-                    *result.errors,
-                ],
+                "qwen_calls": result.qwen_calls,
+                "raw_response": result.raw_response,
+                "errors": list(result.errors),
             }
             if work.scene_prompts:
                 work.status = "awaiting_sam"
@@ -689,16 +603,12 @@ class ObjectMemoryPipeline:
     def _record_scene_guidance_failure(
         self,
         work: ImageWork,
-        result: SceneGuidanceAttemptResult,
+        result: SceneGuidanceCallResult,
         *,
         batch_index: int,
         metrics: dict[str, Any],
-        rescued_from: SceneGuidanceAttemptResult | None,
     ) -> None:
-        all_errors = [
-            *(rescued_from.errors if rescued_from else ()),
-            *result.errors,
-        ]
+        all_errors = list(result.errors)
         error_message = (
             all_errors[-1]
             if all_errors
@@ -708,18 +618,10 @@ class ObjectMemoryPipeline:
             "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
             "batch_index": batch_index,
             "scope_id": result.scope_id,
-            "rescued_from_scope": (
-                rescued_from.scope_id if rescued_from is not None else None
-            ),
             "target_count": None,
             "targets": None,
-            "scope_calls": result.attempted_calls,
-            "scope_pipeline_attempts": result.pipeline_attempts,
-            "accepted_raw_response": None,
-            "attempt_raw_responses": [
-                *(rescued_from.raw_responses if rescued_from else ()),
-                *result.raw_responses,
-            ],
+            "qwen_calls": result.qwen_calls,
+            "raw_response": result.raw_response,
             "errors": all_errors,
         }
         self._fail_source_work(work, error_message, metrics)
@@ -933,72 +835,52 @@ class ObjectMemoryPipeline:
             )
             self._fail_qwen_work(work, message, metrics)
             return
-        attempts_used = 0
-        qwen_calls = 0
-        raw_responses: list[str] = []
-        for call_attempt in range(
-            1,
-            self.config.mllm_pipeline.max_error_attempts + 1,
-        ):
-            attempts_used = call_attempt
-            recorder = RecordingPredictor(self.mllm_runtime)
-            current_evaluation: ImageBatchEvaluation | None = None
-            call_error: str | None = None
-            try:
-                current_evaluation = evaluate_image_batch(
-                    recorder,
-                    candidates=candidates,
-                    cards=cards,
-                    card_assets=self.paths,
-                    settings=self.config.mllm_pipeline,
-                )
-            except Exception as exc:  # noqa: BLE001 - bounded model retry
-                call_error = f"{type(exc).__name__}: {exc}"
-
-            self._add_prediction_metrics(
-                recorder.predictions,
-                metrics,
-                call_field="candidate_reasoning_calls",
-                attempted_calls=recorder.attempted_calls,
+        recorder = RecordingPredictor(self.mllm_runtime)
+        call_error: str | None = None
+        try:
+            evaluation = evaluate_image_batch(
+                recorder,
+                candidates=candidates,
+                cards=cards,
+                card_assets=self.paths,
+                settings=self.config.mllm_pipeline,
             )
-            qwen_calls += recorder.attempted_calls
-            try:
-                current_raw_path = self._write_batch_raw_response(
-                    run.id,
-                    work.source.id,
-                    call_attempt,
-                    recorder.predictions,
-                    expected_proposal_ids=[
-                        candidate.proposal_id for candidate in candidates
-                    ],
-                    object_card_ids=[card.object_id for card in cards],
-                    reference_image_count=sum(
-                        len(card.representative_view_paths) for card in cards
-                    ),
-                    evaluation=current_evaluation,
-                    error=call_error,
-                )
-                raw_responses.append(current_raw_path)
-                raw_path = current_raw_path
-            except Exception as exc:  # noqa: BLE001 - audit data is mandatory
-                storage_error = (
-                    "raw response persistence failed: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-                metrics["external_errors"].append(
-                    f"Qwen candidate-reasoning {work.source.id}: "
-                    f"{storage_error}"
-                )
-                if call_error is not None:
-                    errors.append(call_error)
-                errors.append(storage_error)
-                current_evaluation = None
-                break
+        except Exception as exc:  # noqa: BLE001 - expose the model/protocol failure
+            call_error = f"{type(exc).__name__}: {exc}"
+            errors.append(call_error)
 
-            if call_error is None and current_evaluation is not None:
-                evaluation = current_evaluation
-                break
-            errors.append(call_error or "Qwen produced no usable batch response")
+        self._add_prediction_metrics(
+            recorder.predictions,
+            metrics,
+            call_field="candidate_reasoning_calls",
+            attempted_calls=recorder.attempted_calls,
+        )
+        qwen_calls = recorder.attempted_calls
+        try:
+            raw_path = self._write_batch_raw_response(
+                run.id,
+                work.source.id,
+                recorder.predictions,
+                expected_proposal_ids=[
+                    candidate.proposal_id for candidate in candidates
+                ],
+                object_card_ids=[card.object_id for card in cards],
+                reference_image_count=sum(
+                    len(card.representative_view_paths) for card in cards
+                ),
+                evaluation=evaluation,
+                error=call_error,
+            )
+        except Exception as exc:  # noqa: BLE001 - audit data is mandatory
+            storage_error = (
+                "raw response persistence failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            metrics["external_errors"].append(
+                f"Qwen candidate-reasoning {work.source.id}: {storage_error}"
+            )
+            errors.append(storage_error)
+            evaluation = None
 
         if evaluation is None:
             error_message = (
@@ -1012,10 +894,7 @@ class ObjectMemoryPipeline:
                     len(card.representative_view_paths) for card in cards
                 ),
                 "qwen_calls": qwen_calls,
-                "pipeline_attempts": attempts_used,
                 "raw_response": raw_path,
-                "accepted_raw_response": None,
-                "attempt_raw_responses": raw_responses,
                 "errors": errors,
             }
             for proposal in work.kept:
@@ -1038,10 +917,7 @@ class ObjectMemoryPipeline:
                 "object_card_ids": list(evaluation.object_card_ids),
                 "reference_image_count": evaluation.reference_image_count,
                 "qwen_calls": qwen_calls,
-                "pipeline_attempts": attempts_used,
                 "raw_response": raw_path,
-                "accepted_raw_response": raw_path,
-                "attempt_raw_responses": raw_responses,
                 "errors": errors,
             }
             for proposal in work.kept:
@@ -1203,23 +1079,18 @@ class ObjectMemoryPipeline:
         run_id: str,
         scope_id: str,
         batch_index: int,
-        call_attempt: int,
         scene_inputs: Sequence[SceneImageInput],
         predictions: Sequence[MllmPrediction],
         *,
         evaluation: SceneGuidanceEvaluation | None,
         error: str | None,
     ) -> str:
-        path = (
-            self.paths.raw_response_dir(run_id, scope_id)
-            / f"call_{call_attempt:02d}.json"
-        )
+        path = self.paths.raw_response_dir(run_id, scope_id) / "response.json"
         payload = {
             "stage": "scene_guidance",
             "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
             "scope_id": scope_id,
             "batch_index": batch_index,
-            "call_attempt": call_attempt,
             "expected_source_ids": [item.source_id for item in scene_inputs],
             "error": error,
             "scene_guidance_response": (
@@ -1244,7 +1115,6 @@ class ObjectMemoryPipeline:
         self,
         run_id: str,
         source_id: str,
-        call_attempt: int,
         predictions: Sequence[MllmPrediction],
         *,
         expected_proposal_ids: Sequence[str],
@@ -1253,14 +1123,10 @@ class ObjectMemoryPipeline:
         evaluation: ImageBatchEvaluation | None,
         error: str | None,
     ) -> str:
-        path = (
-            self.paths.raw_response_dir(run_id, source_id)
-            / f"call_{call_attempt:02d}.json"
-        )
+        path = self.paths.raw_response_dir(run_id, source_id) / "response.json"
         payload = {
             "stage": "candidate_reasoning",
             "prompt_version": self.config.mllm_pipeline.prompt_version,
-            "call_attempt": call_attempt,
             "expected_proposal_ids": list(expected_proposal_ids),
             "error": error,
             "candidate_reasoning_response": (
@@ -1300,10 +1166,7 @@ class ObjectMemoryPipeline:
             "object_card_ids": None,
             "reference_image_count": None,
             "qwen_calls": 0,
-            "pipeline_attempts": 0,
             "raw_response": None,
-            "accepted_raw_response": None,
-            "attempt_raw_responses": [],
             "errors": [message],
         }
         for proposal in work.kept:

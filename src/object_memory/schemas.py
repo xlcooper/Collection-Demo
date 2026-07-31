@@ -134,10 +134,12 @@ class SceneTarget(StrictModel):
             raise ValueError(
                 "sam_text_prompt must be a short lowercase English noun phrase"
             )
-        forbidden_words = {
-            "and",
-            "or",
-            "with",
+        alternative_words = {"and", "or"}
+        if alternative_words.intersection(words):
+            raise ValueError(
+                "sam_text_prompt must describe one object concept without alternatives"
+            )
+        position_words = {
             "left",
             "right",
             "upper",
@@ -159,7 +161,12 @@ class SceneTarget(StrictModel):
             "to",
             "by",
             "from",
-            "of",
+        }
+        if position_words.intersection(words):
+            raise ValueError(
+                "sam_text_prompt must not use scene-relative position words"
+            )
+        vague_words = {
             "object",
             "objects",
             "item",
@@ -173,8 +180,8 @@ class SceneTarget(StrictModel):
             "background",
             "foreground",
         }
-        if forbidden_words.intersection(words):
-            raise ValueError("sam_text_prompt is too generic for SAM3")
+        if vague_words.intersection(words):
+            raise ValueError("sam_text_prompt must use a concrete object category")
         return normalized
 
 

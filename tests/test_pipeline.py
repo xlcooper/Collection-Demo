@@ -23,10 +23,8 @@ from object_memory.pipeline import ObjectMemoryPipeline
 from object_memory.sam3_adapter import RawSamCandidate, Sam3Prediction
 
 
-def test_config(*, max_error_attempts: int = 2) -> AppConfig:
-    payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
-    payload["mllm_pipeline"]["max_error_attempts"] = max_error_attempts
-    return AppConfig.model_validate(payload)
+def test_config() -> AppConfig:
+    return load_config(DEFAULT_CONFIG_PATH)
 
 
 def annotation_payload(*, existing: bool = False) -> dict[str, Any]:
@@ -362,7 +360,7 @@ class PipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["schema_version"], 3)
+            self.assertEqual(report["schema_version"], 4)
             self.assertTrue(all(report["checks"].values()))
             self.assertEqual(
                 report["core_counts"],
@@ -504,7 +502,7 @@ class PipelineTests(unittest.TestCase):
                 2,
             )
 
-    def test_invalid_batch_output_retries_without_duplicate_decisions(self) -> None:
+    def test_invalid_candidate_output_fails_after_single_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "image.png"
@@ -516,43 +514,36 @@ class PipelineTests(unittest.TestCase):
             )
             paths = MemoryPaths(root / "memory")
             pipeline = ObjectMemoryPipeline(
-                config=test_config(max_error_attempts=2),
+                config=test_config(),
                 paths=paths,
                 sam_runtime=FakeSamRuntime(events),
                 mllm_runtime=qwen,
             )
 
-            report = pipeline.run([image], run_id="run_demo_retry")
+            report = pipeline.run([image], run_id="run_demo_candidate_failure")
 
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.call_count, 3)
-            self.assertEqual(report["core_counts"]["decisions"], 1)
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"][
-                    "pipeline_attempts"
-                ],
-                2,
-            )
+            self.assertEqual(report["status"], "completed_with_errors")
+            self.assertEqual(qwen.call_count, 2)
+            self.assertEqual(report["core_counts"]["decisions"], 0)
+            self.assertEqual(report["run"]["proposal_counts"]["failed"], 1)
             self.assertEqual(
                 report["images"][0]["candidate_reasoning"]["qwen_calls"],
-                2,
+                1,
             )
+            self.assertTrue(
+                report["images"][0]["candidate_reasoning"]["errors"]
+            )
+            raw_path = report["images"][0]["candidate_reasoning"]["raw_response"]
+            self.assertEqual(Path(raw_path).name, "response.json")
+            raw_response = json.loads(
+                paths.resolve_asset(raw_path).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(raw_response["expected_proposal_ids"]), 1)
             self.assertEqual(
-                len(
-                    report["images"][0]["candidate_reasoning"][
-                        "attempt_raw_responses"
-                    ]
-                ),
-                2,
+                raw_response["memory_context"]["object_card_count"],
+                0,
             )
-            first_attempt_path = report["images"][0]["candidate_reasoning"][
-                "attempt_raw_responses"
-            ][0]
-            first_attempt = json.loads(
-                paths.resolve_asset(first_attempt_path).read_text(encoding="utf-8")
-            )
-            self.assertEqual(len(first_attempt["expected_proposal_ids"]), 1)
-            self.assertEqual(first_attempt["memory_context"]["object_card_count"], 0)
+            self.assertIsNotNone(raw_response["error"])
 
     def test_uncertain_is_persisted_without_immediate_second_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -637,7 +628,7 @@ class PipelineTests(unittest.TestCase):
                 [1, 1, 1, 1, 2],
             )
 
-    def test_invalid_multi_image_scene_batch_is_rescued_per_source(self) -> None:
+    def test_invalid_scene_batch_fails_once_without_rescue(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             images: list[Path] = []
@@ -648,35 +639,45 @@ class PipelineTests(unittest.TestCase):
             events: list[str] = []
             qwen = FakeQwenRuntime(
                 events,
-                scene_responses=["not json", "still not json"],
+                scene_responses=["not json"],
             )
+            paths = MemoryPaths(root / "memory")
             pipeline = ObjectMemoryPipeline(
-                config=test_config(max_error_attempts=2),
-                paths=MemoryPaths(root / "memory"),
+                config=test_config(),
+                paths=paths,
                 sam_runtime=FakeSamRuntime(events),
                 mllm_runtime=qwen,
             )
 
-            report = pipeline.run(images, run_id="run_demo_scene_rescue")
+            report = pipeline.run(images, run_id="run_demo_scene_failure")
 
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.scene_call_count, 4)
+            self.assertEqual(report["status"], "completed_with_errors")
+            self.assertEqual(qwen.scene_call_count, 1)
+            self.assertEqual(qwen.candidate_call_count, 0)
+            self.assertNotIn("sam.predict", events)
             self.assertEqual(
                 report["models"]["qwen"]["phases"]["scene_guidance"][
-                    "rescue_sources"
+                    "scene_batches"
                 ],
-                2,
+                1,
             )
+            self.assertEqual(report["run"]["source_counts"]["failed"], 2)
+            raw_paths = set()
             for image_report in report["images"]:
                 guidance = image_report["scene_guidance"]
-                self.assertEqual(
-                    guidance["rescued_from_scope"],
-                    "scene_batch_0001",
-                )
-                self.assertEqual(len(guidance["attempt_raw_responses"]), 3)
-                self.assertIsNotNone(guidance["accepted_raw_response"])
+                self.assertEqual(guidance["qwen_calls"], 1)
+                self.assertTrue(guidance["errors"])
+                raw_paths.add(guidance["raw_response"])
+            self.assertEqual(len(raw_paths), 1)
+            raw_path = raw_paths.pop()
+            self.assertEqual(Path(raw_path).name, "response.json")
+            raw_response = json.loads(
+                paths.resolve_asset(raw_path).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(raw_response["expected_source_ids"]), 2)
+            self.assertIsNotNone(raw_response["error"])
 
-    def test_runtime_exception_counts_as_a_qwen_call_and_keeps_raw_attempts(self) -> None:
+    def test_runtime_exception_fails_after_one_audited_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "scene.png"
@@ -685,7 +686,7 @@ class PipelineTests(unittest.TestCase):
             paths = MemoryPaths(root / "memory")
             qwen = FakeQwenRuntime(events, scene_failures=1)
             pipeline = ObjectMemoryPipeline(
-                config=test_config(max_error_attempts=2),
+                config=test_config(),
                 paths=paths,
                 sam_runtime=FakeSamRuntime(events),
                 mllm_runtime=qwen,
@@ -693,20 +694,19 @@ class PipelineTests(unittest.TestCase):
 
             report = pipeline.run([image], run_id="run_demo_scene_exception")
 
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["models"]["qwen"]["scene_batch_calls"], 2)
+            self.assertEqual(report["status"], "completed_with_errors")
+            self.assertEqual(report["models"]["qwen"]["scene_batch_calls"], 1)
             guidance = report["images"][0]["scene_guidance"]
-            self.assertEqual(guidance["scope_calls"], 2)
-            self.assertEqual(len(guidance["attempt_raw_responses"]), 2)
-            for relative_path in guidance["attempt_raw_responses"]:
-                self.assertTrue(paths.resolve_asset(relative_path).is_file())
-            first_attempt = json.loads(
-                paths.resolve_asset(guidance["attempt_raw_responses"][0]).read_text(
+            self.assertEqual(guidance["qwen_calls"], 1)
+            self.assertTrue(paths.resolve_asset(guidance["raw_response"]).is_file())
+            raw_response = json.loads(
+                paths.resolve_asset(guidance["raw_response"]).read_text(
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(len(first_attempt["expected_source_ids"]), 1)
-            self.assertEqual(first_attempt["predictions"], [])
+            self.assertEqual(len(raw_response["expected_source_ids"]), 1)
+            self.assertEqual(raw_response["predictions"], [])
+            self.assertIsNotNone(raw_response["error"])
 
     def test_sam_reads_the_canonical_source_after_input_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -731,7 +731,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed")
             self.assertEqual(sam.received_pixels, [(255, 0, 0)])
 
-    def test_scene_raw_write_failure_stops_without_model_or_rescue_retries(self) -> None:
+    def test_scene_raw_write_failure_stops_after_single_model_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "scene.png"
@@ -746,7 +746,7 @@ class PipelineTests(unittest.TestCase):
                 original_write(path, payload)
 
             pipeline = ObjectMemoryPipeline(
-                config=test_config(max_error_attempts=2),
+                config=test_config(),
                 paths=MemoryPaths(root / "memory"),
                 sam_runtime=FakeSamRuntime(events),
                 mllm_runtime=qwen,
@@ -762,12 +762,6 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(qwen.scene_call_count, 1)
             self.assertEqual(qwen.candidate_call_count, 0)
             self.assertNotIn("sam.predict", events)
-            self.assertEqual(
-                report["models"]["qwen"]["phases"]["scene_guidance"][
-                    "rescue_sources"
-                ],
-                0,
-            )
 
     def test_candidate_raw_write_failure_never_persists_a_decision(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -787,7 +781,7 @@ class PipelineTests(unittest.TestCase):
                 original_write(path, payload)
 
             pipeline = ObjectMemoryPipeline(
-                config=test_config(max_error_attempts=2),
+                config=test_config(),
                 paths=MemoryPaths(root / "memory"),
                 sam_runtime=FakeSamRuntime(events),
                 mllm_runtime=qwen,

@@ -90,8 +90,8 @@ class MllmPipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_prompt_version: Literal[
-        "robot-scene-guidance-v1"
-    ] = "robot-scene-guidance-v1"
+        "robot-scene-guidance-v2"
+    ] = "robot-scene-guidance-v2"
     prompt_version: Literal[
         "guided-image-batch-memory-reasoning-v2"
     ] = "guided-image-batch-memory-reasoning-v2"
@@ -101,7 +101,6 @@ class MllmPipelineConfig(BaseModel):
     max_new_tokens: int = Field(default=4096, gt=0)
     max_reference_views_per_object: int = Field(default=2, gt=0)
     existing_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    max_error_attempts: int = Field(default=2, ge=1, le=3)
 
 
 class AppConfig(BaseModel):
@@ -109,7 +108,7 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)

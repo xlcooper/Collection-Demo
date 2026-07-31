@@ -35,7 +35,7 @@ from object_memory.schemas import (
 class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self) -> None:
         config = load_config(DEFAULT_CONFIG_PATH)
-        self.assertEqual(config.schema_version, 2)
+        self.assertEqual(config.schema_version, 3)
         self.assertEqual(
             config.models.qwen_model_id,
             "Qwen/Qwen3-VL-8B-Instruct-FP8",
@@ -43,6 +43,14 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
             "guided-image-batch-memory-reasoning-v2",
+        )
+        self.assertEqual(
+            config.mllm_pipeline.scene_prompt_version,
+            "robot-scene-guidance-v2",
+        )
+        self.assertNotIn(
+            "max_error_attempts",
+            config.mllm_pipeline.model_dump(),
         )
         self.assertEqual(config.mllm_pipeline.scene_batch_size, 4)
         self.assertEqual(
