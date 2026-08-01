@@ -1,0 +1,71 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v2",
+  "expected_proposal_ids": [
+    "prop_6c067183ab4f4c92807a7864d9f17417"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_6c067183ab4f4c92807a7864d9f17417",
+        "validity": "valid",
+        "validity_confidence": 1.0,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "完整独立的塑料饮料杯，带吸管和彩色杯盖",
+        "temporary_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic drink cup",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red",
+            "white",
+            "clear"
+          ],
+          "shape": "cylindrical with lid and straw",
+          "description": "透明塑料杯，内含浅色液体，杯盖为红色，印有卡通图案和二维码，插有红色吸管",
+          "annotation_confidence": 0.95
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 1.0,
+        "reason_code": "new_object",
+        "short_reason": "无匹配记忆卡，且为独立新物体",
+        "final_annotation": {
+          "coarse_category": "container",
+          "fine_category": "plastic drink cup",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "red",
+            "white",
+            "clear"
+          ],
+          "shape": "cylindrical with lid and straw",
+          "description": "透明塑料杯，内含浅色液体，杯盖为红色，印有卡通图案和二维码，插有红色吸管",
+          "annotation_confidence": 0.95
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 2,
+    "object_card_ids": [
+      "obj_d19c9d7d699243c88ae5f0eebd0660b9",
+      "obj_677e64f351e445cdb2f6d71b6adb63a9"
+    ],
+    "reference_image_count": 3,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_6c067183ab4f4c92807a7864d9f17417\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 1.0,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"完整独立的塑料饮料杯，带吸管和彩色杯盖\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic drink cup\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\", \"white\", \"clear\"],\n        \"shape\": \"cylindrical with lid and straw\",\n        \"description\": \"透明塑料杯，内含浅色液体，杯盖为红色，印有卡通图案和二维码，插有红色吸管\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 1.0,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"无匹配记忆卡，且为独立新物体\",\n      \"final_annotation\": {\n        \"coarse_category\": \"container\",\n        \"fine_category\": \"plastic drink cup\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"red\", \"white\", \"clear\"],\n        \"shape\": \"cylindrical with lid and straw\",\n        \"description\": \"透明塑料杯，内含浅色液体，杯盖为红色，印有卡通图案和二维码，插有红色吸管\",\n        \"annotation_confidence\": 0.95\n      }\n    }\n  ]\n}",
+      "input_tokens": 3603,
+      "generated_tokens": 372,
+      "inference_seconds": 25.292238291352987
+    }
+  ]
+}

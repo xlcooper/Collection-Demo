@@ -1,0 +1,73 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v2",
+  "scope_id": "scene_batch_0004",
+  "batch_index": 4,
+  "expected_source_ids": [
+    "src_5cf926f0d4c1c65b71d162b3e47ae947",
+    "src_46cdc95f1f72f513c8dfe5228aa5e0f6"
+  ],
+  "error": null,
+  "scene_guidance_response": {
+    "images": [
+      {
+        "source_id": "src_5cf926f0d4c1c65b71d162b3e47ae947",
+        "scene_summary": "白色桌面上有一个带盖的透明水瓶和一个无线鼠标。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带盖的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "priority": "high",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动，是主要交互对象"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "wireless computer mouse",
+            "priority": "medium",
+            "confidence": 0.9,
+            "selection_reason_code": "task_relevant",
+            "selection_short_reason": "可能与任务相关，需识别其位置和状态"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+        "scene_summary": "白色桌面上有一个带盖的透明水瓶和一个无线鼠标，视角略有不同。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带盖的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "priority": "high",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动，是主要交互对象"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "wireless computer mouse",
+            "priority": "medium",
+            "confidence": 0.9,
+            "selection_reason_code": "task_relevant",
+            "selection_short_reason": "可能与任务相关，需识别其位置和状态"
+          }
+        ],
+        "no_target_reason": null
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_5cf926f0d4c1c65b71d162b3e47ae947\",\n      \"scene_summary\": \"白色桌面上有一个带盖的透明水瓶和一个无线鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带盖的透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle with lid\",\n          \"priority\": \"high\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动，是主要交互对象\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"无线鼠标\",\n          \"sam_text_prompt\": \"wireless computer mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.9,\n          \"selection_reason_code\": \"task_relevant\",\n          \"selection_short_reason\": \"可能与任务相关，需识别其位置和状态\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_46cdc95f1f72f513c8dfe5228aa5e0f6\",\n      \"scene_summary\": \"白色桌面上有一个带盖的透明水瓶和一个无线鼠标，视角略有不同。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带盖的透明水瓶\",\n          \"sam_text_prompt\": \"transparent water bottle with lid\",\n          \"priority\": \"high\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取移动，是主要交互对象\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"无线鼠标\",\n          \"sam_text_prompt\": \"wireless computer mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.9,\n          \"selection_reason_code\": \"task_relevant\",\n          \"selection_short_reason\": \"可能与任务相关，需识别其位置和状态\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 3014,
+      "generated_tokens": 520,
+      "inference_seconds": 35.01039132848382
+    }
+  ]
+}

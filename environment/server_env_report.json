@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "script_version": "0.3.0",
-  "generated_at_utc": "2026-07-30T03:41:54.585901+00:00",
+  "generated_at_utc": "2026-07-31T11:04:40.594908+00:00",
   "target": {
     "sam3": {
       "source": "facebookresearch/sam3",
@@ -18,9 +18,9 @@
   "git": {
     "available": true,
     "version": "git version 2.55.0",
-    "commit": "29221fb70c56bacb8c43cea562459e3588f7f5a2",
-    "worktree_clean": false,
-    "dirty_entry_count": 3,
+    "commit": "3ca25e53c1dc999a804a61802384f8c4a6034dee",
+    "worktree_clean": true,
+    "dirty_entry_count": 0,
     "git_lfs": {
       "available": true,
       "version": "git-lfs/3.7.1 (GitHub; linux amd64; go 1.26.4)"
@@ -34,7 +34,7 @@
     "memory_total_gib": 1007.51,
     "repo_disk": {
       "total_gib": 50.0,
-      "free_gib": 23.45
+      "free_gib": 23.41
     }
   },
   "gpu": {
@@ -138,21 +138,21 @@
       "exists": true,
       "is_directory": true,
       "writable": true,
-      "disk_free_gib": 23.45
+      "disk_free_gib": 23.41
     },
     "data_directory": {
       "configured": true,
       "exists": true,
       "is_directory": true,
       "writable": true,
-      "disk_free_gib": 23.45
+      "disk_free_gib": 23.41
     },
     "sam3_checkpoint": {
       "configured": true,
       "exists": true,
       "is_directory": false,
       "writable": true,
-      "disk_free_gib": 712.86,
+      "disk_free_gib": 737.28,
       "file_size_gib": 3.21
     }
   },
