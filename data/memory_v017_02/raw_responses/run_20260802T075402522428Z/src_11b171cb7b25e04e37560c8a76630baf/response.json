@@ -1,0 +1,68 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v2",
+  "expected_proposal_ids": [
+    "prop_d366cdb8afb141139564025dc94803a5"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_d366cdb8afb141139564025dc94803a5",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "clearly shows a transparent plastic bottle with white lid and handle, distinct from memory card",
+        "temporary_annotation": {
+          "coarse_category": "drink container",
+          "fine_category": "water bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white",
+            "transparent"
+          ],
+          "shape": "cylindrical with handle",
+          "description": "transparent plastic bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface",
+          "annotation_confidence": 0.97
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 0.99,
+        "reason_code": "new_object",
+        "short_reason": "no matching card found; candidate is a new physical object",
+        "final_annotation": {
+          "coarse_category": "drink container",
+          "fine_category": "water bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "white",
+            "transparent"
+          ],
+          "shape": "cylindrical with handle",
+          "description": "transparent plastic water bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface",
+          "annotation_confidence": 0.99
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 1,
+    "object_card_ids": [
+      "obj_0bf2fc229126451b9363a444a02a37c3"
+    ],
+    "reference_image_count": 1,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_d366cdb8afb141139564025dc94803a5\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"clearly shows a transparent plastic bottle with white lid and handle, distinct from memory card\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"drink container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\", \"transparent\"],\n        \"shape\": \"cylindrical with handle\",\n        \"description\": \"transparent plastic bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface\",\n        \"annotation_confidence\": 0.97\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 0.99,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"no matching card found; candidate is a new physical object\",\n      \"final_annotation\": {\n        \"coarse_category\": \"drink container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"white\", \"transparent\"],\n        \"shape\": \"cylindrical with handle\",\n        \"description\": \"transparent plastic water bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface\",\n        \"annotation_confidence\": 0.99\n      }\n    }\n  ]\n}",
+      "input_tokens": 2860,
+      "generated_tokens": 350,
+      "inference_seconds": 23.35869136080146
+    }
+  ]
+}

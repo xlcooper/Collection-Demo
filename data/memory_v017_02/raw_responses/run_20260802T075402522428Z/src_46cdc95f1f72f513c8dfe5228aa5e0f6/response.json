@@ -1,0 +1,70 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v2",
+  "expected_proposal_ids": [
+    "prop_248c71ed1cd54899ba19c7e0279bac3d"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_248c71ed1cd54899ba19c7e0279bac3d",
+        "validity": "valid",
+        "validity_confidence": 0.98,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "透明塑料瓶身，含水，带盖，符合水瓶特征",
+        "temporary_annotation": {
+          "coarse_category": "drink container",
+          "fine_category": "water bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "transparent",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料瓶，内含水，瓶盖为白色，瓶身有水珠，置于反光桌面，旁边有鼠标",
+          "annotation_confidence": 0.95
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+        "confidence": 0.92,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例一致，瓶身、瓶盖、水位、透明度匹配",
+        "final_annotation": {
+          "coarse_category": "drink container",
+          "fine_category": "water bottle",
+          "material": [
+            "plastic"
+          ],
+          "color": [
+            "transparent",
+            "white"
+          ],
+          "shape": "cylindrical",
+          "description": "透明塑料水瓶，配有白色盖子，内含水，瓶身有水珠，置于反光桌面。与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例完全一致，确认为同一物理实例。",
+          "annotation_confidence": 0.95
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 3,
+    "object_card_ids": [
+      "obj_0bf2fc229126451b9363a444a02a37c3",
+      "obj_5fe3821514bd43019c733ea93bd0b1a8",
+      "obj_8e86ee07358d49a4963895892507216a"
+    ],
+    "reference_image_count": 6,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_248c71ed1cd54899ba19c7e0279bac3d\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 0.98,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"透明塑料瓶身，含水，带盖，符合水瓶特征\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"drink container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"transparent\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料瓶，内含水，瓶盖为白色，瓶身有水珠，置于反光桌面，旁边有鼠标\",\n        \"annotation_confidence\": 0.95\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_5fe3821514bd43019c733ea93bd0b1a8\",\n      \"confidence\": 0.92,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例一致，瓶身、瓶盖、水位、透明度匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"drink container\",\n        \"fine_category\": \"water bottle\",\n        \"material\": [\"plastic\"],\n        \"color\": [\"transparent\", \"white\"],\n        \"shape\": \"cylindrical\",\n        \"description\": \"透明塑料水瓶，配有白色盖子，内含水，瓶身有水珠，置于反光桌面。与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例完全一致，确认为同一物理实例。\",\n        \"annotation_confidence\": 0.95\n      }\n    }\n  ]\n}",
+      "input_tokens": 4342,
+      "generated_tokens": 468,
+      "inference_seconds": 31.491237867623568
+    }
+  ]
+}

@@ -1,0 +1,1765 @@
+{
+  "schema_version": 5,
+  "generated_at_utc": "2026-08-02T08:02:51.388153+00:00",
+  "test": "object_memory_demo_batch",
+  "status": "failed",
+  "run": {
+    "run_id": "run_20260802T075402522428Z",
+    "status": "completed_with_errors",
+    "source_counts": {
+      "pending": 0,
+      "processing": 0,
+      "completed": 10,
+      "failed": 4
+    },
+    "proposal_counts": {
+      "pending": 0,
+      "filtered": 0,
+      "decided": 11,
+      "failed": 0
+    },
+    "decision_counts": {
+      "new": 3,
+      "existing": 8,
+      "ignored": 0,
+      "uncertain": 0
+    },
+    "observations_added": 11,
+    "active_objects_total": 3,
+    "duplicate_sources_skipped": 14,
+    "external_errors": 0
+  },
+  "checks": {
+    "input_images_nonempty": true,
+    "every_input_accounted_for": true,
+    "qwen_then_sam_then_qwen_sequential_boundary": true,
+    "every_processed_source_has_scene_guidance": true,
+    "no_source_left_processing": true,
+    "registered_sources_match_nonduplicates": true,
+    "all_qwen_candidates_have_persisted_status": true
+  },
+  "strategy": {
+    "prompt_strategy": "qwen_scene_guidance_to_sam3_text_concepts",
+    "external_category_prompts": false,
+    "model_generated_category_prompts": true,
+    "scene_guidance_batch_size": 4,
+    "max_scene_targets_per_image": 12,
+    "scope": "robot-oriented scene triage followed by open-vocabulary concept segmentation; first-pass recall must be audited",
+    "model_residency": "Qwen scene guidance then release; SAM3 text guidance then release; Qwen candidate reasoning then release",
+    "qwen_call_policy": "one scene-guidance call per configured source-image batch, then one detailed call per source image containing every retained candidate and every active memory object card",
+    "scene_guidance_memory_context": "none; discovery is driven only by each new scene view",
+    "qwen_error_policy": "one model call per logical scope; persist the raw result and fail the affected scope without automatic retry, single-source rescue, normalization, or fallback",
+    "sam_candidate_semantics": "SAM3 detections already above the processor text-confidence threshold, followed by script area, duplicate, same-prompt containment, and fair per-prompt capacity filtering",
+    "object_card_selection": "all active cards with configured recent reference views; no script-side similarity ranking or shortlist",
+    "uncertain_policy": "persist pending; do not immediately repeat",
+    "scene_prompt_version": "robot-scene-guidance-v3",
+    "candidate_prompt_version": "guided-image-batch-memory-reasoning-v2"
+  },
+  "models": {
+    "sam3": {
+      "loaded": true,
+      "model_load_seconds": 8.116,
+      "inference_seconds": 1.404,
+      "peak_memory_mib": 5099.3
+    },
+    "qwen": {
+      "loaded": true,
+      "load_count": 2,
+      "model_load_seconds": 6.124,
+      "inference_seconds": 506.466,
+      "input_tokens": 54443,
+      "generated_tokens": 7574,
+      "scene_batch_calls": 4,
+      "candidate_reasoning_calls": 9,
+      "total_calls": 13,
+      "peak_memory_mib": 11700.63,
+      "placement": [
+        "0"
+      ],
+      "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45",
+      "phases": {
+        "scene_guidance": {
+          "loaded": true,
+          "model_load_seconds": 3.537,
+          "inference_seconds": 210.733,
+          "input_tokens": 18220,
+          "generated_tokens": 3144,
+          "scene_batch_calls": 4,
+          "scene_batches": 4,
+          "images_analyzed": 10,
+          "peak_memory_mib": 11566.56,
+          "placement": [
+            "0"
+          ],
+          "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45"
+        },
+        "candidate_reasoning": {
+          "loaded": true,
+          "model_load_seconds": 2.587,
+          "inference_seconds": 295.733,
+          "input_tokens": 36223,
+          "generated_tokens": 4430,
+          "candidate_reasoning_calls": 9,
+          "peak_memory_mib": 11700.63,
+          "placement": [
+            "0"
+          ],
+          "snapshot": "9cdc6310a8cb770ce18efaf4e9935334512aee45"
+        }
+      }
+    }
+  },
+  "images": [
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0001.jpg",
+      "source_id": "src_c5a2b20d9299071e3915298423480189",
+      "sha256": "c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8",
+      "stored_source": "sources/c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0001/response.json",
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0002.jpg",
+      "source_id": "src_c5a2b20d9299071e3915298423480189",
+      "sha256": "c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8",
+      "stored_source": "sources/c5a2b20d9299071e39152984234801892402c15805a7a4cc3c52fd24f26ef3f8.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0003.jpg",
+      "source_id": "src_4cf691844b8baeee414cff6a9d6e441e",
+      "sha256": "4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2",
+      "stored_source": "sources/4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0001/response.json",
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0004.jpg",
+      "source_id": "src_38f13969e802dc30e46f45461efef2ac",
+      "sha256": "38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939",
+      "stored_source": "sources/38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0001/response.json",
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0005.jpg",
+      "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+      "sha256": "76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6",
+      "stored_source": "sources/76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6.jpg",
+      "duplicate": false,
+      "status": "failed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 1,
+        "scope_id": "scene_batch_0001",
+        "target_count": null,
+        "targets": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0001/response.json",
+        "errors": [
+          "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+        ]
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": "MllmOutputError: Qwen scene-guidance response failed schema validation: 1 validation error for SceneGuidanceBatchResponse\nimages.2.targets.0.sam_text_prompt\n  Value error, sam_text_prompt must describe one object concept without alternatives [type=value_error, input_value='plastic drink cup with straw and cartoon lid', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error"
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0006.jpg",
+      "source_id": "src_ebd9a7980e4eebecde06d3ab3317d51c",
+      "sha256": "ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9",
+      "stored_source": "sources/ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002",
+        "scene_summary": "白色桌面上的红色饮料杯盖，插着吸管，有卡通图案和二维码。",
+        "target_count": 1,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带吸管的红色饮料杯盖",
+            "sam_text_prompt": "red plastic drink cup lid with straw",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取、可移动的独立物体，含吸管"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0002/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "red plastic drink cup lid with straw": 1
+        },
+        "inference_seconds": 0.185
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 0,
+        "object_card_ids": [],
+        "reference_image_count": 0,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_ebd9a7980e4eebecde06d3ab3317d51c/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_e09843115b134f4593ab32bc71e9fe75",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "red plastic drink cup lid with straw",
+            "score": 0.90234375,
+            "bbox": {
+              "x_min": 607.3711547851562,
+              "y_min": 496.3332824707031,
+              "x_max": 1150.351318359375,
+              "y_max": 1038.692626953125
+            },
+            "mask_area_ratio": 0.10504192007190508,
+            "crop": "proposals/run_20260802T075402522428Z/prop_e09843115b134f4593ab32bc71e9fe75/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_e09843115b134f4593ab32bc71e9fe75/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_e09843115b134f4593ab32bc71e9fe75/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_0bf2fc229126451b9363a444a02a37c3",
+          "confidence": 1.0,
+          "reason_code": "new_object",
+          "short_reason": "no memory cards available; valid candidate identified as new",
+          "validity": "valid",
+          "validity_confidence": 1.0,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "clearly isolated red lid with straw and printed graphics",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "cup lid",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "red",
+              "white",
+              "green",
+              "blue",
+              "yellow"
+            ],
+            "shape": "circular",
+            "description": "red plastic cup lid with cartoon character, QR code, Chinese text, and a red straw inserted. The lid has a scalloped edge and is placed on a white surface.",
+            "annotation_confidence": 1.0
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "cup lid",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "red",
+              "white",
+              "green",
+              "blue",
+              "yellow"
+            ],
+            "shape": "circular",
+            "description": "red plastic cup lid with cartoon character, QR code, Chinese text, and a red straw inserted. The lid has a scalloped edge and is placed on a white surface.",
+            "annotation_confidence": 1.0
+          },
+          "matched_object_id": null,
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_ebd9a7980e4eebecde06d3ab3317d51c/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0007.jpg",
+      "source_id": "src_38f13969e802dc30e46f45461efef2ac",
+      "sha256": "38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939",
+      "stored_source": "sources/38f13969e802dc30e46f45461efef2ac27ea0c6c28833db128e09dbf7a8b2939.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0008.jpg",
+      "source_id": "src_11b171cb7b25e04e37560c8a76630baf",
+      "sha256": "11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0",
+      "stored_source": "sources/11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002",
+        "scene_summary": "白色桌面上的透明水瓶，带白色盖子和提手，内有少量水。",
+        "target_count": 1,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带提手的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with handle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取、可移动的独立物体，含提手"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0002/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle with handle": 1
+        },
+        "inference_seconds": 0.109
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 1,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3"
+        ],
+        "reference_image_count": 1,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_11b171cb7b25e04e37560c8a76630baf/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_d366cdb8afb141139564025dc94803a5",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle with handle",
+            "score": 0.53125,
+            "bbox": {
+              "x_min": 457.08087158203125,
+              "y_min": 62.41883087158203,
+              "x_max": 798.24365234375,
+              "y_max": 864.2616577148438
+            },
+            "mask_area_ratio": 0.15207524819863744,
+            "crop": "proposals/run_20260802T075402522428Z/prop_d366cdb8afb141139564025dc94803a5/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_d366cdb8afb141139564025dc94803a5/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_d366cdb8afb141139564025dc94803a5/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.99,
+          "reason_code": "new_object",
+          "short_reason": "no matching card found; candidate is a new physical object",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "clearly shows a transparent plastic bottle with white lid and handle, distinct from memory card",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white",
+              "transparent"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "transparent plastic bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface",
+            "annotation_confidence": 0.97
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white",
+              "transparent"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "transparent plastic water bottle with white lid and integrated handle, partially filled with water, standing upright on a white surface",
+            "annotation_confidence": 0.99
+          },
+          "matched_object_id": null,
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_11b171cb7b25e04e37560c8a76630baf/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0009.jpg",
+      "source_id": "src_cd11b8f53eee5bf00b87e637aa6c481f",
+      "sha256": "cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b",
+      "stored_source": "sources/cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002",
+        "scene_summary": "白色桌面上的透明水瓶和无线鼠标，水瓶倾斜，鼠标在旁。",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带提手的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with handle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取、可移动的独立物体，含提手"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "wireless computer mouse",
+            "priority": "medium",
+            "confidence": 0.97,
+            "selection_reason_code": "task_relevant",
+            "selection_short_reason": "任务相关设备，可能需交互或移动"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0002/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 2,
+        "kept": 2,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle with handle": 1,
+          "wireless computer mouse": 1
+        },
+        "inference_seconds": 0.152
+      },
+      "candidate_reasoning": {
+        "candidate_count": 2,
+        "object_card_count": 2,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8"
+        ],
+        "reference_image_count": 2,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_cd11b8f53eee5bf00b87e637aa6c481f/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_4dc708b7507947e8b46ef8fa75738c40",
+          "candidate": {
+            "raw_candidate_id": "text_001_candidate_000",
+            "sam_text_prompt": "wireless computer mouse",
+            "score": 0.8515625,
+            "bbox": {
+              "x_min": 490.2206115722656,
+              "y_min": 647.2546997070312,
+              "x_max": 736.585205078125,
+              "y_max": 794.80078125
+            },
+            "mask_area_ratio": 0.024369303385416666,
+            "crop": "proposals/run_20260802T075402522428Z/prop_4dc708b7507947e8b46ef8fa75738c40/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_4dc708b7507947e8b46ef8fa75738c40/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_4dc708b7507947e8b46ef8fa75738c40/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "new",
+          "object_id": "obj_8e86ee07358d49a4963895892507216a",
+          "confidence": 0.99,
+          "reason_code": "new_object",
+          "short_reason": "无匹配记忆卡，且为新独立物体",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰可见的无线鼠标外形，含滚轮和中央按钮",
+          "temporary_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "wireless computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "silver"
+            ],
+            "shape": "ergonomic oval",
+            "description": "银色塑料无线鼠标，表面光滑，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "wireless computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "silver"
+            ],
+            "shape": "ergonomic oval",
+            "description": "银色塑料无线鼠标，表面光滑，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.99
+          },
+          "matched_object_id": null,
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_cd11b8f53eee5bf00b87e637aa6c481f/response.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_4ba2547a7ba14dc3b3ea5779226bcea5",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle with handle",
+            "score": 0.625,
+            "bbox": {
+              "x_min": 0.0,
+              "y_min": 196.0316162109375,
+              "x_max": 557.724609375,
+              "y_max": 692.2508544921875
+            },
+            "mask_area_ratio": 0.08335042317708333,
+            "crop": "proposals/run_20260802T075402522428Z/prop_4ba2547a7ba14dc3b3ea5779226bcea5/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_4ba2547a7ba14dc3b3ea5779226bcea5/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_4ba2547a7ba14dc3b3ea5779226bcea5/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8视觉匹配",
+          "validity": "valid",
+          "validity_confidence": 0.97,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "透明瓶身、白色盖子、带提手，符合水瓶特征",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，含白色盖子和提手，内有水，置于反光桌面",
+            "annotation_confidence": 0.96
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，含白色盖子和提手，内有水，置于反光桌面",
+            "annotation_confidence": 0.96
+          },
+          "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_cd11b8f53eee5bf00b87e637aa6c481f/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0010.jpg",
+      "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+      "sha256": "76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6",
+      "stored_source": "sources/76482d84fc76d1c7e2061993bfa67a79bc5bbcc6f0c5a3bc94c03dfb589cd5b6.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0011.jpg",
+      "source_id": "src_01577d5285c9315307e807b77e802c81",
+      "sha256": "01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31",
+      "stored_source": "sources/01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 2,
+        "scope_id": "scene_batch_0002",
+        "scene_summary": "白色桌面上的透明饮料杯，杯身有红色文字，插着吸管，杯盖在下方。",
+        "target_count": 1,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带吸管的透明饮料杯",
+            "sam_text_prompt": "transparent plastic drink cup with straw",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取、可移动的独立物体，含吸管"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0002/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent plastic drink cup with straw": 0
+        },
+        "inference_seconds": 0.106
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0012.jpg",
+      "source_id": "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+      "sha256": "3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c",
+      "stored_source": "sources/3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003",
+        "scene_summary": "白色桌面上的白色鼠标和带提手的白色水瓶",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "带提手的白色水瓶",
+            "sam_text_prompt": "white water bottle with handle",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0003/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "white computer mouse": 1,
+          "white water bottle with handle": 0
+        },
+        "inference_seconds": 0.15
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 4,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_3cea6b6ee098e81455d929f6f2ca3aa2/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_2e036d926bed4997b3fb83f664ed58ab",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "white computer mouse",
+            "score": 0.92578125,
+            "bbox": {
+              "x_min": 619.0617065429688,
+              "y_min": 471.6523742675781,
+              "x_max": 766.0914916992188,
+              "y_max": 684.6109008789062
+            },
+            "mask_area_ratio": 0.011268741696716645,
+            "crop": "proposals/run_20260802T075402522428Z/prop_2e036d926bed4997b3fb83f664ed58ab/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_2e036d926bed4997b3fb83f664ed58ab/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_2e036d926bed4997b3fb83f664ed58ab/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_8e86ee07358d49a4963895892507216a",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡3的银色鼠标在形状、结构和材质上匹配，但颜色不同",
+          "validity": "valid",
+          "validity_confidence": 0.95,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰可见的鼠标外形与滚轮按钮",
+          "temporary_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic oval",
+            "description": "粉色塑料鼠标，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.9
+          },
+          "final_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "wireless computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic oval",
+            "description": "粉色塑料无线鼠标，表面光滑，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_8e86ee07358d49a4963895892507216a",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_3cea6b6ee098e81455d929f6f2ca3aa2/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0013.jpg",
+      "source_id": "src_f37cbe405bc095713b4c5096c9b3bafa",
+      "sha256": "f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a",
+      "stored_source": "sources/f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003",
+        "scene_summary": "桌面上的带吸管和红色盖子的奶茶杯",
+        "target_count": 1,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带吸管的奶茶杯",
+            "sam_text_prompt": "plastic drink cup with straw",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0003/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "plastic drink cup with straw": 1
+        },
+        "inference_seconds": 0.106
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 5,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_f37cbe405bc095713b4c5096c9b3bafa/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_c9fc3a8612ed44a0b93ae2d149eaa7a1",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "plastic drink cup with straw",
+            "score": 0.7265625,
+            "bbox": {
+              "x_min": 438.68133544921875,
+              "y_min": 147.7154541015625,
+              "x_max": 940.7586669921875,
+              "y_max": 859.1613159179688
+            },
+            "mask_area_ratio": 0.10833196031048624,
+            "crop": "proposals/run_20260802T075402522428Z/prop_c9fc3a8612ed44a0b93ae2d149eaa7a1/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_c9fc3a8612ed44a0b93ae2d149eaa7a1/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_c9fc3a8612ed44a0b93ae2d149eaa7a1/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_0bf2fc229126451b9363a444a02a37c3",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "杯盖图案、二维码、吸管插入方式与参考图完全匹配",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "完整塑料杯含盖、吸管、标签和卡通图案，独立物理对象",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "plastic cup with lid",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "white",
+              "red",
+              "green",
+              "blue",
+              "yellow"
+            ],
+            "shape": "cylindrical",
+            "description": "白色塑料杯身，红色杯盖，盖上有卡通图案、二维码和中文文字，插入红色吸管，杯身贴有标签，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "cup lid",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "red",
+              "white",
+              "green",
+              "blue",
+              "yellow"
+            ],
+            "shape": "circular",
+            "description": "红色塑料杯盖，印有卡通角色、二维码和中文文字，配有红色吸管，置于白色反光桌面，与参考图视觉实例完全一致",
+            "annotation_confidence": 0.98
+          },
+          "matched_object_id": "obj_0bf2fc229126451b9363a444a02a37c3",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_f37cbe405bc095713b4c5096c9b3bafa/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0014.jpg",
+      "source_id": "src_4cf691844b8baeee414cff6a9d6e441e",
+      "sha256": "4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2",
+      "stored_source": "sources/4cf691844b8baeee414cff6a9d6e441e26e84911326c59f7d5db5b1dc46de4e2.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0015.jpg",
+      "source_id": "src_54ac1b5d01f7f5f4123518653092ee1b",
+      "sha256": "54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a",
+      "stored_source": "sources/54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003",
+        "scene_summary": "桌面上的透明水瓶和白色鼠标",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "transparent water bottle",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0003/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 2,
+        "kept": 2,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle": 1,
+          "white computer mouse": 1
+        },
+        "inference_seconds": 0.151
+      },
+      "candidate_reasoning": {
+        "candidate_count": 2,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 6,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_54ac1b5d01f7f5f4123518653092ee1b/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_d83b1fcb2e894dbf976297382ffbef81",
+          "candidate": {
+            "raw_candidate_id": "text_001_candidate_000",
+            "sam_text_prompt": "white computer mouse",
+            "score": 0.9765625,
+            "bbox": {
+              "x_min": 498.2108154296875,
+              "y_min": 740.2716674804688,
+              "x_max": 810.8504638671875,
+              "y_max": 969.9349975585938
+            },
+            "mask_area_ratio": 0.02390844683655536,
+            "crop": "proposals/run_20260802T075402522428Z/prop_d83b1fcb2e894dbf976297382ffbef81/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_d83b1fcb2e894dbf976297382ffbef81/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_d83b1fcb2e894dbf976297382ffbef81/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_8e86ee07358d49a4963895892507216a",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_8e86ee07358d49a4963895892507216a描述一致，粉色塑料无线鼠标",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰显示鼠标外形、滚轮和按钮，独立物体",
+          "temporary_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "wireless computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic oval",
+            "description": "粉色塑料无线鼠标，表面光滑，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "input device",
+            "fine_category": "wireless computer mouse",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "pink"
+            ],
+            "shape": "ergonomic oval",
+            "description": "粉色塑料无线鼠标，表面光滑，带中央滚轮按钮，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_8e86ee07358d49a4963895892507216a",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_54ac1b5d01f7f5f4123518653092ee1b/response.json",
+          "errors": []
+        },
+        {
+          "proposal_id": "prop_7abd210eec824d7ba470a7d36ca43624",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle",
+            "score": 0.93359375,
+            "bbox": {
+              "x_min": 423.1921081542969,
+              "y_min": 0.0,
+              "x_max": 937.656982421875,
+              "y_max": 761.3603515625
+            },
+            "mask_area_ratio": 0.09163920620972467,
+            "crop": "proposals/run_20260802T075402522428Z/prop_7abd210eec824d7ba470a7d36ca43624/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_7abd210eec824d7ba470a7d36ca43624/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_7abd210eec824d7ba470a7d36ca43624/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.91,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8描述一致，透明塑料水瓶",
+          "validity": "valid",
+          "validity_confidence": 0.97,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "透明瓶身、白色盖子、含水，独立物体",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，含白色盖子和提手，内有水，置于反光桌面",
+            "annotation_confidence": 0.94
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，含白色盖子和提手，内有水，置于反光桌面",
+            "annotation_confidence": 0.94
+          },
+          "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_54ac1b5d01f7f5f4123518653092ee1b/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0016.jpg",
+      "source_id": "src_ebd9a7980e4eebecde06d3ab3317d51c",
+      "sha256": "ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9",
+      "stored_source": "sources/ebd9a7980e4eebecde06d3ab3317d51cac3a47e1f3fd838152fa73b0c27fa6b9.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0017.jpg",
+      "source_id": "src_3c29806ddef097e7d2dff530f49d18e4",
+      "sha256": "3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba",
+      "stored_source": "sources/3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 3,
+        "scope_id": "scene_batch_0003",
+        "scene_summary": "桌面上的透明水瓶和白色鼠标",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "transparent water bottle",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "白色鼠标",
+            "sam_text_prompt": "white computer mouse",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立物体"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0003/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle": 1,
+          "white computer mouse": 0
+        },
+        "inference_seconds": 0.148
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 6,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_3c29806ddef097e7d2dff530f49d18e4/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_935e2f6694bc4231bff15162d16ca628",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle",
+            "score": 0.89453125,
+            "bbox": {
+              "x_min": 452.4096984863281,
+              "y_min": 0.0,
+              "x_max": 831.0740356445312,
+              "y_max": 580.9893188476562
+            },
+            "mask_area_ratio": 0.10819709949542215,
+            "crop": "proposals/run_20260802T075402522428Z/prop_935e2f6694bc4231bff15162d16ca628/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_935e2f6694bc4231bff15162d16ca628/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_935e2f6694bc4231bff15162d16ca628/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的参考图在形状、颜色、材质和结构上完全一致",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰可见的透明水瓶，含白色盖子和提手，内有水",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料瓶身，内含水，配白色盖子和提手，瓶盖顶部有小孔，瓶身有水珠，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，含白色盖子和提手，内有水，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_3c29806ddef097e7d2dff530f49d18e4/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0018.jpg",
+      "source_id": "src_11b171cb7b25e04e37560c8a76630baf",
+      "sha256": "11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0",
+      "stored_source": "sources/11b171cb7b25e04e37560c8a76630baf17c9aac5cbd940d3b0e8245aea02a9c0.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0019.jpg",
+      "source_id": "src_5cf926f0d4c1c65b71d162b3e47ae947",
+      "sha256": "5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41",
+      "stored_source": "sources/5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 4,
+        "scope_id": "scene_batch_0004",
+        "scene_summary": "白色桌面上有一个带盖的透明水瓶和一个无线鼠标。",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带盖的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "priority": "high",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动，瓶盖与瓶身一体，适合后续操作"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "wireless computer mouse",
+            "priority": "medium",
+            "confidence": 0.9,
+            "selection_reason_code": "task_relevant",
+            "selection_short_reason": "任务相关设备，可能用于交互或位置参考"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0004/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle with lid": 1,
+          "wireless computer mouse": 0
+        },
+        "inference_seconds": 0.146
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 6,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_5cf926f0d4c1c65b71d162b3e47ae947/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_39da5e2d957244b7909416fabb723cd9",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "score": 0.67578125,
+            "bbox": {
+              "x_min": 441.4205322265625,
+              "y_min": 75.5648422241211,
+              "x_max": 868.9185791015625,
+              "y_max": 725.5845947265625
+            },
+            "mask_area_ratio": 0.10841634114583333,
+            "crop": "proposals/run_20260802T075402522428Z/prop_39da5e2d957244b7909416fabb723cd9/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_39da5e2d957244b7909416fabb723cd9/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_39da5e2d957244b7909416fabb723cd9/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.99,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的参考图完全匹配，材质、形状、颜色、结构一致",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "清晰可见的透明水瓶，带白色盖子和提手，内含水，符合物理对象定义",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料瓶身，内含水，配有白色盖子和提手，瓶盖顶部有小孔，瓶身有轻微反光，置于反光桌面",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical with handle",
+            "description": "透明塑料水瓶，配有白色盖子和提手，内含水，置于反光桌面。与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例完全一致，确认为同一物理实例。",
+            "annotation_confidence": 0.99
+          },
+          "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_5cf926f0d4c1c65b71d162b3e47ae947/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0020.jpg",
+      "source_id": "src_cd11b8f53eee5bf00b87e637aa6c481f",
+      "sha256": "cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b",
+      "stored_source": "sources/cd11b8f53eee5bf00b87e637aa6c481f0ca6960789ad18466bc647690a522a7b.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0021.jpg",
+      "source_id": "src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+      "sha256": "46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908",
+      "stored_source": "sources/46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908.jpg",
+      "duplicate": false,
+      "status": "completed",
+      "scene_guidance": {
+        "prompt_version": "robot-scene-guidance-v3",
+        "batch_index": 4,
+        "scope_id": "scene_batch_0004",
+        "scene_summary": "白色桌面上有一个带盖的透明水瓶和一个无线鼠标，视角略有不同。",
+        "target_count": 2,
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带盖的透明水瓶",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "priority": "high",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取移动，瓶盖与瓶身一体，适合后续操作"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "wireless computer mouse",
+            "priority": "medium",
+            "confidence": 0.9,
+            "selection_reason_code": "task_relevant",
+            "selection_short_reason": "任务相关设备，可能用于交互或位置参考"
+          }
+        ],
+        "no_target_reason": null,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/scene_batch_0004/response.json",
+        "errors": []
+      },
+      "sam": {
+        "model_thresholded_candidates": 1,
+        "kept": 1,
+        "filtered": 0,
+        "prompt_detection_counts": {
+          "transparent water bottle with lid": 1,
+          "wireless computer mouse": 0
+        },
+        "inference_seconds": 0.15
+      },
+      "candidate_reasoning": {
+        "candidate_count": 1,
+        "object_card_count": 3,
+        "object_card_ids": [
+          "obj_0bf2fc229126451b9363a444a02a37c3",
+          "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "obj_8e86ee07358d49a4963895892507216a"
+        ],
+        "reference_image_count": 6,
+        "qwen_calls": 1,
+        "raw_response": "raw_responses/run_20260802T075402522428Z/src_46cdc95f1f72f513c8dfe5228aa5e0f6/response.json",
+        "errors": []
+      },
+      "decisions": [
+        {
+          "proposal_id": "prop_248c71ed1cd54899ba19c7e0279bac3d",
+          "candidate": {
+            "raw_candidate_id": "text_000_candidate_000",
+            "sam_text_prompt": "transparent water bottle with lid",
+            "score": 0.85546875,
+            "bbox": {
+              "x_min": 465.5491943359375,
+              "y_min": 0.0,
+              "x_max": 833.4470825195312,
+              "y_max": 696.074951171875
+            },
+            "mask_area_ratio": 0.14176690597574623,
+            "crop": "proposals/run_20260802T075402522428Z/prop_248c71ed1cd54899ba19c7e0279bac3d/crop.png",
+            "mask": "proposals/run_20260802T075402522428Z/prop_248c71ed1cd54899ba19c7e0279bac3d/mask.png",
+            "overlay": "proposals/run_20260802T075402522428Z/prop_248c71ed1cd54899ba19c7e0279bac3d/overlay.jpg"
+          },
+          "status": "decided",
+          "decision": "existing",
+          "object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "confidence": 0.92,
+          "reason_code": "visual_instance_match",
+          "short_reason": "与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例一致，瓶身、瓶盖、水位、透明度匹配",
+          "validity": "valid",
+          "validity_confidence": 0.98,
+          "validity_reason_code": "valid_candidate",
+          "validity_short_reason": "透明塑料瓶身，含水，带盖，符合水瓶特征",
+          "temporary_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical",
+            "description": "透明塑料瓶，内含水，瓶盖为白色，瓶身有水珠，置于反光桌面，旁边有鼠标",
+            "annotation_confidence": 0.95
+          },
+          "final_annotation": {
+            "coarse_category": "drink container",
+            "fine_category": "water bottle",
+            "material": [
+              "plastic"
+            ],
+            "color": [
+              "transparent",
+              "white"
+            ],
+            "shape": "cylindrical",
+            "description": "透明塑料水瓶，配有白色盖子，内含水，瓶身有水珠，置于反光桌面。与记忆卡obj_5fe3821514bd43019c733ea93bd0b1a8的视觉实例完全一致，确认为同一物理实例。",
+            "annotation_confidence": 0.95
+          },
+          "matched_object_id": "obj_5fe3821514bd43019c733ea93bd0b1a8",
+          "raw_response": "raw_responses/run_20260802T075402522428Z/src_46cdc95f1f72f513c8dfe5228aa5e0f6/response.json",
+          "errors": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0022.jpg",
+      "source_id": "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+      "sha256": "3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c",
+      "stored_source": "sources/3cea6b6ee098e81455d929f6f2ca3aa2621b17caa929c8aad8d7e1c35970a95c.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0023.jpg",
+      "source_id": "src_54ac1b5d01f7f5f4123518653092ee1b",
+      "sha256": "54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a",
+      "stored_source": "sources/54ac1b5d01f7f5f4123518653092ee1bb101c36ebd8c72d712b2be417144b95a.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0024.jpg",
+      "source_id": "src_3c29806ddef097e7d2dff530f49d18e4",
+      "sha256": "3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba",
+      "stored_source": "sources/3c29806ddef097e7d2dff530f49d18e457b1a521e20e038eaccadc1c1b7450ba.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0025.jpg",
+      "source_id": "src_5cf926f0d4c1c65b71d162b3e47ae947",
+      "sha256": "5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41",
+      "stored_source": "sources/5cf926f0d4c1c65b71d162b3e47ae947a6c056d221a58330710c82fce639ba41.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0026.jpg",
+      "source_id": "src_01577d5285c9315307e807b77e802c81",
+      "sha256": "01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31",
+      "stored_source": "sources/01577d5285c9315307e807b77e802c8105c36d7137b81c3ed148b49cdacd2f31.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0027.jpg",
+      "source_id": "src_46cdc95f1f72f513c8dfe5228aa5e0f6",
+      "sha256": "46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908",
+      "stored_source": "sources/46cdc95f1f72f513c8dfe5228aa5e0f61b16d9de9fe873e75a19271e3cbed908.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    },
+    {
+      "input_path": "/root/autodl-tmp/Collection-Demo/data/input/img_0028.jpg",
+      "source_id": "src_f37cbe405bc095713b4c5096c9b3bafa",
+      "sha256": "f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a",
+      "stored_source": "sources/f37cbe405bc095713b4c5096c9b3bafae37d556b0da3366e12ab297c5a30581a.jpg",
+      "duplicate": true,
+      "status": "duplicate",
+      "scene_guidance": null,
+      "sam": {
+        "model_thresholded_candidates": 0,
+        "kept": 0,
+        "filtered": 0,
+        "prompt_detection_counts": {},
+        "inference_seconds": 0.0
+      },
+      "candidate_reasoning": null,
+      "decisions": [],
+      "error": null
+    }
+  ],
+  "external_errors": [],
+  "core_counts": {
+    "runs": 1,
+    "source_images": 14,
+    "proposals": 11,
+    "objects": 3,
+    "observations": 11,
+    "decisions": 11
+  },
+  "run_report": "run_reports/run_20260802T075402522428Z.json",
+  "demo_coverage": {
+    "at_least_two_new_object_archives": true,
+    "same_object_observation_was_merged": true,
+    "exact_duplicate_image_was_skipped": true,
+    "no_pending_or_failed_proposals": true
+  },
+  "demo_observations": {
+    "filtered_or_ignored_candidate_observed": false
+  },
+  "pipeline_status": "completed_with_errors"
+}
