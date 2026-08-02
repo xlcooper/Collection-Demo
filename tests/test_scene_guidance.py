@@ -106,6 +106,9 @@ class SceneGuidanceResponseTests(unittest.TestCase):
             "plastic cup with red straw",
             "transparent water bottle with handle",
             "white plastic water bottle with handle",
+            "red plastic drink cup lid with straw",
+            "transparent plastic drink cup with red text",
+            "transparent plastic drink cup with removable red straw",
             "bottle of water",
         ):
             with self.subTest(prompt=prompt):
@@ -134,7 +137,7 @@ class SceneGuidanceResponseTests(unittest.TestCase):
                     prompt,
                 )
 
-    def test_response_rejects_duplicate_or_generic_sam_prompts(self) -> None:
+    def test_response_rejects_duplicate_or_invalid_sam_prompts(self) -> None:
         duplicate = guidance_payload(
             "src_one",
             targets=[
@@ -167,6 +170,7 @@ class SceneGuidanceResponseTests(unittest.TestCase):
             "cup-or-bottle",
             "cup on table",
             "small object",
+            "transparent reusable insulated stainless steel water bottle with white cap",
             "123",
         ):
             with self.subTest(invalid_prompt=invalid_prompt):
@@ -225,6 +229,8 @@ class SceneGuidancePromptTests(unittest.TestCase):
             self.assertIn("water bottle with handle", all_text)
             self.assertIn("never use `with` to join separate objects", all_text)
             self.assertIn("name the whole object concept", all_text)
+            self.assertIn("within 64 characters", all_text)
+            self.assertNotIn("at most six words", all_text)
             self.assertEqual(image_count, 4)
 
     def test_evaluation_uses_one_call_for_multiple_source_images(self) -> None:

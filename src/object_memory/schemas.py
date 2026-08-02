@@ -128,8 +128,6 @@ class SceneTarget(StrictModel):
         if not 2 <= len(normalized) <= 64:
             raise ValueError("sam_text_prompt must contain 2 to 64 characters")
         words = normalized.split()
-        if len(words) > 6:
-            raise ValueError("sam_text_prompt must contain at most 6 words")
         if not re.fullmatch(r"[a-z][a-z0-9]*(?:[ '][a-z0-9]+)*", normalized):
             raise ValueError(
                 "sam_text_prompt must be a short lowercase English noun phrase"
