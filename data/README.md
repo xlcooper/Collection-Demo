@@ -1,6 +1,6 @@
 # `data/` Demo 数据目录
 
-`data/` 保存固定 Demo 输入和运行时生成的完整对象记忆。当前仓库保留同一输入以及两次独立正式实验的记忆根；每个记忆根都是不可拆分的审计单元，实验结论见根目录 `PROGRESS.md`。更早的已清理产物只能从 Git 历史恢复，不能把历史摘要复制成当前结果。
+`data/` 保存固定 Demo 输入和运行时生成的完整对象记忆。当前仓库保留同一输入以及三次独立正式实验的记忆根；每个记忆根都是不可拆分的审计单元，实验结论见根目录 `PROGRESS.md`。更早的已清理产物只能从 Git 历史恢复，不能把历史摘要复制成当前结果。
 
 ## 目录结构
 
@@ -8,10 +8,11 @@
 data/
 ├─ input/
 ├─ memory/                  # v0.16.1 失败实验，默认记忆根
-└─ memory_v017_01/          # v0.17.0 失败实验，独立比较根
+├─ memory_v017_01/          # v0.17.0 失败实验，独立比较根
+└─ memory_v017_02/          # v0.17.4 失败实验，独立比较根
 ```
 
-两个记忆根内部都包含 `memory.sqlite`、`sources/`、`proposals/`、`objects/`、`raw_responses/` 和 `run_reports/`。
+三个记忆根内部都包含 `memory.sqlite`、`sources/`、`proposals/`、`objects/`、`raw_responses/` 和 `run_reports/`。
 
 ### `input/`
 
@@ -24,7 +25,7 @@ data/
 
 ### 记忆根
 
-`config/default.yaml` 默认使用 `memory/`；`memory_v017_01/` 是通过 `--memory-root` 选择的独立实验根。任意空记忆根首次运行时都会创建以下内容：
+`config/default.yaml` 默认使用 `memory/`；`memory_v017_01/` 和 `memory_v017_02/` 是通过 `--memory-root` 选择的独立实验根。任意空记忆根首次运行时都会创建以下内容：
 
 | 路径 | 内容 |
 |---|---|
@@ -39,7 +40,7 @@ data/
 
 ## 使用规则
 
-- 当前 `memory/` 与 `memory_v017_01/` 都是已保留的失败实验与审计证据，不得局部删除、覆盖或直接当作干净实验起点。
+- 当前 `memory/`、`memory_v017_01/` 与 `memory_v017_02/` 都是已保留的失败实验与审计证据，不得局部删除、覆盖或直接当作干净实验起点。
 - 全部相关 source 已完成的记忆根才适合增量运行：相同哈希的已完成图片会跳过，新图片继续写入同一对象记忆。
 - failed 或中断的 source 只能在原 run 内恢复；新 run 不能接管其他 run 的未完成哈希。
 - 重做、修复后复验或并排比较时，使用独立空记忆根，例如 `data/memory_compare/`。
