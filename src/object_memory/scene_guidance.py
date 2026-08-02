@@ -27,7 +27,7 @@ Prioritize:
 - unfamiliar, transparent, partially occluded, or category-uncertain regions when they still plausibly form one independent physical object.
 
 Prefer the complete object. Do not separately select an attached cap, handle, label, button, straw, or other part. Select such a part only when it is visibly detached and independently manipulable.
-When an attached part is the most visible region of a partially visible object, name the whole object concept, for example `plastic drink cup with straw`, rather than the lid or straw alone.
+When an attached part is the most visible region of a partially visible object, name the whole object concept. A lid and straw attached to a cup must be returned as a `drink cup`, not as a lid or straw. The Chinese object name and the SAM3 text must refer to that same complete object.
 
 Exclude:
 - floors, walls, desktops, shelves, support boards, structural partitions, and other scene-support surfaces;
@@ -40,7 +40,8 @@ Recall policy:
 This stage gates downstream discovery. Do not restrict selection to familiar categories, previously known objects, or only the most obvious items. When a bounded foreground region plausibly represents an independent task-relevant object, include it with a concrete but not overly narrow category rather than silently omitting it.
 
 SAM3 prompt policy:
-For each target, return exactly one concise lowercase English concrete noun phrase within 64 characters. Describe one physical object, preferably with a stable category noun; add visible attributes only when they materially help SAM3 localize that object. A phrase such as `water bottle with handle` is valid when `with` describes a visible feature of that same object; never use `with` to join separate objects. Never use scene-relative position, punctuation-separated alternatives, conjunctions such as `and` or `or`, or vague words such as object, item, thing, stuff, region, foreground, or background. If multiple visible instances share the same concept, one prompt is enough because SAM3 returns matching instances.
+SAM3 retrieval text is not an image caption. For each target, return exactly one concise lowercase English concrete noun phrase within 64 characters that names one complete physical object. Prefer the shortest stable category that can match across viewpoints, such as `computer mouse`, `water bottle`, or `drink cup`. Do not add color, material, transparency, wireless status, contents, or attached parts unless the base category is genuinely ambiguous and the attribute is clearly visible in this exact image. A partially occluded object still uses its whole-object category.
+`with` and `and` may describe features belonging to that same object, but never use them to join separate objects. Never use `or` or punctuation-separated alternatives. Never use scene-relative position or vague words such as object, item, thing, stuff, region, foreground, or background. If multiple visible instances share the same concept, one prompt is enough because SAM3 returns matching instances.
 
 Use Chinese for scene summaries, object names, and brief reasons. Keep JSON keys and enum values exactly as specified. Return one JSON object covering every supplied source_id exactly once. Do not return Markdown, extra text, or hidden chain-of-thought.
 """
@@ -73,10 +74,11 @@ Rules:
 1. Output every supplied source_id exactly once and do not invent source IDs. Judge each image only from its own visible pixels; never copy or infer a target for one source merely because it appears in another source.
 2. Return at most {max_targets_per_image} targets per image, ordered by priority and usefulness.
 3. target_id values must be unique within an image.
-4. sam_text_prompt values must be unique within an image and follow the SAM3 prompt policy.
-5. If no qualifying target is visible, return an empty targets list and a brief non-empty no_target_reason.
-6. If targets is non-empty, no_target_reason must be null.
-7. Confidence expresses confidence that the region is an independent worthwhile object, not confidence in its exact category name.
+4. object_name_zh and sam_text_prompt must name the same complete independent object; never name an attached part when the larger object is visible.
+5. sam_text_prompt values must be unique within an image and follow the SAM3 prompt policy. Use stable category-level retrieval text rather than a detailed caption.
+6. If no qualifying target is visible, return an empty targets list and a brief non-empty no_target_reason.
+7. If targets is non-empty, no_target_reason must be null.
+8. Confidence expresses confidence that the region is an independent worthwhile object, not confidence in its exact category name.
 """
 
 

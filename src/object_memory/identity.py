@@ -21,12 +21,14 @@ You receive every retained SAM candidate from one source image, followed by all 
 Each candidate was retrieved from a fallible first-pass scene-survey concept. Its SAM text prompt is retrieval metadata, not ground truth. Never accept, label, or match a candidate merely because the upstream concept names that object.
 
 For every candidate, follow this order:
-1. Judge candidate validity from its mask-isolated crop and context overlay. You may compare candidates from this source image to reject redundant masks or non-independent parts, but do not use memory-card similarity to decide validity.
-2. If valid, create a structured temporary annotation from the candidate's visible evidence.
+1. Judge candidate validity and object granularity from its mask-isolated crop and original-color context image. Use context to determine whether the mask is a complete independent object or only an attached part. You may compare candidates from this source image to reject redundant masks, but do not use memory-card similarity to decide validity.
+2. If valid, create a structured temporary annotation from the unaltered pixels in the mask-isolated crop. The crop is the authoritative source for color, material, texture, and other appearance properties.
 3. Compare that temporary annotation and candidate image with every supplied object card and its reference images.
 4. Decide new, existing, or uncertain, then produce a final annotation updated with the useful evidence from comparison.
 
-Reject shadows, reflections, background regions, support surfaces, fixed structural components or built-in controls, textures, merged groups, meaningless fragments, redundant masks of another complete candidate, and non-independent object parts. A correctly segmented region can still be outside the robot-arm object-memory scope. Same category, color, material, upstream concept, or spatial proximity alone never proves that two observations are the same physical instance. Reference images and distinctive instance details are stronger evidence.
+Reject shadows, reflections, background regions, support surfaces, fixed structural components or built-in controls, textures, merged groups, meaningless fragments, redundant masks of another complete candidate, and non-independent object parts. If a cap, lid, handle, button, label, straw, or similar region is visibly attached to a larger object, ignore that part candidate; do not create a part archive. A detached and independently manipulable part may be valid. A correctly segmented region can still be outside the robot-arm object-memory scope.
+The context image preserves the source image's original colors and adds only a location box. Use it for attachment, boundaries, occlusion, and scene position, never as the source of appearance attributes. Same category, color, material, upstream concept, or spatial proximity alone never proves that two observations are the same physical instance. Reference crops and distinctive instance details are stronger evidence. An existing match additionally requires the same independent-object granularity: a complete object and a card for only one of its parts are not an existing match.
+Object-card annotations contain stable object knowledge only. Never put an object_id, matching decision, table or shelf, nearby objects, reflections, scene position, or context-box color into temporary or final object descriptions. When appearance evidence conflicts, prefer unaltered crop/reference pixels and omit uncertain properties instead of replacing stable facts from a context image.
 Use Chinese for annotation values and brief reason text, while keeping JSON keys and enum values exactly as specified.
 Return one JSON object covering every supplied candidate exactly once. Do not return Markdown, extra text, or hidden chain-of-thought; use only brief reason fields.
 """
@@ -76,10 +78,11 @@ Rules:
 4. existing requires one exact supplied object_id, visual_instance_match, and confidence >= {existing_min_confidence:.2f}.
 5. new requires no matching supplied card, matched_object_id null, and new_object.
 6. uncertain requires matched_object_id null and ambiguous_match or insufficient_evidence.
-7. For new, final_annotation refines the temporary annotation using only visible evidence.
-8. For existing, final_annotation is the updated cumulative object-card annotation: preserve supported stable facts from the matched card and add useful current-view evidence without inventing facts.
-9. For uncertain, final_annotation describes the current valid candidate but must not borrow uncertain identity facts.
-10. When no memory cards are supplied, every valid candidate must be new.
+7. temporary_annotation describes only the current complete independent object. Its appearance fields come from the mask-isolated crop, and its description excludes scene context, IDs, and matching language.
+8. For new, final_annotation refines the temporary annotation using only visible stable object evidence.
+9. Existing requires both the same physical instance and the same independent-object granularity. Its final_annotation preserves supported stable card facts, adds only non-conflicting crop evidence, and excludes scene context, IDs, matching language, and uncertain appearance.
+10. For uncertain, final_annotation describes the current valid candidate but must not borrow uncertain identity facts.
+11. When no memory cards are supplied, every valid candidate must be new.
 """
 
 
@@ -270,9 +273,10 @@ def build_image_batch_messages(
                 {
                     "type": "text",
                     "text": (
-                        f"CANDIDATE_{index}_CONTEXT_OVERLAY follows. Use it only "
-                        "for boundaries and scene position; its colored mask is not "
-                        "the target and must not determine object color."
+                        f"CANDIDATE_{index}_CONTEXT_IMAGE follows. It preserves "
+                        "the source image's original colors and adds only a location "
+                        "box. Use it for attachment, boundaries, occlusion, and scene "
+                        "position; use the crop for all appearance attributes."
                     ),
                 },
                 {

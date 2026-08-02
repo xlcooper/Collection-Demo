@@ -72,8 +72,12 @@ class MemoryLoop:
         prompt_version: str,
         raw_response_path: str | None = None,
         attempt: int = 1,
+        observation_description: str | None = None,
     ) -> DecisionWriteResult:
         """Turn one validated four-way MLLM response into durable records."""
+
+        if observation_description is not None and not observation_description.strip():
+            raise ValueError("observation_description must not be blank")
 
         decision = Decision(
             proposal_id=proposal.id,
@@ -119,7 +123,9 @@ class MemoryLoop:
                 crop_path=promoted_assets.crop_path,
                 mask_path=promoted_assets.mask_path,
                 overlay_path=promoted_assets.overlay_path,
-                description=response.annotation.description,
+                description=(
+                    observation_description or response.annotation.description
+                ),
             )
 
         try:

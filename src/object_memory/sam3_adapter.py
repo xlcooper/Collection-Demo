@@ -119,12 +119,10 @@ class Sam3Adapter:
     ) -> Sam3Prediction:
         """Segment all instances matching validated scene-guidance concepts."""
 
-        normalized_prompts = [
-            " ".join(prompt.strip().lower().split()) for prompt in prompts
-        ]
-        if not normalized_prompts or any(not prompt for prompt in normalized_prompts):
+        prompt_list = list(prompts)
+        if not prompt_list or any(not prompt.strip() for prompt in prompt_list):
             raise ValueError("At least one non-empty SAM3 text prompt is required")
-        if len(normalized_prompts) != len(set(normalized_prompts)):
+        if len(prompt_list) != len(set(prompt_list)):
             raise ValueError("SAM3 text prompts must be unique")
         if self._processor is None:
             self.load()
@@ -144,7 +142,7 @@ class Sam3Adapter:
             device_type="cuda", dtype=torch.bfloat16
         ):
             state = processor.set_image(rgb_image)
-            for prompt_index, prompt in enumerate(normalized_prompts):
+            for prompt_index, prompt in enumerate(prompt_list):
                 output = processor.set_text_prompt(
                     state=state,
                     prompt=prompt,

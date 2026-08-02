@@ -1,3 +1,3 @@
 """Explicit object-memory demo package."""
 
-__version__ = "0.17.5"
+__version__ = "0.18.0"

@@ -85,7 +85,7 @@ def validate_directory_separation(input_root: Path, memory_root: Path) -> None:
 
 def failure_report(exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "object_memory_demo_batch",
         "status": "failed",

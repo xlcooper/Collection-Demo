@@ -124,16 +124,14 @@ class SceneTarget(StrictModel):
     @field_validator("sam_text_prompt")
     @classmethod
     def validate_sam_text_prompt(cls, value: str) -> str:
-        normalized = " ".join(value.strip().lower().split())
-        if not 2 <= len(normalized) <= 64:
+        if not 2 <= len(value) <= 64:
             raise ValueError("sam_text_prompt must contain 2 to 64 characters")
-        words = normalized.split()
-        if not re.fullmatch(r"[a-z][a-z0-9]*(?:[ '][a-z0-9]+)*", normalized):
+        words = value.split()
+        if not re.fullmatch(r"[a-z][a-z0-9]*(?:[ '][a-z0-9]+)*", value):
             raise ValueError(
                 "sam_text_prompt must be a short lowercase English noun phrase"
             )
-        alternative_words = {"and", "or"}
-        if alternative_words.intersection(words):
+        if "or" in words:
             raise ValueError(
                 "sam_text_prompt must describe one object concept without alternatives"
             )
@@ -180,7 +178,7 @@ class SceneTarget(StrictModel):
         }
         if vague_words.intersection(words):
             raise ValueError("sam_text_prompt must use a concrete object category")
-        return normalized
+        return value
 
 
 class SceneImageGuidance(StrictModel):

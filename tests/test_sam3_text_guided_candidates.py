@@ -91,7 +91,7 @@ class TextGuidedCandidateTests(unittest.TestCase):
 
         prediction = adapter.predict(
             Image.new("RGB", (8, 6)),
-            [" Water   Bottle ", "computer mouse"],
+            ["water bottle", "computer mouse"],
         )
 
         self.assertEqual(processor.set_image_calls, 1)
@@ -106,12 +106,12 @@ class TextGuidedCandidateTests(unittest.TestCase):
         self.assertEqual(prediction.prompt_counts["computer mouse"], 0)
         self.assertEqual(len(prediction.candidates), 2)
 
-    def test_predict_rejects_prompts_that_duplicate_after_normalization(self) -> None:
+    def test_predict_rejects_exact_duplicate_prompts(self) -> None:
         adapter = Sam3Adapter("unused-checkpoint.pt", 0.5)
         with self.assertRaises(ValueError):
             adapter.predict(
                 Image.new("RGB", (8, 6)),
-                ["water bottle", " Water   Bottle "],
+                ["water bottle", "water bottle"],
             )
 
     def test_float_tensor_is_moved_to_cpu_then_converted_to_float32(self) -> None:

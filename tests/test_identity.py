@@ -267,6 +267,10 @@ class BatchPromptTests(unittest.TestCase):
             self.assertIn("obj_two", all_text)
             self.assertIn("No script-side similarity ranking", all_text)
             self.assertIn("retrieval hypothesis", all_text)
+            self.assertIn("authoritative source for color", all_text)
+            self.assertIn("visibly attached to a larger object", all_text)
+            self.assertIn("Never put an object_id", all_text)
+            self.assertIn("original colors and adds only a location box", all_text)
             self.assertLess(
                 all_text.index("MASK_ISOLATED_CROP"),
                 all_text.index("retrieval hypothesis"),

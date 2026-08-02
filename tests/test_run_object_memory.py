@@ -4,7 +4,7 @@ import copy
 import unittest
 from typing import Any
 
-from scripts.run_object_memory import add_demo_coverage
+from scripts.run_object_memory import add_demo_coverage, failure_report
 
 
 def passing_report() -> dict[str, Any]:
@@ -28,6 +28,12 @@ def passing_report() -> dict[str, Any]:
 
 
 class DemoCoverageTests(unittest.TestCase):
+    def test_startup_failure_uses_current_report_schema(self) -> None:
+        report = failure_report(ValueError("bad configuration"))
+
+        self.assertEqual(report["schema_version"], 6)
+        self.assertEqual(report["status"], "failed")
+
     def test_clean_candidate_run_can_pass(self) -> None:
         report = passing_report()
 

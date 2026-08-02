@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -126,6 +127,7 @@ class MemoryLoopTests(unittest.TestCase):
                     annotation=annotation(),
                 ),
                 prompt_version="test-object-identity-v1",
+                observation_description="当前正面可见白色杯身和把手",
             )
             loop.complete_source(first_registration.source_id)
             new_summary = loop.complete_run(new_run.id)
@@ -151,6 +153,7 @@ class MemoryLoopTests(unittest.TestCase):
                     annotation=updated_annotation(),
                 ),
                 prompt_version="test-object-identity-v1",
+                observation_description="当前侧面可见蓝色细杯沿",
             )
             loop.complete_source(second_registration.source_id)
             existing_summary = loop.complete_run(existing_run.id)
@@ -182,6 +185,20 @@ class MemoryLoopTests(unittest.TestCase):
                 "白色陶瓷马克杯，新增观测确认蓝色细杯沿",
             )
             self.assertEqual(cards[0].color, ["白色", "蓝色杯沿"])
+            with sqlite3.connect(paths.database) as connection:
+                observation_descriptions = [
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT description FROM observations ORDER BY created_at, id"
+                    )
+                ]
+            self.assertEqual(
+                observation_descriptions,
+                [
+                    "当前正面可见白色杯身和把手",
+                    "当前侧面可见蓝色细杯沿",
+                ],
+            )
             self.assertEqual(len(cards[0].representative_view_paths), 2)
             for relative_path in cards[0].representative_view_paths:
                 self.assertTrue(paths.resolve_asset(relative_path).is_file())

@@ -9,7 +9,7 @@ models:
   qwen_model_id: Qwen/Qwen3-VL-8B-Instruct-FP8
 
 sam3_pipeline:
-  confidence_threshold: 0.5
+  confidence_threshold: 0.4
   min_mask_area_ratio: 0.0005
   max_mask_area_ratio: 0.5
   duplicate_mask_iou_threshold: 0.9
@@ -17,12 +17,12 @@ sam3_pipeline:
   max_candidates_per_image: 24
   crop_padding_pixels: 8
   crop_background_color: [127, 127, 127]
-  overlay_alpha: 0.45
+  overlay_alpha: 0.0
   overlay_color: [255, 64, 64]
 
 mllm_pipeline:
-  scene_prompt_version: robot-scene-guidance-v3
-  prompt_version: guided-image-batch-memory-reasoning-v2
+  scene_prompt_version: robot-scene-guidance-v4
+  prompt_version: guided-image-batch-memory-reasoning-v3
   scene_batch_size: 4
   max_scene_targets_per_image: 12
   max_pixels: 1048576

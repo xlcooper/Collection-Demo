@@ -98,10 +98,15 @@ class ImageWork:
             "status": self.status,
             "scene_guidance": self.scene_guidance,
             "sam": {
-                "model_thresholded_candidates": self.raw_candidate_count,
+                "above_confidence_threshold_candidates": self.raw_candidate_count,
                 "kept": len(self.kept),
                 "filtered": self.filtered_count,
                 "prompt_detection_counts": self.candidate_source_counts,
+                "zero_candidate_prompts": [
+                    prompt
+                    for prompt, count in self.candidate_source_counts.items()
+                    if count == 0
+                ],
                 "inference_seconds": round(self.sam_inference_seconds, 3),
             },
             "candidate_reasoning": self.candidate_reasoning,
@@ -246,7 +251,7 @@ class ObjectMemoryPipeline:
         else:
             report_status = summary.status.value
         report = {
-            "schema_version": 5,
+            "schema_version": 6,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "test": "object_memory_demo_batch",
             "status": report_status,
@@ -287,6 +292,9 @@ class ObjectMemoryPipeline:
                     "SAM3 detections already above the processor text-confidence "
                     "threshold, followed by script area, duplicate, same-prompt "
                     "containment, and fair per-prompt capacity filtering"
+                ),
+                "candidate_context_image": (
+                    "original scene colors with a location box and no mask tint"
                 ),
                 "object_card_selection": (
                     "all active cards with configured recent reference views; "
@@ -634,6 +642,7 @@ class ObjectMemoryPipeline:
         pending = [work for work in works if work.status == "awaiting_sam"]
         metrics: dict[str, Any] = {
             "loaded": False,
+            "confidence_threshold": self.config.sam3_pipeline.confidence_threshold,
             "model_load_seconds": 0.0,
             "inference_seconds": 0.0,
             "peak_memory_mib": 0.0,
@@ -966,6 +975,11 @@ class ObjectMemoryPipeline:
                 prompt_version=self.config.mllm_pipeline.prompt_version,
                 raw_response_path=raw_path,
                 attempt=1,
+                observation_description=(
+                    result.temporary_annotation.description
+                    if result.temporary_annotation is not None
+                    else None
+                ),
             )
             return {
                 "proposal_id": proposal.id,

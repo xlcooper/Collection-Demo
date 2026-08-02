@@ -120,6 +120,13 @@ class CandidatePostprocessTests(unittest.TestCase):
             self.assertEqual(tuple(crop_pixels[0, 0]), (127, 127, 127))
             self.assertEqual(tuple(crop_pixels[5, 5]), (220, 220, 220))
 
+            assert kept.overlay_path is not None
+            with Image.open(paths.resolve_asset(kept.overlay_path)) as overlay:
+                overlay_pixels = np.asarray(overlay.convert("RGB"))
+            self.assertTrue(
+                np.all(np.abs(overlay_pixels[30, 30].astype(int) - 220) <= 3)
+            )
+
     def test_mask_iou_is_deterministic(self) -> None:
         first = np.array([[True, True], [False, False]])
         second = np.array([[True, False], [True, False]])

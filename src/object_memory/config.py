@@ -51,7 +51,7 @@ class Sam3PipelineConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
     max_mask_area_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
     duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
@@ -63,7 +63,7 @@ class Sam3PipelineConfig(BaseModel):
     max_candidates_per_image: int = Field(default=24, ge=1, le=256)
     crop_padding_pixels: int = Field(default=8, ge=0)
     crop_background_color: tuple[int, int, int] = (127, 127, 127)
-    overlay_alpha: float = Field(default=0.45, gt=0.0, le=1.0)
+    overlay_alpha: float = Field(default=0.0, ge=0.0, le=0.0)
     overlay_color: tuple[int, int, int] = (255, 64, 64)
 
     @field_validator("crop_background_color", "overlay_color")
@@ -90,11 +90,11 @@ class MllmPipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_prompt_version: Literal[
-        "robot-scene-guidance-v3"
-    ] = "robot-scene-guidance-v3"
+        "robot-scene-guidance-v4"
+    ] = "robot-scene-guidance-v4"
     prompt_version: Literal[
-        "guided-image-batch-memory-reasoning-v2"
-    ] = "guided-image-batch-memory-reasoning-v2"
+        "guided-image-batch-memory-reasoning-v3"
+    ] = "guided-image-batch-memory-reasoning-v3"
     scene_batch_size: int = Field(default=4, ge=1, le=8)
     max_scene_targets_per_image: int = Field(default=12, ge=1, le=24)
     max_pixels: int = Field(default=1024 * 1024, gt=0)

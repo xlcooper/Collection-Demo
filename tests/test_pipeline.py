@@ -19,7 +19,7 @@ from object_memory.assets import MemoryPaths
 from object_memory.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
 from object_memory.memory_store import MemoryStore
 from object_memory.mllm_adapter import MllmPrediction
-from object_memory.pipeline import ObjectMemoryPipeline
+from object_memory.pipeline import ImageWork, ObjectMemoryPipeline
 from object_memory.sam3_adapter import RawSamCandidate, Sam3Prediction
 
 
@@ -360,7 +360,7 @@ class PipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["schema_version"], 5)
+            self.assertEqual(report["schema_version"], 6)
             self.assertTrue(all(report["checks"].values()))
             self.assertEqual(
                 report["core_counts"],
@@ -384,6 +384,7 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertEqual(report["models"]["qwen"]["total_calls"], 3)
             self.assertEqual(report["models"]["qwen"]["load_count"], 2)
+            self.assertEqual(report["models"]["sam3"]["confidence_threshold"], 0.4)
             self.assertEqual(
                 report["images"][0]["candidate_reasoning"]["candidate_count"],
                 1,
@@ -498,9 +499,24 @@ class PipelineTests(unittest.TestCase):
                 {"coffee cup": 1, "computer mouse": 1},
             )
             self.assertEqual(
+                report["images"][0]["sam"]["zero_candidate_prompts"],
+                [],
+            )
+            self.assertEqual(
                 report["images"][0]["candidate_reasoning"]["candidate_count"],
                 2,
             )
+
+    def test_image_report_lists_zero_candidate_prompts(self) -> None:
+        work = ImageWork(
+            input_path=Path("scene.jpg"),
+            candidate_source_counts={"water bottle": 1, "computer mouse": 0},
+        )
+
+        self.assertEqual(
+            work.as_dict()["sam"]["zero_candidate_prompts"],
+            ["computer mouse"],
+        )
 
     def test_invalid_candidate_output_fails_after_single_call(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -109,6 +109,8 @@ class SceneGuidanceResponseTests(unittest.TestCase):
             "red plastic drink cup lid with straw",
             "transparent plastic drink cup with red text",
             "transparent plastic drink cup with removable red straw",
+            "plastic drink cup with straw and cartoon lid",
+            "water bottle with handle and white cap",
             "bottle of water",
         ):
             with self.subTest(prompt=prompt):
@@ -164,13 +166,16 @@ class SceneGuidanceResponseTests(unittest.TestCase):
             )
 
         for invalid_prompt in (
-            "bottle and mouse",
             "left bottle",
             "cup. mouse",
+            "cup or bottle",
             "cup-or-bottle",
             "cup on table",
             "small object",
             "transparent reusable insulated stainless steel water bottle with white cap",
+            "Water bottle",
+            " water bottle",
+            "water  bottle",
             "123",
         ):
             with self.subTest(invalid_prompt=invalid_prompt):
@@ -226,8 +231,13 @@ class SceneGuidancePromptTests(unittest.TestCase):
                 self.assertIn(f"src_{index}", all_text)
             self.assertIn("robot-oriented observation plan", all_text)
             self.assertIn("only from its own visible pixels", all_text)
-            self.assertIn("water bottle with handle", all_text)
-            self.assertIn("never use `with` to join separate objects", all_text)
+            self.assertIn("computer mouse", all_text)
+            self.assertIn("water bottle", all_text)
+            self.assertIn("drink cup", all_text)
+            self.assertIn("Do not add color, material, transparency", all_text)
+            self.assertIn("`with` and `and` may describe", all_text)
+            self.assertIn("never use them to join separate objects", all_text)
+            self.assertIn("Never use `or`", all_text)
             self.assertIn("name the whole object concept", all_text)
             self.assertIn("within 64 characters", all_text)
             self.assertNotIn("at most six words", all_text)

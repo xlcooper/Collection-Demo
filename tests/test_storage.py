@@ -42,11 +42,11 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "guided-image-batch-memory-reasoning-v2",
+            "guided-image-batch-memory-reasoning-v3",
         )
         self.assertEqual(
             config.mllm_pipeline.scene_prompt_version,
-            "robot-scene-guidance-v3",
+            "robot-scene-guidance-v4",
         )
         self.assertNotIn(
             "max_error_attempts",
@@ -61,12 +61,21 @@ class ConfigTests(unittest.TestCase):
             config.sam3_pipeline.crop_background_color,
             (127, 127, 127),
         )
+        self.assertEqual(config.sam3_pipeline.confidence_threshold, 0.4)
+        self.assertEqual(config.sam3_pipeline.overlay_alpha, 0.0)
         self.assertEqual(len(config_digest(config)), 64)
 
     def test_scene_target_count_cannot_exceed_candidate_capacity(self) -> None:
         payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
         payload["mllm_pipeline"]["max_scene_targets_per_image"] = 13
         payload["sam3_pipeline"]["max_candidates_per_image"] = 12
+
+        with self.assertRaises(ValidationError):
+            AppConfig.model_validate(payload)
+
+    def test_colored_candidate_overlay_is_not_supported(self) -> None:
+        payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
+        payload["sam3_pipeline"]["overlay_alpha"] = 0.1
 
         with self.assertRaises(ValidationError):
             AppConfig.model_validate(payload)
