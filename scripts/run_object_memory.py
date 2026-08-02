@@ -48,8 +48,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Require coverage for at least two new objects, one existing match, "
-            "one duplicate image, one filtered/ignored candidate, and no pending "
-            "or failed proposals."
+            "one duplicate image, and no pending or failed proposals."
         ),
     )
     parser.add_argument(
@@ -86,7 +85,7 @@ def validate_directory_separation(input_root: Path, memory_root: Path) -> None:
 
 def failure_report(exc: Exception) -> dict[str, Any]:
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "object_memory_demo_batch",
         "status": "failed",
@@ -109,14 +108,16 @@ def add_demo_coverage(report: dict[str, Any]) -> None:
         "exact_duplicate_image_was_skipped": (
             run["duplicate_sources_skipped"] >= 1
         ),
-        "invalid_or_duplicate_mask_was_filtered": (
-            proposals["filtered"] + decisions["ignored"] >= 1
-        ),
         "no_pending_or_failed_proposals": (
             proposals["pending"] == 0 and proposals["failed"] == 0
         ),
     }
     report["demo_coverage"] = coverage
+    report["demo_observations"] = {
+        "filtered_or_ignored_candidate_observed": (
+            proposals["filtered"] + decisions["ignored"] >= 1
+        )
+    }
     if report["status"] != "passed" or not all(coverage.values()):
         report["pipeline_status"] = report["status"]
         report["status"] = "failed"

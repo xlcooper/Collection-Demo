@@ -360,7 +360,7 @@ class PipelineTests(unittest.TestCase):
             )
 
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["schema_version"], 4)
+            self.assertEqual(report["schema_version"], 5)
             self.assertTrue(all(report["checks"].values()))
             self.assertEqual(
                 report["core_counts"],

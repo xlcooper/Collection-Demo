@@ -246,7 +246,7 @@ class ObjectMemoryPipeline:
         else:
             report_status = summary.status.value
         report = {
-            "schema_version": 4,
+            "schema_version": 5,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "test": "object_memory_demo_batch",
             "status": report_status,
