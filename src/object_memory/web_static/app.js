@@ -12,9 +12,9 @@
     cli: "实验入口收尾",
     input_registration: "输入登记与 SHA-256 去重",
     input: "输入登记与 SHA-256 去重",
-    scene_guidance: "Qwen 首轮目标规划",
+    scene_guidance: "Qwen3-VL 目标规划",
     sam3: "SAM3 分割与候选过滤",
-    candidate_reasoning: "Qwen 候选与对象判断",
+    candidate_reasoning: "Qwen3-VL 对象决策",
     memory: "写入 SQLite 对象记忆",
     report: "生成结果摘要",
     completed: "实验已完成",
@@ -41,6 +41,17 @@
     uncertain: "不确定",
   };
 
+  const stagePurposes = {
+    input:
+      "作用：识别内容完全相同的输入文件，只让每张唯一图片进入模型一次；输入文件数与实际处理图片数分别显示。",
+    scene_guidance:
+      "作用：Qwen3-VL 为每张实际处理图片提出完整物体概念，并生成交给 SAM3 的文本查找任务。一个首轮文本目标不等于最终对象；首轮漏掉的物体不会进入后续阶段。",
+    sam3:
+      "作用：SAM3 按每个首轮文本目标定位并分割图像区域，脚本再过滤过小、重复或被包含的区域。保留结果仍是候选区域，不是最终对象。",
+    candidate_reasoning:
+      "作用：Qwen3-VL 先判断候选是否为完整、可独立建档的物体，再决定它是新对象、已有对象、忽略或不确定。",
+  };
+
   const state = {
     inputs: [],
     inputSummary: { total: 0, unique: 0, duplicates: 0 },
@@ -52,6 +63,9 @@
     memory: null,
     selectedStage: "input",
     selectedMemoryView: "objects",
+    candidateAssetKinds: new Map(),
+    lastIntermediateRenderKey: "",
+    pendingIntermediateRender: false,
     lastDataRefresh: 0,
     pollInFlight: false,
     pollTimer: null,
@@ -84,6 +98,15 @@
     summaryContent: document.querySelector("#summary-content"),
     toastRegion: document.querySelector("#toast-region"),
   };
+
+  const renderedHtml = new WeakMap();
+
+  function updateHtml(element, html) {
+    if (renderedHtml.get(element) === html) return false;
+    element.innerHTML = html;
+    renderedHtml.set(element, html);
+    return true;
+  }
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -308,6 +331,9 @@
           latestSequence: 0,
           report: null,
           serverSummary: null,
+          candidateAssetKinds: new Map(),
+          lastIntermediateRenderKey: "",
+          pendingIntermediateRender: false,
           lastDataRefresh: 0,
         });
         if (requestedSequence > 0) {
@@ -361,6 +387,9 @@
             latestSequence: 0,
             report: null,
             serverSummary: null,
+            candidateAssetKinds: new Map(),
+            lastIntermediateRenderKey: "",
+            pendingIntermediateRender: false,
             lastDataRefresh: 0,
           });
           state.run = { status: "idle", ...payload.state };
@@ -389,7 +418,6 @@
     try {
       state.memory = await apiJson("/api/memory");
       renderMemory();
-      renderIntermediates();
     } catch (error) {
       if (!quiet) toast(`无法读取对象记忆：${error.message}`, "error");
     }
@@ -398,16 +426,16 @@
   function renderInputs() {
     const summary = state.inputSummary;
     elements.inputMetrics.innerHTML = `
-      <article><span>文件总数</span><strong>${formatInteger(summary.total)}</strong></article>
-      <article><span>唯一内容</span><strong>${formatInteger(summary.unique)}</strong></article>
-      <article><span>重复副本</span><strong>${formatInteger(summary.duplicates)}</strong></article>
+      <article><span>输入图片</span><strong>${formatInteger(summary.total)}</strong></article>
+      <article><span>实际处理</span><strong>${formatInteger(summary.unique)}</strong></article>
+      <article><span>重复内容</span><strong>${formatInteger(summary.duplicates)}</strong></article>
       <article><span>支持格式</span><strong>JPG · PNG · WEBP</strong></article>
     `;
 
     if (!state.inputs.length) {
       elements.inputGrid.innerHTML = emptyState(
-        "输入目录为空",
-        "上传至少一张图片后才能运行实验。",
+        "还没有实验图片",
+        "添加至少一张场景图片后即可运行实验。",
         "＋"
       );
       return;
@@ -465,17 +493,17 @@
       input_registration_started: "正在读取图片并计算 SHA-256",
       input_registered: `已登记 ${filename || `第 ${current} 张图片`}（${current}/${total}）`,
       input_registration_completed: "输入登记与内容去重完成",
-      scene_guidance_started: "准备进行首轮场景目标规划",
+      scene_guidance_started: "准备进行场景目标规划",
       scene_guidance_batch_started: `Qwen 正在分析第 ${current + 1}/${total} 个场景批次`,
       scene_guidance_batch_completed: `第 ${current}/${total} 个场景批次已完成`,
-      scene_guidance_completed: "首轮目标规划完成",
+      scene_guidance_completed: "场景目标规划完成",
       sam3_started: "准备进行 SAM3 文本定向分割",
       sam3_image_started: `SAM3 正在处理第 ${current + 1}/${total} 张图`,
       sam3_image_completed: `SAM3 已完成第 ${current}/${total} 张图`,
       sam3_completed: "SAM3 分割与候选过滤完成",
       candidate_reasoning_started: "准备进行候选复核与对象身份判断",
       candidate_reasoning_image_started: `Qwen 正在判断第 ${current + 1}/${total} 张图的候选`,
-      candidate_reasoning_image_completed: `Qwen 已完成第 ${current}/${total} 张图的对象判断`,
+      candidate_reasoning_image_completed: `Qwen3-VL 已完成第 ${current}/${total} 张图的对象决策`,
       candidate_reasoning_completed: "候选复核与对象记忆写入完成",
       report_started: "正在汇总实验报告",
       report_completed: "运行报告已写入",
@@ -669,44 +697,122 @@
     return [...byKey.values()];
   }
 
-  function renderIntermediates() {
+  function hasActiveStageSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return false;
+    const range = selection.getRangeAt(0);
+    return Boolean(
+      elements.stagePanel.contains(selection.anchorNode) ||
+        elements.stagePanel.contains(selection.focusNode) ||
+        elements.stagePanel.contains(range.commonAncestorContainer)
+    );
+  }
+
+  function hasSamEvidence(image) {
+    const sam = image?.sam;
+    if (!sam) return false;
+    return Boolean(
+      number(sam.kept) ||
+        number(sam.filtered) ||
+        number(sam.above_confidence_threshold_candidates) ||
+        Object.keys(sam.prompt_detection_counts || {}).length ||
+        (image.error && number(image.scene_guidance?.target_count) > 0)
+    );
+  }
+
+  function intermediateRenderKey() {
+    const report = state.report || {};
+    return JSON.stringify([
+      state.selectedStage,
+      state.run.web_run_id || "",
+      state.latestSequence,
+      report.run?.run_id || "",
+      report.status || "",
+      report.generated_at_utc || report.run?.finished_at_utc || "",
+      array(report.images).length,
+      state.inputSummary.total,
+      state.inputSummary.unique,
+    ]);
+  }
+
+  function renderIntermediates({ force = false } = {}) {
+    const renderKey = intermediateRenderKey();
+    if (!force && renderKey === state.lastIntermediateRenderKey) return;
+    if (!force && hasActiveStageSelection()) {
+      state.pendingIntermediateRender = true;
+      return;
+    }
+    state.pendingIntermediateRender = false;
     const images = imageStates();
+    const uniqueImages = images.filter((image) => !image.duplicate && image.source_id);
+    const guidedImages = images.filter((image) => image.scene_guidance);
+    const samImages = images.filter(hasSamEvidence);
+    const decidedImages = images.filter(
+      (image) => array(image.decisions).length || image.candidate_reasoning
+    );
     const sceneCount = images.reduce((sum, image) => sum + number(image.scene_guidance?.target_count, 0), 0);
     const keptCount = images.reduce((sum, image) => sum + number(image.sam?.kept, 0), 0);
     const decisionCount = images.reduce((sum, image) => sum + array(image.decisions).length, 0);
-    document.querySelector("#tab-count-input").textContent = images.length ? `${images.length} 张` : "—";
-    document.querySelector("#tab-count-scene").textContent = images.length ? `${sceneCount} 目标` : "—";
-    document.querySelector("#tab-count-sam").textContent = images.length ? `${keptCount} 保留` : "—";
-    document.querySelector("#tab-count-reasoning").textContent = images.length ? `${decisionCount} 判断` : "—";
+    document.querySelector("#tab-count-input").textContent = images.length
+      ? `${images.length} 个输入文件 · ${uniqueImages.length} 张实际处理图片`
+      : "等待结果";
+    document.querySelector("#tab-count-scene").textContent = guidedImages.length
+      ? `${uniqueImages.length} 张实际处理图片 · ${sceneCount} 个首轮文本目标`
+      : "等待结果";
+    document.querySelector("#tab-count-sam").textContent = samImages.length
+      ? `${samImages.length} 张 SAM3 结果图片 · ${keptCount} 个保留候选区域`
+      : "等待结果";
+    document.querySelector("#tab-count-reasoning").textContent = decidedImages.length
+      ? `${decisionCount} 条候选判断记录`
+      : "等待结果";
 
     if (state.selectedStage === "input") renderDedupStage(images);
     if (state.selectedStage === "scene_guidance") renderSceneStage(images);
     if (state.selectedStage === "sam3") renderSamStage(images);
     if (state.selectedStage === "candidate_reasoning") renderReasoningStage(images);
+    state.lastIntermediateRenderKey = renderKey;
   }
 
   function renderDedupStage(images) {
     if (!images.length) {
-      elements.stagePanel.innerHTML = emptyState("等待去重结果", "实验登记输入后会显示每个文件的 canonical source 与重复状态。", "◎");
+      updateHtml(
+        elements.stagePanel,
+        `${stagePanelHeader(
+          "STEP 01 · INPUT PREPARATION",
+          "输入整理",
+          stagePurposes.input,
+          []
+        )}${emptyState("等待输入整理结果", "实验开始后，这里会显示哪些图片进入推理、哪些相同内容被跳过。", "◎")}`
+      );
       return;
     }
     const duplicates = images.filter((image) => image.duplicate);
-    elements.stagePanel.innerHTML = `
-      ${stagePanelHeader("输入登记与去重", `${images.length} 个输入记录，${duplicates.length} 个内容副本按 SHA-256 跳过。`, `${images.length - duplicates.length} 唯一 source`)}
+    const uniqueCount = images.filter((image) => !image.duplicate && image.source_id).length;
+    updateHtml(elements.stagePanel, `
+      ${stagePanelHeader(
+        "STEP 01 · INPUT PREPARATION",
+        "输入整理",
+        stagePurposes.input,
+        [
+          ["输入文件", images.length],
+          ["实际处理图片", uniqueCount],
+          ["重复文件", duplicates.length],
+        ]
+      )}
       <div class="table-wrap">
         <table class="lineage-table">
-          <thead><tr><th>输入</th><th>SHA-256</th><th>source_id</th><th>状态</th><th>存储源图</th><th>错误</th></tr></thead>
+          <thead><tr><th>输入图片</th><th>内容指纹</th><th>处理图片 ID</th><th>处理状态</th><th>源图资产</th><th>错误</th></tr></thead>
           <tbody>
             ${images
               .map(
                 (image) => `
                   <tr>
-                    <td class="mono">${escapeHtml(image.input_path || "—")}</td>
+                    <td class="mono">${escapeHtml(fileName(image.input_path) || "—")}</td>
                     <td class="mono" title="${escapeHtml(image.sha256 || "")}">${escapeHtml(shortId(image.sha256, 16))}</td>
                     <td class="mono" title="${escapeHtml(image.source_id || "")}">${escapeHtml(shortId(image.source_id, 17))}</td>
                     <td>${statusPill(image.duplicate ? "duplicate" : image.status, image.duplicate ? "重复跳过" : statusLabels[image.status] || image.status)}</td>
-                    <td class="mono">${escapeHtml(image.stored_source || "—")}</td>
-                    <td>${escapeHtml(image.error || "—")}</td>
+                    <td>${sourcePreview(image) ? `<a class="quiet-button" href="${escapeHtml(sourcePreview(image))}" target="_blank" rel="noopener">查看源图</a>` : "—"}</td>
+                    <td>${escapeHtml(errorValueText(image.error) || "—")}</td>
                   </tr>
                 `
               )
@@ -714,7 +820,7 @@
           </tbody>
         </table>
       </div>
-    `;
+    `);
   }
 
   function sourcePreview(image) {
@@ -724,15 +830,35 @@
     return matched ? matched.url || inputAssetUrl(matched.path || matched.name) : "";
   }
 
+  function fileName(path) {
+    return String(path || "").replaceAll("\\", "/").split("/").pop();
+  }
+
   function renderSceneStage(images) {
     const guided = images.filter((image) => image.scene_guidance);
     if (!guided.length) {
-      elements.stagePanel.innerHTML = emptyState("等待首轮目标", "Qwen 完成一个场景批次后会显示原图、场景摘要与 SAM3 文本概念。", "02");
+      updateHtml(
+        elements.stagePanel,
+        `${stagePanelHeader(
+          "STEP 02 · TARGET PLANNING",
+          "Qwen3-VL 目标规划",
+          stagePurposes.scene_guidance,
+          []
+        )}${emptyState("等待目标规划结果", "Qwen3-VL 完成场景理解后，这里会显示每张图及其首轮文本目标。", "02")}`
+      );
       return;
     }
     const targetCount = guided.reduce((sum, image) => sum + number(image.scene_guidance?.target_count, 0), 0);
-    elements.stagePanel.innerHTML = `
-      ${stagePanelHeader("Qwen 首轮目标规划", `按每批最多 4 张图生成完整物体概念；首轮漏掉的物体不会进入 SAM3。`, `${targetCount} 个目标`)}
+    updateHtml(elements.stagePanel, `
+      ${stagePanelHeader(
+        "STEP 02 · TARGET PLANNING",
+        "Qwen3-VL 目标规划",
+        stagePurposes.scene_guidance,
+        [
+          ["实际处理图片", images.filter((image) => !image.duplicate && image.source_id).length],
+          ["首轮文本目标", targetCount],
+        ]
+      )}
       <div class="evidence-list">
         ${guided
           .map((image) => {
@@ -745,10 +871,10 @@
                   <div class="card-title-row">
                     <div>
                       <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">${escapeHtml(guidance.scope_id || "—")} · batch ${escapeHtml(guidance.batch_index ?? "—")}</span>
+                      <span class="mono-line">目标规划批次 ${escapeHtml(guidance.batch_index ?? "—")}</span>
                     </div>
                     <div class="chip-list" style="margin-top:0">
-                      ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `${targets.length} 目标`)}
+                      ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `本图 ${targets.length} 个首轮文本目标`)}
                       ${guidance.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(guidance.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
                     </div>
                   </div>
@@ -774,7 +900,7 @@
           })
           .join("")}
       </div>
-    `;
+    `);
   }
 
   function candidatesForImage(image) {
@@ -796,23 +922,32 @@
   }
 
   function renderSamStage(images) {
-    const relevant = images.filter(
-      (image) =>
-        image.sam &&
-        (image.sam.kept ||
-          image.sam.filtered ||
-          image.sam.above_confidence_threshold_candidates ||
-          Object.keys(image.sam.prompt_detection_counts || {}).length ||
-          (image.error && number(image.scene_guidance?.target_count) > 0))
-    );
+    const relevant = images.filter(hasSamEvidence);
     if (!relevant.length) {
-      elements.stagePanel.innerHTML = emptyState("等待 SAM3 结果", "每张图完成文字查找与脚本过滤后，会显示检测数、0 候选提示和图像资产。", "03");
+      updateHtml(
+        elements.stagePanel,
+        `${stagePanelHeader(
+          "STEP 03 · SEGMENTATION",
+          "SAM3 分割与候选筛选",
+          stagePurposes.sam3,
+          []
+        )}${emptyState("等待对象分割结果", "SAM3 完成文本引导分割后，这里会显示候选区域与筛选结果。", "03")}`
+      );
       return;
     }
     const kept = relevant.reduce((sum, image) => sum + number(image.sam?.kept), 0);
     const filtered = relevant.reduce((sum, image) => sum + number(image.sam?.filtered), 0);
-    elements.stagePanel.innerHTML = `
-      ${stagePanelHeader("SAM3 分割与脚本过滤", `文字阈值后的区域再经过面积、重复、包含关系与数量上限检查。`, `${kept} 保留 · ${filtered} 过滤`)}
+    updateHtml(elements.stagePanel, `
+      ${stagePanelHeader(
+        "STEP 03 · SEGMENTATION",
+        "SAM3 分割与候选筛选",
+        stagePurposes.sam3,
+        [
+          ["SAM3 结果图片", relevant.length],
+          ["保留候选区域", kept],
+          ["过滤候选区域", filtered],
+        ]
+      )}
       <div class="evidence-list">
         ${relevant
           .map((image) => {
@@ -825,16 +960,16 @@
                   <div class="card-title-row">
                     <div>
                       <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">SAM ${escapeHtml(sam.inference_seconds ?? "—")}s · ${number(sam.above_confidence_threshold_candidates)} 个阈值上候选</span>
+                      <span class="mono-line">SAM3 ${escapeHtml(sam.inference_seconds ?? "—")}s · ${number(sam.above_confidence_threshold_candidates)} 个阈值以上候选区域</span>
                     </div>
                     <div class="chip-list" style="margin-top:0">
-                      ${statusPill("info", `${number(sam.kept)} 保留`)}
-                      ${number(sam.filtered) ? statusPill("filtered", `${number(sam.filtered)} 过滤`) : ""}
+                      ${statusPill("info", `保留 ${number(sam.kept)} 个候选区域`)}
+                      ${number(sam.filtered) ? statusPill("filtered", `过滤 ${number(sam.filtered)} 个候选区域`) : ""}
                     </div>
                   </div>
                   <div class="chip-list">
                     ${promptCounts
-                      .map(([prompt, count]) => `<span class="chip ${number(count) === 0 ? "" : "prompt"}">${escapeHtml(prompt)} · <b>${formatInteger(count)}</b></span>`)
+                      .map(([prompt, count]) => `<span class="chip ${number(count) === 0 ? "" : "prompt"}">${escapeHtml(prompt)} · <b>${formatInteger(count)} 个区域</b></span>`)
                       .join("") || '<span class="chip">暂无提示统计</span>'}
                   </div>
                   ${image.error ? `<p class="meta-line">阶段错误 · ${escapeHtml(image.error)}</p>` : ""}
@@ -845,7 +980,8 @@
           })
           .join("")}
       </div>
-    `;
+    `);
+    restoreCandidateAssetViews();
   }
 
   function candidateCard(candidate) {
@@ -853,21 +989,22 @@
     const crop = candidate.crop || candidate.crop_path;
     const mask = candidate.mask || candidate.mask_path;
     const overlay = candidate.overlay || candidate.overlay_path;
-    const initialAsset = overlay || crop || mask;
     const assets = [
       ["overlay", overlay, "定位"],
       ["crop", crop, "裁剪"],
       ["mask", mask, "掩码"],
     ].filter(([, path]) => path);
+    const initialAsset = assets[0]?.[1];
+    const initialKind = assets[0]?.[0];
     return `
-      <article class="candidate-card">
+      <article class="candidate-card" data-candidate-id="${escapeHtml(id)}">
         <div class="candidate-asset">
           ${previewImage(imageUrl(initialAsset), `候选 ${id}`)}
           ${
             assets.length > 1
               ? `<div class="candidate-asset-switch">${assets
                   .map(
-                    ([kind, path, label], index) => `<button class="asset-toggle ${index === 0 ? "active" : ""}" type="button" data-asset-url="${escapeHtml(
+                    ([kind, path, label]) => `<button class="asset-toggle ${kind === initialKind ? "active" : ""}" type="button" data-asset-url="${escapeHtml(
                       imageUrl(path)
                     )}" data-asset-kind="${kind}">${label}</button>`
                   )
@@ -889,6 +1026,19 @@
     `;
   }
 
+  function restoreCandidateAssetViews() {
+    elements.stagePanel.querySelectorAll("[data-candidate-id]").forEach((card) => {
+      const selectedKind = state.candidateAssetKinds.get(card.dataset.candidateId);
+      if (!selectedKind) return;
+      const buttons = [...card.querySelectorAll("[data-asset-kind]")];
+      const selectedButton = buttons.find((button) => button.dataset.assetKind === selectedKind);
+      if (!selectedButton) return;
+      const image = card.querySelector(".candidate-asset > img");
+      if (image) image.src = selectedButton.dataset.assetUrl;
+      buttons.forEach((button) => button.classList.toggle("active", button === selectedButton));
+    });
+  }
+
   function bboxText(bbox) {
     if (!bbox) return "—";
     if (Array.isArray(bbox)) return bbox.map((value) => number(value).toFixed(0)).join(", ");
@@ -900,12 +1050,27 @@
   function renderReasoningStage(images) {
     const relevant = images.filter((image) => array(image.decisions).length || image.candidate_reasoning);
     if (!relevant.length) {
-      elements.stagePanel.innerHTML = emptyState("等待对象判断", "第二轮 Qwen 会对每个正式候选给出有效性、临时标注与对象身份决定。", "04");
+      updateHtml(
+        elements.stagePanel,
+        `${stagePanelHeader(
+          "STEP 04 · OBJECT DECISION",
+          "Qwen3-VL 对象决策",
+          stagePurposes.candidate_reasoning,
+          []
+        )}${emptyState("等待对象决策结果", "Qwen3-VL 完成候选复核后，这里会显示有效性与对象身份决定。", "04")}`
+      );
       return;
     }
     const decisions = relevant.flatMap((image) => array(image.decisions).map((decision) => ({ image, decision })));
-    elements.stagePanel.innerHTML = `
-      ${stagePanelHeader("Qwen 候选与对象判断", `crop 判断外观，原色定位图辅助边界与附着；上游文本只作为可错的检索假设。`, `${decisions.length} 个决定`)}
+    updateHtml(elements.stagePanel, `
+      ${stagePanelHeader(
+        "STEP 04 · OBJECT DECISION",
+        "Qwen3-VL 对象决策",
+        stagePurposes.candidate_reasoning,
+        [
+          ["候选判断记录", decisions.length],
+        ]
+      )}
       <div class="candidate-grid">
         ${decisions
           .map(({ image, decision }) => {
@@ -973,7 +1138,7 @@
           })
           .join("")}
       </div>
-    `;
+    `);
   }
 
   function annotationBox(label, annotation) {
@@ -982,11 +1147,26 @@
     return `<div class="annotation-box"><span>${label}</span><p><b>${escapeHtml(title)}</b><br>${escapeHtml(annotation.description || "—")}</p></div>`;
   }
 
-  function stagePanelHeader(title, description, count) {
+  function stagePanelHeader(step, title, description, metrics) {
     return `
       <div class="stage-panel-header">
-        <div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div>
-        ${statusPill("info", count)}
+        <div>
+          <span class="stage-step-label">${escapeHtml(step)}</span>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(description)}</p>
+        </div>
+        <div class="stage-stat-list" aria-label="本阶段结果数量">
+          ${array(metrics)
+            .map(
+              ([label, value]) => `
+                <span class="stage-stat">
+                  <strong>${formatInteger(value)}</strong>
+                  <small>${escapeHtml(label)}</small>
+                </span>
+              `
+            )
+            .join("")}
+        </div>
       </div>
     `;
   }
@@ -1006,15 +1186,15 @@
       memory.initialized ?? memory.database_exists ?? (objects.length > 0 || Object.keys(counts).length > 0)
     );
     const observationCount = number(counts.observations, objects.reduce((sum, object) => sum + array(object.observations).length, 0));
-    elements.memoryOverview.innerHTML = `
+    updateHtml(elements.memoryOverview, `
       <article><span>活跃对象</span><strong>${formatInteger(counts.active_objects ?? objects.length)}</strong><small>长期档案</small></article>
       <article><span>观测记录</span><strong>${formatInteger(observationCount)}</strong><small>跨视角证据</small></article>
       <article><span>正式候选</span><strong>${formatInteger(counts.proposals ?? candidates.length)}</strong><small>含过滤与待定</small></article>
       <article><span>数据库状态</span><strong>${initialized ? "已连接" : "未初始化"}</strong><small>memory.sqlite</small></article>
-    `;
+    `);
 
     if (!initialized) {
-      elements.memoryContent.innerHTML = emptyState("当前还没有对象记忆", "首次实验会自动创建 SQLite 与对象资产。", "□");
+      updateHtml(elements.memoryContent, emptyState("当前还没有对象记忆", "首次实验会自动创建 SQLite 与对象资产。", "□"));
       return;
     }
     if (state.selectedMemoryView === "lineage") {
@@ -1026,10 +1206,10 @@
 
   function renderObjects(objects) {
     if (!objects.length) {
-      elements.memoryContent.innerHTML = emptyState("数据库已建立，但还没有对象卡", "请核对候选是否被忽略、不确定或运行失败。", "□");
+      updateHtml(elements.memoryContent, emptyState("数据库已建立，但还没有对象卡", "请核对候选是否被忽略、不确定或运行失败。", "□"));
       return;
     }
-    elements.memoryContent.innerHTML = `<div class="object-grid">${objects.map(objectCard).join("")}</div>`;
+    updateHtml(elements.memoryContent, `<div class="object-grid">${objects.map(objectCard).join("")}</div>`);
   }
 
   function objectCard(object) {
@@ -1078,10 +1258,10 @@
 
   function renderLineage(candidates) {
     if (!candidates.length) {
-      elements.memoryContent.innerHTML = emptyState("暂无候选血缘", "SAM3 产生候选并写入数据库后，这里会连接 source、proposal、decision 与 object。", "⌁");
+      updateHtml(elements.memoryContent, emptyState("暂无候选血缘", "SAM3 产生候选并写入数据库后，这里会连接 source、proposal、decision 与 object。", "⌁"));
       return;
     }
-    elements.memoryContent.innerHTML = `
+    updateHtml(elements.memoryContent, `
       <div class="table-wrap">
         <table class="lineage-table">
           <thead><tr><th>候选</th><th>source</th><th>文本提示</th><th>分数</th><th>候选状态</th><th>Qwen 决策</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
@@ -1107,7 +1287,7 @@
           </tbody>
         </table>
       </div>
-    `;
+    `);
   }
 
   function reportMetrics(report) {
@@ -1183,7 +1363,7 @@
     const exitCode = resolvedExitCode == null ? "未提供" : String(resolvedExitCode);
     elements.summaryStatus.className = `status-pill ${statusClass(status)}`;
     elements.summaryStatus.textContent = statusLabels[status] || status;
-    elements.summaryContent.innerHTML = `
+    updateHtml(elements.summaryContent, `
       <div class="summary-details failure-summary-grid">
         <article class="detail-panel">
           <p class="eyebrow">PROCESS FAILURE</p>
@@ -1200,7 +1380,7 @@
           <pre class="failure-log">${escapeHtml(logTail)}</pre>
         </article>
       </div>
-    `;
+    `);
   }
 
   function renderSummary() {
@@ -1213,7 +1393,7 @@
       }
       elements.summaryStatus.className = "status-pill neutral";
       elements.summaryStatus.textContent = "暂无报告";
-      elements.summaryContent.innerHTML = emptyState("完成一次实验后生成摘要", "摘要会覆盖输入、目标、候选、四类决策、对象、观测、耗时和错误。", "∴");
+      updateHtml(elements.summaryContent, emptyState("完成一次实验后生成摘要", "摘要会覆盖输入、目标、候选、四类决策、对象、观测、耗时和错误。", "∴"));
       return;
     }
     const metrics = reportMetrics(report);
@@ -1228,7 +1408,7 @@
     const demoCoverage = Object.entries(report.demo_coverage || {});
     const serverNarrative = state.serverSummary?.narrative || state.serverSummary?.headline;
     const verdict = status === "passed" ? "流程结构通过" : status === "completed_with_errors" ? "完成但存在错误" : "本次流程未通过";
-    elements.summaryContent.innerHTML = `
+    updateHtml(elements.summaryContent, `
       <div class="summary-hero">
         <article class="summary-verdict">
           <div>
@@ -1239,8 +1419,8 @@
           <div class="summary-warning">passed 只表示程序与结构检查通过；物体召回、完整粒度、颜色和身份归并仍需人工逐图复核。</div>
         </article>
         <div class="funnel-grid">
-          ${summaryMetric("输入文件", metrics.inputs, `${metrics.duplicates} 个重复副本`)}
-          ${summaryMetric("首轮目标", metrics.sceneTargets, "Qwen 提出的物体概念")}
+          ${summaryMetric("输入文件", metrics.inputs, `${metrics.uniqueSources} 张实际处理图片 · ${metrics.duplicates} 个重复文件`)}
+          ${summaryMetric("首轮文本目标", metrics.sceneTargets, "Qwen3-VL 为 SAM3 生成的查找任务")}
           ${summaryMetric("阈值上候选", metrics.rawCandidates, `${metrics.zeroPrompts} 条提示为 0 候选`)}
           ${summaryMetric("保留候选", metrics.kept, `${metrics.filtered} 个被脚本过滤`)}
           ${summaryMetric("对象决定", metrics.newCount + metrics.existingCount + metrics.ignoredCount + metrics.uncertainCount, `${metrics.newCount} new · ${metrics.existingCount} existing`)}
@@ -1290,7 +1470,7 @@
           </ul>
         </article>
       </div>
-    `;
+    `);
   }
 
   function summaryMetric(label, value, hint) {
@@ -1325,7 +1505,7 @@
 
   async function deleteInput(path) {
     if (isRunningStatus(state.run.status)) return;
-    const confirmed = window.confirm(`确定从实验输入中删除“${path}”吗？\n\n此操作只影响 data/input，不会回删已有对象记忆。`);
+    const confirmed = window.confirm(`确定从本次实验输入中移除“${fileName(path)}”吗？\n\n已经生成的对象记忆不会受到影响。`);
     if (!confirmed) return;
     try {
       const payload = await apiJson(`/api/inputs?path=${encodeURIComponent(path)}`, { method: "DELETE" });
@@ -1339,7 +1519,7 @@
   async function startRun() {
     if (isRunningStatus(state.run.status) || !state.inputSummary.total) return;
     const confirmed = window.confirm(
-      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n运行期间会锁定输入，并顺序加载 Qwen、SAM3、Qwen。是否继续？`
+      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n运行期间会锁定输入，并顺序加载 Qwen3-VL、SAM3、Qwen3-VL。是否继续？`
     );
     if (!confirmed) return;
     elements.startRunButton.disabled = true;
@@ -1355,10 +1535,14 @@
         latestSequence: 0,
         report: null,
         serverSummary: null,
+        candidateAssetKinds: new Map(),
+        lastIntermediateRenderKey: "",
+        pendingIntermediateRender: false,
         lastDataRefresh: 0,
       });
       state.run = { ...incomingRun, status: payload.status || incomingRun.status || "starting" };
       renderSummary();
+      renderIntermediates({ force: true });
       toast("实验已启动，页面将持续显示真实阶段事件");
       await refreshRun();
     } catch (error) {
@@ -1403,7 +1587,7 @@
       button.addEventListener("click", () => {
         state.selectedStage = button.dataset.stageTab;
         document.querySelectorAll("[data-stage-tab]").forEach((item) => item.setAttribute("aria-selected", String(item === button)));
-        renderIntermediates();
+        renderIntermediates({ force: true });
       });
     });
 
@@ -1419,9 +1603,19 @@
       const button = event.target.closest("[data-asset-url]");
       if (!button) return;
       const container = button.closest(".candidate-asset");
+      const card = button.closest("[data-candidate-id]");
       const image = container?.querySelector(":scope > img");
+      if (card?.dataset.candidateId && button.dataset.assetKind) {
+        state.candidateAssetKinds.set(card.dataset.candidateId, button.dataset.assetKind);
+      }
       if (image) image.src = button.dataset.assetUrl;
       container?.querySelectorAll(".asset-toggle").forEach((item) => item.classList.toggle("active", item === button));
+    });
+
+    document.addEventListener("selectionchange", () => {
+      if (state.pendingIntermediateRender && !hasActiveStageSelection()) {
+        renderIntermediates();
+      }
     });
   }
 

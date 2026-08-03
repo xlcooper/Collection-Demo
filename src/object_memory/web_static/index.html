@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Collection-Demo 对象记忆实验流程、候选证据与 SQLite 记忆可视化界面"
+      content="Collection Demo：从场景图片到 SQLite 对象记忆的端到端可视化实验"
     />
-    <title>Object Memory Lab · 对象记忆实验台</title>
+    <title>Collection Demo</title>
     <link rel="stylesheet" href="/static/app.css" />
     <script defer src="/static/app.js"></script>
   </head>
@@ -18,8 +18,8 @@
       <a class="brand" href="#top" aria-label="返回页面顶部">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
         <span>
-          <strong>Object Memory Lab</strong>
-          <small>Collection-Demo 实验台</small>
+          <strong>Collection Demo</strong>
+          <small>Visual Object Memory</small>
         </span>
       </a>
       <div class="header-status" aria-live="polite">
@@ -31,12 +31,40 @@
     <main id="main-content">
       <section class="hero section-shell" id="top">
         <div class="hero-copy">
-          <p class="eyebrow">END-TO-END OBJECT MEMORY</p>
-          <h1>把一次对象记忆实验，<br />从输入到档案完整摊开。</h1>
+          <p class="eyebrow">VISUAL OBJECT MEMORY</p>
+          <h1>Collection<br />Demo</h1>
+          <p class="hero-tagline">从场景图片到可持续对象记忆</p>
           <p class="hero-description">
-            管理当前输入图片，启动单卡端到端流程，逐步核对 Qwen 目标、SAM3 候选、对象判断与最终 SQLite 记忆。
-            所有失败和不确定结果都会原样保留，便于审计。
+            上传一组场景图片后，Qwen3-VL 会提出值得观察的完整物体，SAM3 按文本目标定位和分割候选，
+            再由 Qwen3-VL 判断候选有效性与对象身份。对象档案和跨视角观测最终写入 SQLite，页面同步呈现完整过程、耗时与结果证据。
           </p>
+          <div class="demo-config" aria-label="默认 Demo 配置与服务器基线">
+            <article>
+              <span>默认视觉语言模型</span>
+              <strong>Qwen3-VL-8B-Instruct-FP8</strong>
+            </article>
+            <article>
+              <span>默认分割模型</span>
+              <strong>SAM3 0.1.0 · BF16 · 文本阈值 0.4</strong>
+            </article>
+            <article>
+              <span>服务器与推理调度基线</span>
+              <strong>AutoDL · RTX 4090 24 GB · 单卡顺序加载</strong>
+            </article>
+          </div>
+          <a
+            class="project-link"
+            href="https://github.com/xlcooper/Collection-Demo"
+            target="_blank"
+            rel="noopener"
+            aria-label="在 GitHub 查看 Collection Demo 项目"
+          >
+            <span>
+              <small>GITHUB PROJECT</small>
+              <strong>xlcooper / Collection-Demo</strong>
+            </span>
+            <span aria-hidden="true">查看项目 ↗</span>
+          </a>
         </div>
 
         <aside class="run-console" aria-labelledby="run-console-title">
@@ -51,7 +79,7 @@
             <div>
               <span class="run-stage-label">当前阶段</span>
               <strong id="run-stage">等待启动</strong>
-              <small id="run-unit">准备读取输入目录</small>
+              <small id="run-unit">准备读取实验图片</small>
             </div>
             <div class="timer" aria-label="实验已用时间">
               <span>已用时间</span>
@@ -86,41 +114,41 @@
       <section class="flow-section section-shell" aria-labelledby="flow-title">
         <div class="section-heading compact">
           <div>
-            <p class="eyebrow">PIPELINE</p>
-            <h2 id="flow-title">数据如何流过实验</h2>
+            <p class="eyebrow">END-TO-END WORKFLOW</p>
+            <h2 id="flow-title">PIPELINE</h2>
           </div>
-          <p>这里只标出大模块；每一步的证据在下方展开。</p>
+          <p>详细过程与阶段结果在下方展开。</p>
         </div>
         <ol class="pipeline-flow" id="pipeline-flow">
           <li data-flow-stage="input">
             <span class="flow-number">01</span>
-            <strong>输入与去重</strong>
-            <small>图片 · SHA-256</small>
+            <strong>图片输入</strong>
+            <small>输入文件 → 实际处理图片</small>
           </li>
           <li data-flow-stage="scene_guidance">
             <span class="flow-number">02</span>
-            <strong>Qwen 目标规划</strong>
-            <small>场景 · 文本概念</small>
+            <strong>目标规划</strong>
+            <small>实际处理图片 → 首轮文本目标</small>
           </li>
           <li data-flow-stage="sam3">
             <span class="flow-number">03</span>
-            <strong>SAM3 分割</strong>
-            <small>mask · 筛选</small>
+            <strong>对象分割</strong>
+            <small>文本目标 → 候选区域</small>
           </li>
           <li data-flow-stage="candidate_reasoning">
             <span class="flow-number">04</span>
-            <strong>Qwen 对象判断</strong>
-            <small>有效性 · 身份</small>
+            <strong>对象决策</strong>
+            <small>候选区域 → 对象决定</small>
           </li>
           <li data-flow-stage="memory">
             <span class="flow-number">05</span>
-            <strong>SQLite 记忆</strong>
-            <small>对象 · 观测</small>
+            <strong>记忆写入</strong>
+            <small>SQLite · 对象与观测</small>
           </li>
           <li data-flow-stage="report">
             <span class="flow-number">06</span>
-            <strong>结果摘要</strong>
-            <small>计数 · 错误</small>
+            <strong>结果汇总</strong>
+            <small>摘要 · 耗时与错误</small>
           </li>
         </ol>
       </section>
@@ -137,7 +165,7 @@
           <div>
             <p class="eyebrow">01 · INPUT</p>
             <h2 id="inputs-title">实验输入</h2>
-            <p>这里直接对应服务器的 <code>data/input/</code>。内容重复的图片会保留，但在实验中按哈希跳过。</p>
+            <p>选择希望系统观察的场景图片。支持上传、预览和移除；相同内容会自动识别，避免重复推理。</p>
           </div>
           <div class="heading-actions">
             <input
@@ -154,17 +182,17 @@
         </div>
 
         <div class="metric-strip" id="input-metrics" aria-live="polite">
-          <article><span>文件总数</span><strong>—</strong></article>
-          <article><span>唯一内容</span><strong>—</strong></article>
-          <article><span>重复副本</span><strong>—</strong></article>
+          <article><span>输入图片</span><strong>—</strong></article>
+          <article><span>实际处理</span><strong>—</strong></article>
+          <article><span>重复内容</span><strong>—</strong></article>
           <article><span>支持格式</span><strong>JPG · PNG · WEBP</strong></article>
         </div>
 
         <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="点击或拖拽上传图片">
           <span class="drop-icon" aria-hidden="true">＋</span>
           <div>
-            <strong>拖拽图片到这里</strong>
-            <small>或点击选择多个文件；同名文件不会被覆盖</small>
+            <strong>添加场景图片</strong>
+            <small>拖拽到这里，或点击选择多个文件</small>
           </div>
         </div>
 
@@ -181,7 +209,7 @@
           <div>
             <p class="eyebrow">02 · EVIDENCE</p>
             <h2 id="intermediates-title">逐阶段中间结果</h2>
-            <p>页面只展示真实落盘事件和资产。模型加载期间不会用虚假的线性进度填充。</p>
+            <p>沿着输入整理、目标规划、对象分割和对象决策，查看场景图片如何逐步转化为对象记忆。</p>
           </div>
           <span class="data-freshness" id="event-freshness">等待实验事件</span>
         </div>
@@ -189,16 +217,16 @@
         <div class="stage-layout">
           <div class="stage-tabs" role="tablist" aria-label="中间结果阶段">
             <button role="tab" aria-selected="true" data-stage-tab="input" type="button">
-              <span>01</span><strong>去重结果</strong><small id="tab-count-input">—</small>
+              <span>01</span><strong>输入整理</strong><small id="tab-count-input">等待结果</small>
             </button>
             <button role="tab" aria-selected="false" data-stage-tab="scene_guidance" type="button">
-              <span>02</span><strong>首轮目标</strong><small id="tab-count-scene">—</small>
+              <span>02</span><strong>目标规划</strong><small id="tab-count-scene">等待结果</small>
             </button>
             <button role="tab" aria-selected="false" data-stage-tab="sam3" type="button">
-              <span>03</span><strong>SAM3 候选</strong><small id="tab-count-sam">—</small>
+              <span>03</span><strong>分割候选</strong><small id="tab-count-sam">等待结果</small>
             </button>
             <button role="tab" aria-selected="false" data-stage-tab="candidate_reasoning" type="button">
-              <span>04</span><strong>对象判断</strong><small id="tab-count-reasoning">—</small>
+              <span>04</span><strong>对象决策</strong><small id="tab-count-reasoning">等待结果</small>
             </button>
           </div>
           <div class="stage-panel" id="stage-panel" role="tabpanel" aria-live="polite">
@@ -216,7 +244,7 @@
           <div>
             <p class="eyebrow">03 · MEMORY</p>
             <h2 id="memory-title">SQLite 对象记忆</h2>
-            <p>默认按“对象卡—观测时间线”阅读长期记忆；候选血缘表用于反查每条记录从哪里来。</p>
+            <p>对象卡汇总长期稳定属性，观测时间线保留不同图片中的视角证据；候选血缘用于回查每条记录如何形成。</p>
           </div>
           <div class="view-switch" role="group" aria-label="记忆视图">
             <button class="active" data-memory-view="objects" type="button">对象卡</button>
@@ -245,7 +273,7 @@
           <div>
             <p class="eyebrow">04 · SUMMARY</p>
             <h2 id="summary-title">结果摘要</h2>
-            <p>程序结构状态和对象语义效果分开呈现，避免把 <code>passed</code> 误读为实验验收通过。</p>
+            <p>汇总输入、目标、候选、对象决定、记忆增量、耗时与错误；程序结构通过不等于语义效果通过。</p>
           </div>
           <span class="status-pill neutral" id="summary-status">暂无报告</span>
         </div>
@@ -261,7 +289,7 @@
     </main>
 
     <footer class="site-footer section-shell">
-      <p>Collection-Demo · 自动对象发现、语义标注与持续对象记忆</p>
+      <p>Collection Demo · 自动对象发现、语义标注与持续对象记忆</p>
       <p>结构通过 ≠ 语义验收通过，关键结果仍需人工复核。</p>
     </footer>
 

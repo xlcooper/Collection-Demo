@@ -36,8 +36,28 @@ class WebStaticContractTests(unittest.TestCase):
 
         self.assertIn('href="/static/app.css"', html)
         self.assertIn('src="/static/app.js"', html)
-        self.assertNotIn("https://", html)
+        self.assertIn(
+            'href="https://github.com/xlcooper/Collection-Demo"',
+            html,
+        )
+        self.assertEqual(html.count("https://"), 1)
         self.assertNotIn("http://", html)
+
+    def test_project_introduction_names_models_and_inference_environment(self) -> None:
+        html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+
+        for expected in (
+            "Collection Demo",
+            "Qwen3-VL-8B-Instruct-FP8",
+            "SAM3 0.1.0 · BF16 · 文本阈值 0.4",
+            "AutoDL · RTX 4090 24 GB · 单卡顺序加载",
+            "详细过程与阶段结果在下方展开。",
+        ):
+            self.assertIn(expected, html)
+
+        self.assertNotIn("这里直接对应服务器", html)
+        self.assertNotIn("data/input/", html)
+        self.assertIn("默认 Demo 配置与服务器基线", html)
 
     def test_frontend_calls_only_fixed_web_api_routes(self) -> None:
         javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
@@ -104,6 +124,52 @@ class WebStaticContractTests(unittest.TestCase):
             refresh_run,
         )
         self.assertEqual(refresh_run.count("refreshInputs"), 1)
+
+    def test_polling_does_not_replace_unchanged_evidence_dom(self) -> None:
+        javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+        refresh_memory = javascript[
+            javascript.index("async function refreshMemory") : javascript.index(
+                "function renderInputs"
+            )
+        ]
+        candidate_card = javascript[
+            javascript.index("function candidateCard") : javascript.index(
+                "function bboxText"
+            )
+        ]
+
+        self.assertIn("const renderedHtml = new WeakMap();", javascript)
+        self.assertIn("if (renderedHtml.get(element) === html) return false;", javascript)
+        self.assertNotIn("renderIntermediates();", refresh_memory)
+        self.assertIn("renderKey === state.lastIntermediateRenderKey", javascript)
+        self.assertIn("const samImages = images.filter(hasSamEvidence);", javascript)
+        self.assertIn("!image.duplicate && image.source_id", javascript)
+        self.assertIn("hasActiveStageSelection()", javascript)
+        self.assertIn("state.pendingIntermediateRender = true;", javascript)
+        self.assertIn('document.addEventListener("selectionchange"', javascript)
+        self.assertIn("candidateAssetKinds: new Map()", javascript)
+        self.assertIn("function restoreCandidateAssetViews", javascript)
+        self.assertIn("state.candidateAssetKinds.get(card.dataset.candidateId)", javascript)
+        self.assertIn(
+            "state.candidateAssetKinds.set(card.dataset.candidateId, button.dataset.assetKind);",
+            javascript,
+        )
+
+    def test_intermediate_stage_counts_have_explicit_units_and_purpose(self) -> None:
+        javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+        for expected in (
+            "个输入文件",
+            "张实际处理图片",
+            "个首轮文本目标",
+            "个保留候选区域",
+            "条候选判断记录",
+            "识别内容完全相同的输入文件",
+            "一个首轮文本目标不等于最终对象",
+            "保留结果仍是候选区域，不是最终对象",
+            "Qwen3-VL 先判断候选是否为完整、可独立建档的物体",
+        ):
+            self.assertIn(expected, javascript)
 
     def test_new_web_run_resets_old_cursor_and_evidence(self) -> None:
         javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
