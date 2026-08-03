@@ -75,6 +75,23 @@
             </div>
             <span class="status-pill neutral" id="run-status-pill">空闲</span>
           </div>
+          <div class="memory-library-control">
+            <label for="memory-library-select">
+              <span>本次实验使用的对象记忆库</span>
+              <select id="memory-library-select" disabled>
+                <option>正在读取记忆库</option>
+              </select>
+            </label>
+            <div class="memory-library-actions">
+              <button class="console-button" id="new-memory-button" type="button" disabled>
+                新建空白库
+              </button>
+              <button class="console-button danger" id="delete-memory-button" type="button" disabled>
+                删除 / 清空
+              </button>
+            </div>
+            <p id="memory-library-meta">系统会读取所选库中的已有对象，并把本次新观测写回同一个库。</p>
+          </div>
           <div class="run-primary">
             <div>
               <span class="run-stage-label">当前阶段</span>
@@ -123,17 +140,17 @@
           <li data-flow-stage="input">
             <span class="flow-number">01</span>
             <strong>图片输入</strong>
-            <small>输入文件 → 实际处理图片</small>
+            <small>输入文件 → 本次新登记源图</small>
           </li>
           <li data-flow-stage="scene_guidance">
             <span class="flow-number">02</span>
             <strong>目标规划</strong>
-            <small>实际处理图片 → 首轮文本目标</small>
+            <small>新登记源图 → Qwen 目标条目</small>
           </li>
           <li data-flow-stage="sam3">
             <span class="flow-number">03</span>
             <strong>对象分割</strong>
-            <small>文本目标 → 候选区域</small>
+            <small>英文查询 → 候选区域</small>
           </li>
           <li data-flow-stage="candidate_reasoning">
             <span class="flow-number">04</span>
@@ -183,8 +200,8 @@
 
         <div class="metric-strip" id="input-metrics" aria-live="polite">
           <article><span>输入图片</span><strong>—</strong></article>
-          <article><span>实际处理</span><strong>—</strong></article>
-          <article><span>重复内容</span><strong>—</strong></article>
+          <article><span>不同内容</span><strong>—</strong></article>
+          <article><span>内容副本</span><strong>—</strong></article>
           <article><span>支持格式</span><strong>JPG · PNG · WEBP</strong></article>
         </div>
 
@@ -246,16 +263,19 @@
             <h2 id="memory-title">SQLite 对象记忆</h2>
             <p>对象卡汇总长期稳定属性，观测时间线保留不同图片中的视角证据；候选血缘用于回查每条记录如何形成。</p>
           </div>
-          <div class="view-switch" role="group" aria-label="记忆视图">
-            <button class="active" data-memory-view="objects" type="button">对象卡</button>
-            <button data-memory-view="lineage" type="button">候选血缘</button>
+          <div class="memory-heading-tools">
+            <span class="memory-context" id="memory-context">正在查看：默认记忆库</span>
+            <div class="view-switch" role="group" aria-label="记忆视图">
+              <button class="active" data-memory-view="objects" type="button">对象卡</button>
+              <button data-memory-view="lineage" type="button">候选血缘</button>
+            </div>
           </div>
         </div>
 
         <div class="memory-overview" id="memory-overview">
           <article><span>活跃对象</span><strong>—</strong><small>长期档案</small></article>
           <article><span>观测记录</span><strong>—</strong><small>跨视角证据</small></article>
-          <article><span>正式候选</span><strong>—</strong><small>含过滤与待定</small></article>
+          <article><span>候选记录</span><strong>—</strong><small>保留、过滤与待定总数</small></article>
           <article><span>数据库状态</span><strong>未初始化</strong><small>memory.sqlite</small></article>
         </div>
 
@@ -273,7 +293,7 @@
           <div>
             <p class="eyebrow">04 · SUMMARY</p>
             <h2 id="summary-title">结果摘要</h2>
-            <p>汇总输入、目标、候选、对象决定、记忆增量、耗时与错误；程序结构通过不等于语义效果通过。</p>
+            <p>区分本次运行增量与记忆库累计结果，并分别呈现流程检查、运行错误和人工复核重点。</p>
           </div>
           <span class="status-pill neutral" id="summary-status">暂无报告</span>
         </div>
@@ -282,7 +302,7 @@
           <div class="empty-state">
             <span class="empty-symbol" aria-hidden="true">∴</span>
             <strong>完成一次实验后生成摘要</strong>
-            <p>摘要会覆盖输入、目标、候选、四类决策、对象、观测、耗时和错误。</p>
+            <p>摘要会按输入、目标与查询、候选、对象决策和记忆写入五个阶段整理结果。</p>
           </div>
         </div>
       </section>
@@ -290,7 +310,7 @@
 
     <footer class="site-footer section-shell">
       <p>Collection Demo · 自动对象发现、语义标注与持续对象记忆</p>
-      <p>结构通过 ≠ 语义验收通过，关键结果仍需人工复核。</p>
+      <p>流程与数据检查通过 ≠ 物体识别质量已验收，关键结果仍需人工复核。</p>
     </footer>
 
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>

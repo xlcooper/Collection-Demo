@@ -21,7 +21,7 @@ sam3_pipeline:
   overlay_color: [255, 64, 64]
 
 mllm_pipeline:
-  scene_prompt_version: robot-scene-guidance-v4
+  scene_prompt_version: robot-scene-guidance-v5
   prompt_version: guided-image-batch-memory-reasoning-v3
   scene_batch_size: 4
   max_scene_targets_per_image: 12

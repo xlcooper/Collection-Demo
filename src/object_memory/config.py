@@ -90,8 +90,8 @@ class MllmPipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_prompt_version: Literal[
-        "robot-scene-guidance-v4"
-    ] = "robot-scene-guidance-v4"
+        "robot-scene-guidance-v5"
+    ] = "robot-scene-guidance-v5"
     prompt_version: Literal[
         "guided-image-batch-memory-reasoning-v3"
     ] = "guided-image-batch-memory-reasoning-v3"

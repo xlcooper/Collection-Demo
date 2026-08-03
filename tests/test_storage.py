@@ -46,7 +46,7 @@ class ConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             config.mllm_pipeline.scene_prompt_version,
-            "robot-scene-guidance-v4",
+            "robot-scene-guidance-v5",
         )
         self.assertNotIn(
             "max_error_attempts",

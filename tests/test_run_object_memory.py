@@ -33,6 +33,19 @@ class DemoCoverageTests(unittest.TestCase):
 
         self.assertEqual(report["schema_version"], 6)
         self.assertEqual(report["status"], "failed")
+        self.assertNotIn("run", report)
+
+    def test_started_run_failure_keeps_internal_report_identity(self) -> None:
+        report = failure_report(
+            RuntimeError("model interrupted"),
+            run_id="run_20260803_200000",
+        )
+
+        self.assertEqual(report["run"]["run_id"], "run_20260803_200000")
+        self.assertEqual(
+            report["run_report"],
+            "run_reports/run_20260803_200000.json",
+        )
 
     def test_clean_candidate_run_can_pass(self) -> None:
         report = passing_report()

@@ -8,26 +8,34 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
+from unittest.mock import patch
 
 from PIL import Image
 
+import object_memory.web_service as web_service_module
 from object_memory.assets import MemoryPaths
 from object_memory.memory_store import MemoryStore
 from object_memory.web_service import (
     ExperimentBusyError,
     ExperimentManager,
     InputValidationError,
+    MemoryReadError,
     SafePathError,
     WebSettings,
     _basic_authorized,
     create_app,
     deterministic_result_summary,
     input_listing_payload,
+    list_memory_libraries,
     list_input_images,
+    read_latest_memory_report,
+    read_memory_report_for_run,
+    read_memory_run_timing,
     read_memory_snapshot,
     resolve_audit_json,
     resolve_input_file,
+    resolve_memory_library_root,
     resolve_memory_image,
     save_input_uploads,
 )
@@ -65,6 +73,49 @@ def test_settings(root: Path, *, password: str | None = None) -> WebSettings:
         python_executable=Path(os.sys.executable),
         basic_password=password,
     ).resolved()
+
+
+def add_completed_memory_run(
+    paths: MemoryPaths,
+    run_id: str,
+    *,
+    started_at: str,
+) -> dict[str, Any]:
+    """Create one minimal completed SQLite run and its exact internal report."""
+
+    MemoryStore(paths).initialize()
+    completed_at = started_at.replace("00+00:00", "05+00:00")
+    with sqlite3.connect(paths.database) as connection:
+        connection.execute(
+            """
+            INSERT INTO runs (
+                id, status, started_at, completed_at, config_digest,
+                sam_model_id, qwen_model_id, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                "completed",
+                started_at,
+                completed_at,
+                "a" * 64,
+                "sam",
+                "qwen",
+                None,
+            ),
+        )
+    report: dict[str, Any] = {
+        "schema_version": 6,
+        "status": "passed",
+        "run": {"run_id": run_id},
+        "images": [],
+        "external_errors": [],
+    }
+    (paths.run_reports / f"{run_id}.json").write_text(
+        json.dumps(report),
+        encoding="utf-8",
+    )
+    return report
 
 
 class InputFileTests(unittest.TestCase):
@@ -206,6 +257,296 @@ class MemoryReadTests(unittest.TestCase):
         self.assertEqual(snapshot["objects"], [])
         self.assertEqual(snapshot["candidates"], [])
 
+    def test_database_symlink_is_never_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            memory = root / "memory"
+            memory.mkdir()
+            outside = root / "outside.sqlite"
+            outside.write_bytes(b"not a managed database")
+            try:
+                (memory / "memory.sqlite").symlink_to(outside)
+            except OSError:
+                self.skipTest("Symbolic links are unavailable")
+
+            with self.assertRaises(MemoryReadError):
+                read_memory_snapshot(memory)
+
+
+class MemoryLibraryTests(unittest.TestCase):
+    def test_create_list_and_delete_managed_library(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+
+            created = manager.create_memory_library("桌面物体全新实验")
+            memory_id = str(created["id"])
+            root = resolve_memory_library_root(settings, memory_id)
+            marker = root / "marker.txt"
+            marker.write_text("only this library", encoding="utf-8")
+            sibling = settings.memory_root.parent / "memory_sibling"
+            sibling.mkdir()
+            (sibling / "keep.txt").write_text("keep", encoding="utf-8")
+
+            listed = manager.memory_libraries()
+            self.assertIn(memory_id, {item["id"] for item in listed["items"]})
+            self.assertEqual(created["label"], "桌面物体全新实验")
+            self.assertTrue((root / "memory_info.json").is_file())
+
+            deleted = manager.delete_memory_library(memory_id)
+
+            self.assertEqual(deleted["action"], "deleted")
+            self.assertFalse(root.exists())
+            self.assertTrue((sibling / "keep.txt").is_file())
+            self.assertTrue(settings.input_root.is_dir())
+
+    def test_default_clear_recreates_only_the_default_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            settings.memory_root.mkdir()
+            (settings.memory_root / "old.txt").write_text("old", encoding="utf-8")
+            input_image = settings.input_root / "input.png"
+            input_image.write_bytes(png_bytes())
+
+            payload = ExperimentManager(settings).delete_memory_library("default")
+
+            self.assertEqual(payload["action"], "cleared")
+            self.assertTrue(settings.memory_root.is_dir())
+            self.assertEqual(list(settings.memory_root.iterdir()), [])
+            self.assertTrue(input_image.is_file())
+
+    def test_delete_rolls_back_library_when_selection_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+            created = manager.create_memory_library("保留到回滚完成")
+            memory_id = str(created["id"])
+            root = resolve_memory_library_root(settings, memory_id)
+            marker = root / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            original_write = web_service_module._write_json_atomic
+
+            def fail_default_selection(
+                path: Path,
+                payload: dict[str, object],
+            ) -> None:
+                if (
+                    path.name == "selected_memory.json"
+                    and payload.get("memory_id") == "default"
+                ):
+                    raise OSError("selection storage is unavailable")
+                original_write(path, payload)
+
+            with patch.object(
+                web_service_module,
+                "_write_json_atomic",
+                side_effect=fail_default_selection,
+            ):
+                with self.assertRaises(OSError):
+                    manager.delete_memory_library(memory_id)
+
+            self.assertTrue(marker.is_file())
+            self.assertEqual(manager.selected_memory_id(), memory_id)
+            self.assertIn(
+                memory_id,
+                {item["id"] for item in manager.memory_libraries()["items"]},
+            )
+
+    def test_memory_ids_never_resolve_browser_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            for value in ("../input", "memory/other", "..", "A", "a\\b"):
+                with self.subTest(value=value):
+                    with self.assertRaises((ValueError, SafePathError)):
+                        resolve_memory_library_root(settings, value)
+
+    def test_selection_persists_across_manager_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            first = ExperimentManager(settings)
+            created = first.create_memory_library("跨页面保留选择")
+
+            restored = ExperimentManager(settings)
+            self.assertEqual(restored.memory_libraries()["selected_id"], created["id"])
+
+            restored.select_memory_library("default")
+            self.assertEqual(
+                ExperimentManager(settings).memory_libraries()["selected_id"],
+                "default",
+            )
+
+    def test_create_rolls_back_root_when_selection_cannot_be_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+            original_write = web_service_module._write_json_atomic
+
+            def fail_selection(path: Path, payload: dict[str, Any]) -> None:
+                if path.name == "selected_memory.json":
+                    raise OSError("selection storage is unavailable")
+                original_write(path, payload)
+
+            with patch.object(
+                web_service_module,
+                "_write_json_atomic",
+                side_effect=fail_selection,
+            ):
+                with self.assertRaises(OSError):
+                    manager.create_memory_library("不应留下孤儿目录")
+
+            managed = list((settings.project_root / "data").glob("memory_*"))
+            self.assertEqual(managed, [])
+            self.assertEqual(manager.selected_memory_id(), "default")
+
+    def test_default_memory_symlink_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            outside = Path(temporary_directory) / "outside-memory"
+            outside.mkdir()
+            try:
+                settings.memory_root.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                self.skipTest("Symbolic links are unavailable")
+
+            with self.assertRaises(SafePathError):
+                resolve_memory_library_root(settings, "default")
+
+    def test_library_health_distinguishes_ready_and_partial(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+            ready = manager.create_memory_library("可续写")
+            ready_root = resolve_memory_library_root(settings, str(ready["id"]))
+            MemoryStore(MemoryPaths(ready_root)).initialize()
+            partial = manager.create_memory_library("不完整")
+            partial_root = resolve_memory_library_root(settings, str(partial["id"]))
+            (partial_root / "sources").mkdir()
+
+            items = {
+                item["id"]: item for item in list_memory_libraries(settings)
+            }
+
+            self.assertEqual(items[ready["id"]]["status"], "ready")
+            self.assertTrue(items[ready["id"]]["continuable"])
+            self.assertEqual(items[partial["id"]]["status"], "review_only")
+            self.assertFalse(items[partial["id"]]["continuable"])
+
+    def test_latest_report_follows_sqlite_run_order_and_recovers_timing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = MemoryPaths(Path(temporary_directory) / "memory")
+            MemoryStore(paths).initialize()
+            with sqlite3.connect(paths.database) as connection:
+                connection.executemany(
+                    """
+                    INSERT INTO runs (
+                        id, status, started_at, completed_at, config_digest,
+                        sam_model_id, qwen_model_id, error_message
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            "run_old",
+                            "completed",
+                            "2026-08-03T00:00:00+00:00",
+                            "2026-08-03T00:00:05+00:00",
+                            "a" * 64,
+                            "sam",
+                            "qwen",
+                            None,
+                        ),
+                        (
+                            "run_new",
+                            "completed",
+                            "2026-08-03T01:00:00+00:00",
+                            "2026-08-03T01:00:12.5+00:00",
+                            "b" * 64,
+                            "sam",
+                            "qwen",
+                            None,
+                        ),
+                    ],
+                )
+            for run_id in ("run_old", "run_new"):
+                (paths.run_reports / f"{run_id}.json").write_text(
+                    json.dumps({"status": "passed", "run": {"run_id": run_id}}),
+                    encoding="utf-8",
+                )
+
+            report = read_latest_memory_report(paths.root)
+            exact = read_memory_report_for_run(paths.root, "run_old")
+            timing = read_memory_run_timing(paths.root, "run_new")
+
+        self.assertEqual(report["run"]["run_id"], "run_new")
+        self.assertEqual(exact["run"]["run_id"], "run_old")
+        self.assertEqual(timing["elapsed_seconds"], 12.5)
+
+    def test_result_defaults_to_persisted_selection_and_never_crosses_libraries(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            creator = ExperimentManager(settings)
+            first = creator.create_memory_library("当前运行所属库")
+            second = creator.create_memory_library("页面持久选择库")
+            first_root = resolve_memory_library_root(settings, str(first["id"]))
+            second_root = resolve_memory_library_root(settings, str(second["id"]))
+            first_report = add_completed_memory_run(
+                MemoryPaths(first_root),
+                "run_first",
+                started_at="2026-08-03T00:00:00+00:00",
+            )
+            second_report = add_completed_memory_run(
+                MemoryPaths(second_root),
+                "run_second",
+                started_at="2026-08-03T01:00:00+00:00",
+            )
+            settings.report_path.write_text(
+                json.dumps(second_report),
+                encoding="utf-8",
+            )
+            run_dir = settings.run_state_root / "web_run_20260803T020000000000Z"
+            run_dir.mkdir(parents=True)
+            (run_dir / "state.json").write_text(
+                json.dumps(
+                    {
+                        "web_run_id": run_dir.name,
+                        "run_id": "run_first",
+                        "memory_id": first["id"],
+                        "memory_label": first["label"],
+                        "status": "completed",
+                        "stage": "cli",
+                        "stage_status": "completed",
+                        "started_at_utc": "2026-08-03T00:00:00+00:00",
+                        "completed_at_utc": "2026-08-03T00:00:05+00:00",
+                        "last_sequence": 0,
+                        "overall_percent": 100.0,
+                        "report_mtime_before_ns": None,
+                        "pid": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "events.jsonl").touch()
+            manager = ExperimentManager(settings)
+
+            explicit_first = manager.result_for_memory(str(first["id"]))
+            selected_default = manager.result_for_memory()
+
+        self.assertEqual(explicit_first["memory_id"], first["id"])
+        self.assertEqual(
+            explicit_first["report"]["run"]["run_id"],
+            first_report["run"]["run_id"],
+        )
+        self.assertTrue(explicit_first["is_current_run"])
+        self.assertEqual(selected_default["memory_id"], second["id"])
+        self.assertEqual(
+            selected_default["report"]["run"]["run_id"],
+            second_report["run"]["run_id"],
+        )
+        self.assertFalse(selected_default["is_current_run"])
+
+
+class MemorySnapshotJoinTests(unittest.TestCase):
     def test_object_timeline_and_candidate_lineage_are_joined(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = MemoryPaths(Path(temporary_directory) / "memory")
@@ -729,6 +1070,114 @@ class RunStateTests(unittest.TestCase):
         self.assertIsNone(recovered["process_error"]["exit_code"])
         self.assertIn("process vanished", recovered["process_error"]["log_tail"])
 
+    def test_watcher_report_read_failure_persists_failure_and_releases_handles(
+        self,
+    ) -> None:
+        class FinishedProcess:
+            pid = 24680
+
+            def poll(self) -> int:
+                return 0
+
+            def wait(self) -> int:
+                return 0
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            run_dir = settings.run_state_root / "web_run_20260803T000000000000Z"
+            run_dir.mkdir(parents=True)
+            state = {
+                "web_run_id": run_dir.name,
+                "run_id": "run_broken_report",
+                "memory_id": "default",
+                "status": "running",
+                "stage": "report",
+                "stage_status": "running",
+                "started_at_utc": "2026-08-03T00:00:00+00:00",
+                "last_sequence": 0,
+                "elapsed_seconds": 0.0,
+                "overall_percent": 95.0,
+                "message": "writing report",
+                "pid": FinishedProcess.pid,
+                "report_mtime_before_ns": None,
+            }
+            (run_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+            (run_dir / "events.jsonl").touch()
+            (run_dir / "process.log").write_text(
+                "report parse failed after child exit",
+                encoding="utf-8",
+            )
+            settings.report_path.write_text("{broken", encoding="utf-8")
+            manager = ExperimentManager(settings)
+            process = FinishedProcess()
+            manager._process = process  # type: ignore[assignment]
+            manager._log_handle = (run_dir / "process.log").open("ab")
+
+            manager._watch_process(run_dir, process)  # type: ignore[arg-type]
+            recovered = manager.current()["state"]
+
+        self.assertEqual(recovered["status"], "failed")
+        self.assertEqual(
+            recovered["process_error"]["kind"],
+            "watcher_artifact_error",
+        )
+        self.assertEqual(
+            recovered["process_error"]["error_type"],
+            "MemoryReadError",
+        )
+        self.assertIn("report parse failed", recovered["process_error"]["log_tail"])
+        self.assertIsNone(manager._process)
+        self.assertIsNone(manager._log_handle)
+
+    def test_zero_exit_without_current_report_is_not_completed(self) -> None:
+        class FinishedProcess:
+            def poll(self) -> int:
+                return 0
+
+            def wait(self) -> int:
+                return 0
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            run_dir = settings.run_state_root / "web_run_20260803T000000000000Z"
+            run_dir.mkdir(parents=True)
+            (run_dir / "state.json").write_text(
+                json.dumps(
+                    {
+                        "web_run_id": run_dir.name,
+                        "memory_id": "default",
+                        "status": "running",
+                        "stage": "cli",
+                        "stage_status": "running",
+                        "started_at_utc": "2026-08-03T00:00:00+00:00",
+                        "last_sequence": 0,
+                        "elapsed_seconds": 0.0,
+                        "overall_percent": 95.0,
+                        "message": "child exited without a report",
+                        "pid": 12345,
+                        "report_mtime_before_ns": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (run_dir / "events.jsonl").touch()
+            (run_dir / "process.log").write_text(
+                "no report was written",
+                encoding="utf-8",
+            )
+            manager = ExperimentManager(settings)
+
+            manager._watch_process(run_dir, FinishedProcess())  # type: ignore[arg-type]
+            recovered = manager.current()["state"]
+
+        self.assertEqual(recovered["status"], "failed")
+        self.assertEqual(recovered["exit_code"], 0)
+        self.assertIsNone(recovered["result_status"])
+        self.assertEqual(
+            recovered["process_error"]["kind"],
+            "unexpected_process_exit",
+        )
+
     def test_subprocess_command_is_fixed_and_uses_progress_file(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             settings = test_settings(Path(temporary_directory))
@@ -742,6 +1191,78 @@ class RunStateTests(unittest.TestCase):
         self.assertIn(str(settings.input_root), command)
         self.assertIn(str(settings.memory_root), command)
         self.assertNotIn("--allow-network", command)
+
+    def test_subprocess_command_omits_demo_gate_for_incremental_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+            progress = settings.run_state_root / "web_run_x" / "events.jsonl"
+
+            command = manager._command(progress, validate_demo=False)
+
+        self.assertNotIn("--validate-demo", command)
+        self.assertIn("--report", command)
+
+    def test_start_uses_demo_gate_only_for_library_without_prior_runs(self) -> None:
+        class DormantProcess:
+            pid = 13579
+
+        for has_prior_run, expected_mode in (
+            (False, "fresh_demo"),
+            (True, "incremental"),
+        ):
+            with self.subTest(has_prior_run=has_prior_run):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    settings = test_settings(Path(temporary_directory))
+                    (settings.input_root / "scene.png").write_bytes(png_bytes())
+                    manager = ExperimentManager(settings)
+                    item = manager.create_memory_library(
+                        "已有记忆" if has_prior_run else "空白记忆"
+                    )
+                    root = resolve_memory_library_root(settings, str(item["id"]))
+                    if has_prior_run:
+                        add_completed_memory_run(
+                            MemoryPaths(root),
+                            "run_existing",
+                            started_at="2026-08-03T00:00:00+00:00",
+                        )
+                    process = DormantProcess()
+                    with patch.object(
+                        web_service_module.subprocess,
+                        "Popen",
+                        return_value=process,
+                    ) as popen, patch.object(
+                        web_service_module.threading,
+                        "Thread",
+                    ):
+                        try:
+                            payload = manager.start(str(item["id"]))
+                            command = popen.call_args.args[0]
+                        finally:
+                            if manager._log_handle is not None:
+                                manager._log_handle.close()
+                            manager._log_handle = None
+                            manager._process = None
+
+                self.assertEqual(payload["state"]["validation_mode"], expected_mode)
+                if has_prior_run:
+                    self.assertNotIn("--validate-demo", command)
+                else:
+                    self.assertIn("--validate-demo", command)
+
+    def test_subprocess_command_uses_captured_selected_memory_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings = test_settings(Path(temporary_directory))
+            manager = ExperimentManager(settings)
+            item = manager.create_memory_library("增量对象记忆")
+            selected = resolve_memory_library_root(settings, str(item["id"]))
+            progress = settings.run_state_root / "web_run_x" / "events.jsonl"
+
+            command = manager._command(progress, selected)
+
+        memory_index = command.index("--memory-root") + 1
+        self.assertEqual(command[memory_index], str(selected))
+        self.assertNotIn(str(settings.memory_root), command[memory_index : memory_index + 1])
 
 
 class AppContractTests(unittest.TestCase):
@@ -759,6 +1280,9 @@ class AppContractTests(unittest.TestCase):
                 "/",
                 "/static",
                 "/api/inputs",
+                "/api/memories",
+                "/api/memories/{memory_id}",
+                "/api/memories/{memory_id}/select",
                 "/api/runs",
                 "/api/runs/current",
                 "/api/results",

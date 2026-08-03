@@ -64,6 +64,7 @@ class WebStaticContractTests(unittest.TestCase):
 
         for route in (
             "/api/inputs",
+            "/api/memories",
             "/api/runs",
             "/api/runs/current",
             "/api/results",
@@ -97,7 +98,7 @@ class WebStaticContractTests(unittest.TestCase):
         ]
         self.assertGreater(
             image_states.index("array(state.report?.images)"),
-            image_states.index("for (const event of state.events)"),
+            image_states.index("for (const event of visibleEvents)"),
         )
 
     def test_polling_is_serial_and_data_refreshes_are_throttled(self) -> None:
@@ -128,7 +129,7 @@ class WebStaticContractTests(unittest.TestCase):
     def test_polling_does_not_replace_unchanged_evidence_dom(self) -> None:
         javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
         refresh_memory = javascript[
-            javascript.index("async function refreshMemory") : javascript.index(
+            javascript.index("async function refreshMemory({") : javascript.index(
                 "function renderInputs"
             )
         ]
@@ -154,22 +155,68 @@ class WebStaticContractTests(unittest.TestCase):
             "state.candidateAssetKinds.set(card.dataset.candidateId, button.dataset.assetKind);",
             javascript,
         )
+        self.assertIn("stagePointerActive: false", javascript)
+        self.assertIn('elements.stagePanel.addEventListener("pointerdown"', javascript)
+        self.assertIn('window.addEventListener("pointerup", releaseStagePointer)', javascript)
+        self.assertIn('window.addEventListener("pointercancel", releaseStagePointer)', javascript)
+        self.assertIn("captureStageTableScrollPositions()", javascript)
+        self.assertIn("restoreStageTableScrollPositions(tableScrollPositions)", javascript)
+        self.assertIn("node.scrollLeft = scrollLeft", javascript)
 
     def test_intermediate_stage_counts_have_explicit_units_and_purpose(self) -> None:
         javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
 
         for expected in (
             "个输入文件",
-            "张实际处理图片",
-            "个首轮文本目标",
+            "张本次登记源图",
+            "个 Qwen 目标条目",
             "个保留候选区域",
             "条候选判断记录",
-            "识别内容完全相同的输入文件",
-            "一个首轮文本目标不等于最终对象",
+            "识别内容副本",
+            "唯一可能用于 SAM3 查询的是英文 sam_text_prompt",
             "保留结果仍是候选区域，不是最终对象",
             "Qwen3-VL 先判断候选是否为完整、可独立建档的物体",
         ):
             self.assertIn(expected, javascript)
+
+    def test_memory_library_and_sam_prompt_controls_are_explicit(self) -> None:
+        html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+        javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+        stylesheet = (STATIC_ROOT / "app.css").read_text(encoding="utf-8")
+        refresh_catalog = javascript[
+            javascript.index("async function refreshMemoryLibraries") : javascript.index(
+                "async function refreshInputs"
+            )
+        ]
+
+        for expected in (
+            'id="memory-library-select"',
+            'id="new-memory-button"',
+            'id="delete-memory-button"',
+            "本次实验使用的对象记忆库",
+        ):
+            self.assertIn(expected, html)
+        self.assertIn("memory_id: state.selectedMemoryId", javascript)
+        self.assertIn("/select", javascript)
+        self.assertIn("viewEpoch", javascript)
+        self.assertIn("serverCatalogLocked", javascript)
+        self.assertIn("catalogMutationInFlight", javascript)
+        self.assertIn("function memoryControlsLocked()", javascript)
+        self.assertNotIn("state.catalogLocked", javascript)
+        self.assertIn("state.serverCatalogLocked = Boolean(payload.locked);", refresh_catalog)
+        self.assertNotIn("state.catalogMutationInFlight =", refresh_catalog)
+        self.assertIn('运行所属：${runMemoryLabel()}', javascript)
+        self.assertIn("SAM3 已完成查询", javascript)
+        self.assertIn("已完成查询的 SAM3 英文原文", javascript)
+        self.assertIn("中文物体名称不会用于 SAM3 查询", javascript)
+        self.assertIn("prompt_detection_counts", javascript)
+        self.assertIn("SAM3 英文提示词", javascript)
+        self.assertIn(
+            "function memoryAssetUrl(path, memoryId = state.selectedMemoryId)",
+            javascript,
+        )
+        self.assertIn(".target-prompt-heading .status-pill", stylesheet)
+        self.assertIn("overflow-wrap: anywhere", stylesheet)
 
     def test_new_web_run_resets_old_cursor_and_evidence(self) -> None:
         javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
@@ -255,7 +302,7 @@ class WebStaticContractTests(unittest.TestCase):
         stylesheet = (STATIC_ROOT / "app.css").read_text(encoding="utf-8")
         render_summary = javascript[
             javascript.index("function renderSummary") : javascript.index(
-                "function summaryMetric"
+                "function summaryStageCard"
             )
         ]
 

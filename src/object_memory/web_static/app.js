@@ -43,11 +43,11 @@
 
   const stagePurposes = {
     input:
-      "作用：识别内容完全相同的输入文件，只让每张唯一图片进入模型一次；输入文件数与实际处理图片数分别显示。",
+      "作用：登记输入文件并按 SHA-256 识别内容副本。页面区分输入文件、本次在所选记忆库中新登记的源图，以及因内容相同而跳过的文件。",
     scene_guidance:
-      "作用：Qwen3-VL 为每张实际处理图片提出完整物体概念，并生成交给 SAM3 的文本查找任务。一个首轮文本目标不等于最终对象；首轮漏掉的物体不会进入后续阶段。",
+      "作用：Qwen3-VL 为每张新登记源图提出完整物体概念。中文名称用于阅读与审计；唯一可能用于 SAM3 查询的是英文 sam_text_prompt，执行时不会改写。目标置信度表示该区域值得观察，不代表类别名称一定正确。",
     sam3:
-      "作用：SAM3 按每个首轮文本目标定位并分割图像区域，脚本再过滤过小、重复或被包含的区域。保留结果仍是候选区域，不是最终对象。",
+      "作用：SAM3 按英文提示词定位并分割图像区域，脚本再过滤过小、重复或被包含的区域。报告只把已完成并记录检测数的查询计入统计；保留结果仍是候选区域，不是最终对象。",
     candidate_reasoning:
       "作用：Qwen3-VL 先判断候选是否为完整、可独立建档的物体，再决定它是新对象、已有对象、忽略或不确定。",
   };
@@ -61,11 +61,21 @@
     report: null,
     serverSummary: null,
     memory: null,
+    memoryLibraries: [],
+    selectedMemoryId: "default",
+    serverCatalogLocked: false,
+    catalogMutationInFlight: false,
+    catalogRequestSerial: 0,
+    runRequestSerial: 0,
+    resultRequestSerial: 0,
+    memoryRequestSerial: 0,
+    viewEpoch: 0,
     selectedStage: "input",
     selectedMemoryView: "objects",
     candidateAssetKinds: new Map(),
     lastIntermediateRenderKey: "",
     pendingIntermediateRender: false,
+    stagePointerActive: false,
     lastDataRefresh: 0,
     pollInFlight: false,
     pollTimer: null,
@@ -85,6 +95,10 @@
     progressPercent: document.querySelector("#progress-percent"),
     startRunButton: document.querySelector("#start-run-button"),
     runLockNote: document.querySelector("#run-lock-note"),
+    memoryLibrarySelect: document.querySelector("#memory-library-select"),
+    newMemoryButton: document.querySelector("#new-memory-button"),
+    deleteMemoryButton: document.querySelector("#delete-memory-button"),
+    memoryLibraryMeta: document.querySelector("#memory-library-meta"),
     uploadButton: document.querySelector("#upload-button"),
     fileInput: document.querySelector("#file-input"),
     dropZone: document.querySelector("#drop-zone"),
@@ -94,6 +108,7 @@
     stagePanel: document.querySelector("#stage-panel"),
     memoryOverview: document.querySelector("#memory-overview"),
     memoryContent: document.querySelector("#memory-content"),
+    memoryContext: document.querySelector("#memory-context"),
     summaryStatus: document.querySelector("#summary-status"),
     summaryContent: document.querySelector("#summary-content"),
     toastRegion: document.querySelector("#toast-region"),
@@ -220,6 +235,14 @@
     ].includes(String(status));
   }
 
+  function memoryControlsLocked() {
+    return (
+      state.serverCatalogLocked
+      || state.catalogMutationInFlight
+      || isRunningStatus(state.run.status)
+    );
+  }
+
   function normalizedStage(stage) {
     if (stage === "input_registration") return "input";
     if (stage === "run" || stage === "cli") {
@@ -249,12 +272,12 @@
     return `/api/input-asset?path=${encodeURIComponent(path || "")}`;
   }
 
-  function memoryAssetUrl(path) {
-    return `/api/memory-asset?path=${encodeURIComponent(path || "")}`;
+  function memoryAssetUrl(path, memoryId = state.selectedMemoryId) {
+    return `/api/memory-asset?memory_id=${encodeURIComponent(memoryId || "default")}&path=${encodeURIComponent(path || "")}`;
   }
 
-  function auditJsonUrl(path) {
-    return `/api/audit-json?path=${encodeURIComponent(path || "")}`;
+  function auditJsonUrl(path, memoryId = state.selectedMemoryId) {
+    return `/api/audit-json?memory_id=${encodeURIComponent(memoryId || "default")}&path=${encodeURIComponent(path || "")}`;
   }
 
   function imageUrl(path, fallbackScope = "memory") {
@@ -296,6 +319,110 @@
     window.setTimeout(() => node.remove(), 4200);
   }
 
+  function selectedLibrary() {
+    return state.memoryLibraries.find((item) => item.id === state.selectedMemoryId) || null;
+  }
+
+  function runMemoryLabel() {
+    const memoryId = String(state.run.memory_id || "");
+    if (!memoryId) return "尚无运行归属";
+    const library = state.memoryLibraries.find((item) => item.id === memoryId);
+    const label = state.run.memory_label || library?.label || (memoryId === "default" ? "默认记忆库" : memoryId);
+    return state.run.memory_deleted_at_utc ? `${label}（已删除）` : label;
+  }
+
+  function memoryStatusText(status) {
+    return {
+      empty: "空白",
+      ready: "可继续写入",
+      running: "正在写入",
+      review_only: "仅供复核",
+      unreadable: "读取失败",
+    }[status] || "状态未知";
+  }
+
+  function memoryIssueText(library) {
+    const messages = {
+      database_symlink: "数据库文件不是受管的普通文件，已停止读取。",
+      database_unreadable: "SQLite 数据库无法安全读取，请在技术环境中检查。",
+      invalid_library_root: "记忆库位置不是可管理的目录，已停止读取。",
+      incomplete_run: "库内存在未完成或失败的运行，目前仅供复核。",
+      missing_asset_directories: "对象资产目录不完整，目前仅供复核。",
+      partial_without_database: "目录中只有部分资产，但没有 SQLite 数据库。",
+    };
+    return messages[library?.issue_code] || "该记忆库当前不能继续写入，请先复核或新建空白库。";
+  }
+
+  function renderMemoryLibraryControl() {
+    const libraries = state.memoryLibraries;
+    const locked = memoryControlsLocked();
+    if (!libraries.length) {
+      updateHtml(elements.memoryLibrarySelect, "<option>暂无可用记忆库</option>");
+      elements.memoryLibrarySelect.disabled = true;
+      elements.newMemoryButton.disabled = locked;
+      elements.deleteMemoryButton.disabled = true;
+      elements.memoryLibraryMeta.textContent = "无法读取记忆库列表。";
+      return;
+    }
+    const current = selectedLibrary();
+    updateHtml(
+      elements.memoryLibrarySelect,
+      libraries
+        .map(
+          (item) => `<option value="${escapeHtml(item.id)}" ${item.id === state.selectedMemoryId ? "selected" : ""}>${escapeHtml(item.label)} · ${escapeHtml(memoryStatusText(item.status))}</option>`
+        )
+        .join("")
+    );
+    elements.memoryLibrarySelect.disabled = locked;
+    elements.newMemoryButton.disabled = locked;
+    elements.deleteMemoryButton.disabled = locked || !current || current.deletable === false;
+    if (!current) {
+      elements.memoryLibraryMeta.textContent = "所选记忆库已不存在，正在恢复默认选择。";
+      return;
+    }
+    const counts = current.counts || {};
+    const base = current.status === "empty"
+      ? "空白库，首次运行会创建 SQLite 与对象资产。"
+      : `${formatInteger(counts.active_objects)} 个活跃对象 · ${formatInteger(counts.observations)} 条观测 · ${formatInteger(counts.runs)} 次运行`;
+    const hasIssue = Boolean(current.issue_code || current.issue);
+    elements.memoryLibraryMeta.textContent = hasIssue
+      ? `${memoryStatusText(current.status)}：${memoryIssueText(current)}`
+      : `${base} 系统会把本次新观测写回此库。`;
+    elements.memoryContext.textContent = `正在查看：${current.label}`;
+  }
+
+  async function refreshMemoryLibraries({ quiet = false, preferServerSelection = false } = {}) {
+    const requestSerial = ++state.catalogRequestSerial;
+    const requestedEpoch = state.viewEpoch;
+    try {
+      const payload = await apiJson("/api/memories");
+      if (requestSerial !== state.catalogRequestSerial || requestedEpoch !== state.viewEpoch) return;
+      state.memoryLibraries = array(payload.items);
+      state.serverCatalogLocked = Boolean(payload.locked);
+      const activeId = payload.active_id;
+      const knownIds = new Set(state.memoryLibraries.map((item) => item.id));
+      const serverSelection = activeId || payload.selected_id;
+      let nextSelection = state.selectedMemoryId;
+      if (activeId || preferServerSelection || !knownIds.has(nextSelection)) {
+        nextSelection = knownIds.has(serverSelection)
+          ? serverSelection
+          : state.memoryLibraries[0]?.id || "default";
+      }
+      const selectionChanged = setSelectedMemoryId(nextSelection, { clear: true });
+      renderMemoryLibraryControl();
+      renderControlAvailability();
+      if (selectionChanged) {
+        await Promise.all([
+          refreshMemory({ quiet: true }),
+          refreshResults({ quiet: true }),
+        ]);
+      }
+    } catch (error) {
+      if (!quiet) toast(`无法读取记忆库：${error.message}`, "error");
+      renderMemoryLibraryControl();
+    }
+  }
+
   async function refreshInputs({ quiet = false } = {}) {
     try {
       const payload = await apiJson("/api/inputs");
@@ -315,6 +442,8 @@
 
   async function refreshRun({ initial = false } = {}) {
     if (state.pollInFlight) return;
+    const requestSerial = ++state.runRequestSerial;
+    const requestedEpoch = state.viewEpoch;
     state.pollInFlight = true;
     try {
       const wasRunning = isRunningStatus(state.run.status);
@@ -322,23 +451,37 @@
       const requestedSequence = state.latestSequence;
       const suffix = requestedSequence ? `?after_sequence=${requestedSequence}` : "";
       let payload = await apiJson(`/api/runs/current${suffix}`);
+      if (requestSerial !== state.runRequestSerial || requestedEpoch !== state.viewEpoch) return;
       let incomingRun = payload.state || payload.run || payload;
       const incomingWebRunId = incomingRun.web_run_id;
       const runChanged = Boolean(incomingWebRunId && incomingWebRunId !== previousWebRunId);
+      if (runChanged && requestedSequence > 0) {
+        payload = await apiJson("/api/runs/current?after_sequence=0");
+        if (requestSerial !== state.runRequestSerial || requestedEpoch !== state.viewEpoch) return;
+        incomingRun = payload.state || payload.run || payload;
+      }
+      const runMemoryId = incomingRun.memory_id;
+      const memoryChanged = Boolean(runMemoryId && runMemoryId !== state.selectedMemoryId);
+      if (memoryChanged && isRunningStatus(incomingRun.status)) {
+        setSelectedMemoryId(runMemoryId, { clear: true });
+        state.serverCatalogLocked = true;
+      }
       if (runChanged) {
         Object.assign(state, {
           events: [],
           latestSequence: 0,
-          report: null,
-          serverSummary: null,
-          candidateAssetKinds: new Map(),
-          lastIntermediateRenderKey: "",
-          pendingIntermediateRender: false,
           lastDataRefresh: 0,
         });
-        if (requestedSequence > 0) {
-          payload = await apiJson("/api/runs/current?after_sequence=0");
-          incomingRun = payload.state || payload.run || payload;
+        const runBelongsToSelection = !runMemoryId || runMemoryId === state.selectedMemoryId;
+        if (runBelongsToSelection) {
+          Object.assign(state, {
+            report: null,
+            serverSummary: null,
+            memory: null,
+            candidateAssetKinds: new Map(),
+            lastIntermediateRenderKey: "",
+            pendingIntermediateRender: false,
+          });
         }
       }
       state.run = runChanged ? { status: "idle", ...incomingRun } : { ...state.run, ...incomingRun };
@@ -361,7 +504,11 @@
       const transitionedToTerminal = wasRunning && !isRunning;
       if (transitionedToTerminal || now - state.lastDataRefresh >= DATA_REFRESH_INTERVAL_MS) {
         state.lastDataRefresh = now;
-        await Promise.all([refreshResults({ quiet: true }), refreshMemory({ quiet: true })]);
+        await Promise.all([
+          refreshResults({ quiet: true }),
+          refreshMemory({ quiet: true }),
+          refreshMemoryLibraries({ quiet: true }),
+        ]);
       }
       if (transitionedToTerminal && !initial) await refreshInputs({ quiet: true });
     } catch (error) {
@@ -374,9 +521,18 @@
   }
 
   async function refreshResults({ quiet = false } = {}) {
+    const requestedMemoryId = state.selectedMemoryId;
+    const requestedEpoch = state.viewEpoch;
+    const requestSerial = ++state.resultRequestSerial;
     try {
-      const payload = await apiJson("/api/results");
-      if (payload.state && typeof payload.state === "object") {
+      const payload = await apiJson(`/api/results?memory_id=${encodeURIComponent(requestedMemoryId)}`);
+      if (
+        requestSerial !== state.resultRequestSerial
+        || state.viewEpoch !== requestedEpoch
+        || state.selectedMemoryId !== requestedMemoryId
+        || (payload.memory_id && payload.memory_id !== requestedMemoryId)
+      ) return;
+      if (payload.state?.web_run_id && typeof payload.state === "object") {
         const resultWebRunId = payload.state.web_run_id;
         const resultRunChanged = Boolean(
           resultWebRunId && resultWebRunId !== state.run.web_run_id
@@ -399,11 +555,10 @@
         }
       }
       const incoming = payload.report || (payload.schema_version ? payload : null);
-      const currentEnough = payload.is_current_run !== false || !isRunningStatus(state.run.status);
       if (payload.available === false) {
         state.report = null;
         state.serverSummary = null;
-      } else if (incoming && currentEnough) {
+      } else if (incoming) {
         state.report = incoming;
         state.serverSummary = payload.summary || null;
       }
@@ -415,8 +570,18 @@
   }
 
   async function refreshMemory({ quiet = false } = {}) {
+    const requestedMemoryId = state.selectedMemoryId;
+    const requestedEpoch = state.viewEpoch;
+    const requestSerial = ++state.memoryRequestSerial;
     try {
-      state.memory = await apiJson("/api/memory");
+      const payload = await apiJson(`/api/memory?memory_id=${encodeURIComponent(requestedMemoryId)}`);
+      if (
+        requestSerial !== state.memoryRequestSerial
+        || state.viewEpoch !== requestedEpoch
+        || state.selectedMemoryId !== requestedMemoryId
+        || (payload.memory_id && payload.memory_id !== requestedMemoryId)
+      ) return;
+      state.memory = payload;
       renderMemory();
     } catch (error) {
       if (!quiet) toast(`无法读取对象记忆：${error.message}`, "error");
@@ -427,8 +592,8 @@
     const summary = state.inputSummary;
     elements.inputMetrics.innerHTML = `
       <article><span>输入图片</span><strong>${formatInteger(summary.total)}</strong></article>
-      <article><span>实际处理</span><strong>${formatInteger(summary.unique)}</strong></article>
-      <article><span>重复内容</span><strong>${formatInteger(summary.duplicates)}</strong></article>
+      <article><span>不同内容</span><strong>${formatInteger(summary.unique)}</strong></article>
+      <article><span>内容副本</span><strong>${formatInteger(summary.duplicates)}</strong></article>
       <article><span>支持格式</span><strong>JPG · PNG · WEBP</strong></article>
     `;
 
@@ -441,7 +606,7 @@
       return;
     }
 
-    const locked = isRunningStatus(state.run.status);
+    const locked = memoryControlsLocked();
     elements.inputGrid.innerHTML = state.inputs
       .map((item) => {
         const path = item.path || item.relative_path || item.name;
@@ -536,6 +701,7 @@
   function renderRun() {
     const event = latestProgressEvent();
     const runStatus = state.run.status || event?.status || "idle";
+    const running = isRunningStatus(runStatus);
     const terminalFailure = ["failed", "interrupted"].includes(runStatus);
     const rawEventStage = event?.stage || state.run.stage || (isRunningStatus(runStatus) ? "starting" : "idle");
     const eventStage = normalizedStage(rawEventStage);
@@ -555,19 +721,23 @@
     elements.runStage.textContent = terminalFailure
       ? `${stageText} · ${statusLabels[runStatus] || runStatus}`
       : stageText || stageLabels[runStatus];
-    elements.runUnit.textContent = terminalFailure
+    const runDetail = terminalFailure
       ? runExitCode(state.run) != null
         ? `子进程退出码 ${runExitCode(state.run)}`
         : statusLabels[runStatus] || runStatus
       : current != null && total != null
         ? `已完成 ${current} / ${total}`
         : message;
+    const ownership = state.run.memory_id
+      ? `${running ? "当前" : "最近"}运行所属：${runMemoryLabel()}`
+      : "尚无运行归属";
+    elements.runUnit.textContent = `${ownership} · ${runDetail}`;
+    elements.runUnit.title = `${ownership} · ${runDetail}`;
     elements.progressBar.style.width = `${progress}%`;
     elements.progressTrack.setAttribute("aria-valuenow", String(Math.round(progress)));
     elements.progressMessage.textContent = message;
     elements.progressPercent.textContent = `${Math.round(progress)}%`;
 
-    const running = isRunningStatus(runStatus);
     elements.headerStatusDot.className = `status-dot ${running ? "running" : statusClass(runStatus) === "failed" ? "failed" : "ready"}`;
     elements.headerStatusText.textContent = running
       ? `实验运行中 · ${stageLabels[eventStage] || eventStage}`
@@ -599,17 +769,30 @@
   }
 
   function renderControlAvailability() {
-    const running = isRunningStatus(state.run.status);
+    const locked = memoryControlsLocked();
+    const experimentRunning = state.serverCatalogLocked || isRunningStatus(state.run.status);
     const hasInputs = state.inputSummary.total > 0;
-    elements.startRunButton.disabled = running || !hasInputs;
-    elements.uploadButton.disabled = running;
-    elements.dropZone.classList.toggle("locked", running);
-    elements.dropZone.setAttribute("aria-disabled", String(running));
-    elements.runLockNote.textContent = running
-      ? "实验正在运行，输入上传、删除和再次启动已锁定。"
-      : hasInputs
-        ? "启动后会锁定输入；同一时间只运行一个实验。"
-        : "请先上传至少一张输入图片。";
+    const library = selectedLibrary();
+    const canUseLibrary = Boolean(library?.continuable);
+    elements.startRunButton.disabled = locked || !hasInputs || !canUseLibrary;
+    elements.uploadButton.disabled = locked;
+    elements.memoryLibrarySelect.disabled = locked || !state.memoryLibraries.length;
+    elements.newMemoryButton.disabled = locked;
+    elements.deleteMemoryButton.disabled = locked || !library || library.deletable === false;
+    elements.inputGrid.querySelectorAll("[data-delete-input]").forEach((button) => {
+      button.disabled = locked;
+    });
+    elements.dropZone.classList.toggle("locked", locked);
+    elements.dropZone.setAttribute("aria-disabled", String(locked));
+    elements.runLockNote.textContent = state.catalogMutationInFlight
+      ? "正在更新记忆库选择，请稍候。"
+      : experimentRunning
+        ? "实验正在运行，输入与记忆库管理已锁定。"
+        : !canUseLibrary
+          ? "所选记忆库仅供复核；请新建空白库或选择可继续写入的库。"
+          : hasInputs
+            ? "启动后会锁定输入；同一时间只运行一个实验。"
+            : "请先上传至少一张输入图片。";
   }
 
   function runElapsedSeconds() {
@@ -651,7 +834,10 @@
       }
       byKey.set(key, merged);
     };
-    for (const event of state.events) {
+    const visibleEvents = !state.run.memory_id || state.run.memory_id === state.selectedMemoryId
+      ? state.events
+      : [];
+    for (const event of visibleEvents) {
       const data = event.data || {};
       const direct = data.input_path || data.source_id
         ? [
@@ -708,6 +894,25 @@
     );
   }
 
+  function stageTableScrollKey(node, index) {
+    return node.dataset.scrollKey || `${state.selectedStage}:table:${index}`;
+  }
+
+  function captureStageTableScrollPositions() {
+    const positions = new Map();
+    elements.stagePanel.querySelectorAll(".table-wrap").forEach((node, index) => {
+      positions.set(stageTableScrollKey(node, index), node.scrollLeft);
+    });
+    return positions;
+  }
+
+  function restoreStageTableScrollPositions(positions) {
+    elements.stagePanel.querySelectorAll(".table-wrap").forEach((node, index) => {
+      const scrollLeft = positions.get(stageTableScrollKey(node, index));
+      if (scrollLeft != null) node.scrollLeft = scrollLeft;
+    });
+  }
+
   function hasSamEvidence(image) {
     const sam = image?.sam;
     if (!sam) return false;
@@ -724,6 +929,7 @@
     const report = state.report || {};
     return JSON.stringify([
       state.selectedStage,
+      state.selectedMemoryId,
       state.run.web_run_id || "",
       state.latestSequence,
       report.run?.run_id || "",
@@ -738,10 +944,11 @@
   function renderIntermediates({ force = false } = {}) {
     const renderKey = intermediateRenderKey();
     if (!force && renderKey === state.lastIntermediateRenderKey) return;
-    if (!force && hasActiveStageSelection()) {
+    if (state.stagePointerActive || (!force && hasActiveStageSelection())) {
       state.pendingIntermediateRender = true;
       return;
     }
+    const tableScrollPositions = captureStageTableScrollPositions();
     state.pendingIntermediateRender = false;
     const images = imageStates();
     const uniqueImages = images.filter((image) => !image.duplicate && image.source_id);
@@ -754,10 +961,10 @@
     const keptCount = images.reduce((sum, image) => sum + number(image.sam?.kept, 0), 0);
     const decisionCount = images.reduce((sum, image) => sum + array(image.decisions).length, 0);
     document.querySelector("#tab-count-input").textContent = images.length
-      ? `${images.length} 个输入文件 · ${uniqueImages.length} 张实际处理图片`
+      ? `${images.length} 个输入文件 · ${uniqueImages.length} 张本次登记源图`
       : "等待结果";
     document.querySelector("#tab-count-scene").textContent = guidedImages.length
-      ? `${uniqueImages.length} 张实际处理图片 · ${sceneCount} 个首轮文本目标`
+      ? `${uniqueImages.length} 张本次登记源图 · ${sceneCount} 个 Qwen 目标条目`
       : "等待结果";
     document.querySelector("#tab-count-sam").textContent = samImages.length
       ? `${samImages.length} 张 SAM3 结果图片 · ${keptCount} 个保留候选区域`
@@ -770,6 +977,7 @@
     if (state.selectedStage === "scene_guidance") renderSceneStage(images);
     if (state.selectedStage === "sam3") renderSamStage(images);
     if (state.selectedStage === "candidate_reasoning") renderReasoningStage(images);
+    restoreStageTableScrollPositions(tableScrollPositions);
     state.lastIntermediateRenderKey = renderKey;
   }
 
@@ -795,11 +1003,11 @@
         stagePurposes.input,
         [
           ["输入文件", images.length],
-          ["实际处理图片", uniqueCount],
+          ["本次登记源图", uniqueCount],
           ["重复文件", duplicates.length],
         ]
       )}
-      <div class="table-wrap">
+      <div class="table-wrap" data-scroll-key="input-lineage">
         <table class="lineage-table">
           <thead><tr><th>输入图片</th><th>内容指纹</th><th>处理图片 ID</th><th>处理状态</th><th>源图资产</th><th>错误</th></tr></thead>
           <tbody>
@@ -844,19 +1052,24 @@
           "Qwen3-VL 目标规划",
           stagePurposes.scene_guidance,
           []
-        )}${emptyState("等待目标规划结果", "Qwen3-VL 完成场景理解后，这里会显示每张图及其首轮文本目标。", "02")}`
+        )}${emptyState("等待目标规划结果", "Qwen3-VL 完成场景理解后，这里会显示每张图的中文物体名称与计划发送给 SAM3 的英文提示词。", "02")}`
       );
       return;
     }
     const targetCount = guided.reduce((sum, image) => sum + number(image.scene_guidance?.target_count, 0), 0);
+    const actualQueryCount = guided.reduce(
+      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
+      0
+    );
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
         "STEP 02 · TARGET PLANNING",
         "Qwen3-VL 目标规划",
         stagePurposes.scene_guidance,
         [
-          ["实际处理图片", images.filter((image) => !image.duplicate && image.source_id).length],
-          ["首轮文本目标", targetCount],
+          ["本次登记源图", images.filter((image) => !image.duplicate && image.source_id).length],
+          ["Qwen 目标条目", targetCount],
+          ["SAM3 已完成查询", actualQueryCount],
         ]
       )}
       <div class="evidence-list">
@@ -864,6 +1077,7 @@
           .map((image) => {
             const guidance = image.scene_guidance || {};
             const targets = array(guidance.targets);
+            const promptCounts = image.sam?.prompt_detection_counts || {};
             return `
               <article class="evidence-card">
                 <div class="evidence-image">${previewImage(sourcePreview(image), `源图 ${image.source_id || ""}`)}</div>
@@ -874,25 +1088,41 @@
                       <span class="mono-line">目标规划批次 ${escapeHtml(guidance.batch_index ?? "—")}</span>
                     </div>
                     <div class="chip-list" style="margin-top:0">
-                      ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `本图 ${targets.length} 个首轮文本目标`)}
+                      ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `本图 ${targets.length} 个 Qwen 目标条目`)}
                       ${guidance.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(guidance.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
                     </div>
                   </div>
                   <p>${escapeHtml(guidance.scene_summary || guidance.no_target_reason || guidance.errors?.join("；") || "尚无可用场景摘要")}</p>
-                  <div class="chip-list">
+                  <div class="sam-prompt-note">中文物体名称不会用于 SAM3 查询。下方展示英文查询原文；有检测数字表示查询已完成并写入报告，未记录条目可能尚未执行或在该图的 SAM3 阶段中途失败。</div>
+                  <div class="target-prompt-list">
                     ${targets.length
                       ? targets
                           .map(
-                            (target) => `
-                              <span class="chip prompt" title="${escapeHtml(target.selection_short_reason || "")}">
-                                <b>${escapeHtml(target.object_name_zh || target.target_id)}</b>
-                                ${escapeHtml(target.sam_text_prompt)}
-                                · ${Math.round(number(target.confidence) * 100)}%
-                              </span>
-                            `
+                            (target, index) => {
+                              const prompt = target.sam_text_prompt || "";
+                              const sent = Object.prototype.hasOwnProperty.call(promptCounts, prompt);
+                              const queryStatus = sent
+                                ? `SAM3 查询已完成 · 返回 ${formatInteger(promptCounts[prompt])} 个阈值以上区域`
+                                : image.sam
+                                  ? "未完成或未记录"
+                                  : "等待 SAM3 查询";
+                              return `
+                                <article class="target-prompt-card">
+                                  <div class="target-prompt-heading">
+                                    <strong>目标 ${String(index + 1).padStart(2, "0")}</strong>
+                                    ${statusPill(sent ? "completed" : "neutral", queryStatus)}
+                                  </div>
+                                  <dl>
+                                    <div><dt>中文物体名称</dt><dd>${escapeHtml(target.object_name_zh || target.target_id)}</dd></div>
+                                    <div class="sam-query-row"><dt>${sent ? "已完成查询的 SAM3 英文原文" : "计划用于 SAM3 的英文原文"}</dt><dd><code>${escapeHtml(prompt)}</code></dd></div>
+                                    <div><dt>目标置信度</dt><dd>${Math.round(number(target.confidence) * 100)}% · ${escapeHtml(target.selection_short_reason || "未提供选择原因")}</dd></div>
+                                  </dl>
+                                </article>
+                              `;
+                            }
                           )
                           .join("")
-                      : '<span class="chip">本图无目标</span>'}
+                      : '<span class="chip">本图无 Qwen 目标条目</span>'}
                   </div>
                 </div>
               </article>
@@ -937,6 +1167,10 @@
     }
     const kept = relevant.reduce((sum, image) => sum + number(image.sam?.kept), 0);
     const filtered = relevant.reduce((sum, image) => sum + number(image.sam?.filtered), 0);
+    const queryCount = relevant.reduce(
+      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
+      0
+    );
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
         "STEP 03 · SEGMENTATION",
@@ -944,6 +1178,7 @@
         stagePurposes.sam3,
         [
           ["SAM3 结果图片", relevant.length],
+          ["已完成英文查询", queryCount],
           ["保留候选区域", kept],
           ["过滤候选区域", filtered],
         ]
@@ -969,7 +1204,7 @@
                   </div>
                   <div class="chip-list">
                     ${promptCounts
-                      .map(([prompt, count]) => `<span class="chip ${number(count) === 0 ? "" : "prompt"}">${escapeHtml(prompt)} · <b>${formatInteger(count)} 个区域</b></span>`)
+                      .map(([prompt, count]) => `<span class="chip ${number(count) === 0 ? "" : "prompt"}">已完成查询的英文原文 · <code>${escapeHtml(prompt)}</code> · <b>返回 ${formatInteger(count)} 个阈值以上区域</b></span>`)
                       .join("") || '<span class="chip">暂无提示统计</span>'}
                   </div>
                   ${image.error ? `<p class="meta-line">阶段错误 · ${escapeHtml(image.error)}</p>` : ""}
@@ -1017,7 +1252,8 @@
             <strong class="mono">${escapeHtml(shortId(id, 20))}</strong>
             ${candidate.status ? statusPill(candidate.status) : ""}
           </div>
-          <p><b>${escapeHtml(candidate.sam_text_prompt || candidate.prompt || "unknown")}</b> · score ${number(candidate.score).toFixed(3)}</p>
+          <p>来源英文提示词 · <b>${escapeHtml(candidate.sam_text_prompt || candidate.prompt || "unknown")}</b></p>
+          <p class="meta-line">SAM3 文本匹配分数 · ${number(candidate.score).toFixed(3)}</p>
           ${candidate.filter_reason ? `<p class="meta-line">过滤原因 · ${escapeHtml(candidate.filter_reason)}</p>` : ""}
           ${candidate.error ? `<p class="meta-line">错误 · ${escapeHtml(candidate.error)}</p>` : ""}
           <span class="mono-line">bbox ${escapeHtml(bboxText(candidate.bbox))} · area ${number(candidate.mask_area_ratio) ? `${(number(candidate.mask_area_ratio) * 100).toFixed(2)}%` : "—"}</span>
@@ -1179,6 +1415,7 @@
 
   function renderMemory() {
     const memory = state.memory || {};
+    const libraryLabel = memory.memory_label || selectedLibrary()?.label || "默认记忆库";
     const counts = memory.counts || {};
     const objects = array(memory.objects);
     const candidates = array(memory.candidates || memory.proposals);
@@ -1186,15 +1423,22 @@
       memory.initialized ?? memory.database_exists ?? (objects.length > 0 || Object.keys(counts).length > 0)
     );
     const observationCount = number(counts.observations, objects.reduce((sum, object) => sum + array(object.observations).length, 0));
+    elements.memoryContext.textContent = `正在查看：${libraryLabel}`;
     updateHtml(elements.memoryOverview, `
       <article><span>活跃对象</span><strong>${formatInteger(counts.active_objects ?? objects.length)}</strong><small>长期档案</small></article>
       <article><span>观测记录</span><strong>${formatInteger(observationCount)}</strong><small>跨视角证据</small></article>
-      <article><span>正式候选</span><strong>${formatInteger(counts.proposals ?? candidates.length)}</strong><small>含过滤与待定</small></article>
+      <article><span>候选记录</span><strong>${formatInteger(counts.proposals ?? candidates.length)}</strong><small>保留、过滤与待定总数</small></article>
       <article><span>数据库状态</span><strong>${initialized ? "已连接" : "未初始化"}</strong><small>memory.sqlite</small></article>
     `);
 
     if (!initialized) {
-      updateHtml(elements.memoryContent, emptyState("当前还没有对象记忆", "首次实验会自动创建 SQLite 与对象资产。", "□"));
+      const library = selectedLibrary();
+      if (library?.status === "unreadable" || library?.status === "review_only") {
+        const title = library.status === "unreadable" ? "记忆库无法读取" : "记忆库不完整，仅供复核";
+        updateHtml(elements.memoryContent, emptyState(title, memoryIssueText(library), "!"));
+        return;
+      }
+      updateHtml(elements.memoryContent, emptyState(`“${libraryLabel}”目前为空`, "首次写入会创建 SQLite 与对象资产。", "□"));
       return;
     }
     if (state.selectedMemoryView === "lineage") {
@@ -1264,7 +1508,7 @@
     updateHtml(elements.memoryContent, `
       <div class="table-wrap">
         <table class="lineage-table">
-          <thead><tr><th>候选</th><th>source</th><th>文本提示</th><th>分数</th><th>候选状态</th><th>Qwen 决策</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
+          <thead><tr><th>候选</th><th>source</th><th>SAM3 英文提示词</th><th>分数</th><th>候选状态</th><th>Qwen 决策</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
           <tbody>
             ${candidates
               .map((candidate) => {
@@ -1297,6 +1541,10 @@
     const proposalCounts = run.proposal_counts || {};
     const decisions = run.decision_counts || {};
     const sceneTargets = images.reduce((sum, image) => sum + number(image.scene_guidance?.target_count), 0);
+    const samPrompts = images.reduce(
+      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
+      0
+    );
     const rawCandidates = images.reduce((sum, image) => sum + number(image.sam?.above_confidence_threshold_candidates), 0);
     const zeroPrompts = images.reduce((sum, image) => sum + array(image.sam?.zero_candidate_prompts).length, 0);
     return {
@@ -1304,6 +1552,7 @@
       uniqueSources: Object.values(sourceCounts).reduce((sum, value) => sum + number(value), 0),
       duplicates: number(run.duplicate_sources_skipped, images.filter((image) => image.duplicate).length),
       sceneTargets,
+      samPrompts,
       rawCandidates,
       kept: number(proposalCounts.decided) + number(proposalCounts.pending) + number(proposalCounts.failed),
       filtered: number(proposalCounts.filtered),
@@ -1311,6 +1560,7 @@
       existingCount: number(decisions.existing),
       ignoredCount: number(decisions.ignored),
       uncertainCount: number(decisions.uncertain),
+      failedProposals: number(proposalCounts.failed),
       observations: number(run.observations_added),
       objects: number(run.active_objects_total),
       zeroPrompts,
@@ -1386,14 +1636,15 @@
   function renderSummary() {
     const report = state.report;
     if (!report) {
-      const terminalFailure = ["failed", "interrupted"].includes(state.run.status);
+      const reportBelongsToRun = !state.run.memory_id || state.run.memory_id === state.selectedMemoryId;
+      const terminalFailure = reportBelongsToRun && !state.run.memory_deleted_at_utc && ["failed", "interrupted"].includes(state.run.status);
       if (terminalFailure) {
         renderFailedRunSummary(state.run);
         return;
       }
       elements.summaryStatus.className = "status-pill neutral";
       elements.summaryStatus.textContent = "暂无报告";
-      updateHtml(elements.summaryContent, emptyState("完成一次实验后生成摘要", "摘要会覆盖输入、目标、候选、四类决策、对象、观测、耗时和错误。", "∴"));
+      updateHtml(elements.summaryContent, emptyState("所选记忆库暂无正式报告", "完成一次实验后，这里会按五个阶段整理本次增量、库内累计结果、运行错误和人工复核重点。", "∴"));
       return;
     }
     const metrics = reportMetrics(report);
@@ -1406,75 +1657,108 @@
     const errors = reportErrorMessages(report);
     const checks = Object.entries(report.checks || {});
     const demoCoverage = Object.entries(report.demo_coverage || {});
-    const serverNarrative = state.serverSummary?.narrative || state.serverSummary?.headline;
-    const verdict = status === "passed" ? "流程结构通过" : status === "completed_with_errors" ? "完成但存在错误" : "本次流程未通过";
+    const libraryLabel = selectedLibrary()?.label || state.memory?.memory_label || "默认记忆库";
+    const decisionTotal = metrics.newCount + metrics.existingCount + metrics.ignoredCount + metrics.uncertainCount;
+    const queryGap = Math.max(0, metrics.sceneTargets - metrics.samPrompts);
+    const decisionGap = Math.max(0, metrics.kept - decisionTotal - metrics.failedProposals);
+    const threshold = number(sam.confidence_threshold, 0.4);
+    const elapsed = state.serverSummary && "elapsed_seconds" in state.serverSummary
+      ? state.serverSummary.elapsed_seconds
+      : state.run.elapsed_seconds;
+    const structurePassed = status === "passed";
+    const completedWithErrors = status === "completed_with_errors";
+    const outcomeClass = structurePassed ? "passed" : completedWithErrors ? "warning" : "failed";
+    const formalTitle = structurePassed
+      ? "实验完成，结果已写入对象记忆"
+      : completedWithErrors
+        ? "实验已结束，但部分内容处理失败"
+        : "实验未形成可验收的完整结果";
     updateHtml(elements.summaryContent, `
-      <div class="summary-hero">
-        <article class="summary-verdict">
-          <div>
-            <p class="eyebrow">RUN VERDICT</p>
-            <h3>${escapeHtml(serverNarrative || verdict)}</h3>
-            <p>run_id · <span class="mono">${escapeHtml(report.run?.run_id || "—")}</span></p>
+      <section class="summary-outcome ${outcomeClass}">
+        <div>
+          <p class="eyebrow">RUN OUTCOME</p>
+          <h3>${escapeHtml(formalTitle)}</h3>
+          <div class="summary-status-row">
+            ${statusPill(structurePassed ? "passed" : completedWithErrors ? "uncertain" : "failed", `流程与数据检查：${structurePassed ? "通过" : completedWithErrors ? "有错误" : "未通过"}`)}
+            ${statusPill("uncertain", "物体识别质量：待人工复核")}
           </div>
-          <div class="summary-warning">passed 只表示程序与结构检查通过；物体召回、完整粒度、颜色和身份归并仍需人工逐图复核。</div>
-        </article>
-        <div class="funnel-grid">
-          ${summaryMetric("输入文件", metrics.inputs, `${metrics.uniqueSources} 张实际处理图片 · ${metrics.duplicates} 个重复文件`)}
-          ${summaryMetric("首轮文本目标", metrics.sceneTargets, "Qwen3-VL 为 SAM3 生成的查找任务")}
-          ${summaryMetric("阈值上候选", metrics.rawCandidates, `${metrics.zeroPrompts} 条提示为 0 候选`)}
-          ${summaryMetric("保留候选", metrics.kept, `${metrics.filtered} 个被脚本过滤`)}
-          ${summaryMetric("对象决定", metrics.newCount + metrics.existingCount + metrics.ignoredCount + metrics.uncertainCount, `${metrics.newCount} new · ${metrics.existingCount} existing`)}
-          ${summaryMetric("长期记忆", metrics.objects, `${metrics.observations} 条观测`)}
         </div>
+        <div class="summary-run-meta">
+          <span>记忆库 · <b>${escapeHtml(libraryLabel)}</b></span>
+          <span>运行编号 · <code>${escapeHtml(report.run?.run_id || "—")}</code></span>
+          <span>总耗时 · <b>${elapsed == null ? "—" : formatSeconds(elapsed)}</b></span>
+        </div>
+        <p>${structurePassed ? "流程完整结束且结构化结果可读取；物体是否找全、粒度是否完整、颜色是否正确及跨图身份是否一致，仍需结合下方证据人工确认。" : "先查看运行错误与对应阶段证据；缺失或失败的内容不会被摘要数字包装成成功结果。"}</p>
+      </section>
+      <div class="summary-stage-grid">
+        ${summaryStageCard("01", "输入整理", [
+          ["输入文件", metrics.inputs],
+          ["本次登记源图", metrics.uniqueSources],
+          ["重复文件跳过", metrics.duplicates],
+        ])}
+        ${summaryStageCard("02", "目标与查询", [
+          ["Qwen 目标条目", metrics.sceneTargets],
+          ["SAM3 已完成英文查询", metrics.samPrompts],
+          ["返回 0 区域的查询", metrics.zeroPrompts],
+        ], queryGap ? `${queryGap} 个 Qwen 目标没有形成已完成并记录的 SAM3 查询，请查看目标规划或 SAM3 阶段错误。` : "每条已完成查询都可在中间结果中查看英文原文。")}
+        ${summaryStageCard("03", "候选区域", [
+          [`高于 ${threshold.toFixed(2)} 阈值的区域`, metrics.rawCandidates],
+          ["保留候选", metrics.kept],
+          ["脚本过滤候选", metrics.filtered],
+        ])}
+        ${summaryStageCard("04", "对象决策", [
+          ["新对象", metrics.newCount],
+          ["归入已有对象", metrics.existingCount],
+          ["忽略候选", metrics.ignoredCount],
+          ["不确定待复核", metrics.uncertainCount],
+          ["处理失败", metrics.failedProposals],
+        ], decisionGap ? `${decisionGap} 个保留候选没有形成决定，请查看对象决策阶段。` : "四类决定与失败记录分开统计。")}
+        ${summaryStageCard("05", "记忆写入", [
+          ["本次新增观测", metrics.observations],
+          ["库内活跃对象", metrics.objects],
+        ], "新增观测是本次增量；活跃对象是所选记忆库的累计总数。")}
       </div>
-      <div class="summary-details">
+      <div class="summary-details summary-review-grid">
         <article class="detail-panel">
-          <h3>耗时与模型</h3>
-          <div class="timing-grid">
-            ${timingMetric("总墙钟", state.run.elapsed_seconds, "Web 运行记录")}
-            ${timingMetric("Qwen 加载", qwen.model_load_seconds, `${number(qwen.load_count)} 次驻留`)}
-            ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.total_calls)} 次调用`)}
-            ${timingMetric("SAM3 推理", sam.inference_seconds, `峰值 ${number(sam.peak_memory_mib).toFixed(0)} MiB`)}
-          </div>
-        </article>
-        <article class="detail-panel">
-          <h3>结构检查</h3>
-          <ul class="check-list">
-            ${
-              checks.length
-                ? checks.map(([name, ok]) => `<li class="${ok ? "ok" : "bad"}"><span><b>${escapeHtml(name)}</b> · ${ok ? "通过" : "未通过"}</span></li>`).join("")
-                : '<li class="bad"><span>报告没有结构检查字段</span></li>'
-            }
-            ${demoCoverage.map(([name, ok]) => `<li class="${ok ? "ok" : "bad"}"><span><b>demo · ${escapeHtml(name)}</b> · ${ok ? "覆盖" : "未覆盖"}</span></li>`).join("")}
-          </ul>
-        </article>
-      </div>
-      <div class="summary-details">
-        <article class="detail-panel">
-          <h3>四类决定</h3>
-          <div class="chip-list">
-            ${statusPill("new", `new ${metrics.newCount}`)}
-            ${statusPill("existing", `existing ${metrics.existingCount}`)}
-            ${statusPill("ignored", `ignored ${metrics.ignoredCount}`)}
-            ${statusPill("uncertain", `uncertain ${metrics.uncertainCount}`)}
-          </div>
-        </article>
-        <article class="detail-panel">
-          <h3>错误与人工复核提示</h3>
+          <h3>运行错误 · ${errors.length}</h3>
           <ul class="error-list">
-            ${
-              errors.length
-                ? errors.map((error) => `<li><span>${escapeHtml(error)}</span></li>`).join("")
-                : '<li style="background:var(--green-soft)"><span>报告未记录外部错误；仍需人工审查语义效果。</span></li>'
-            }
+            ${errors.length ? errors.map((error) => `<li><span>${escapeHtml(error)}</span></li>`).join("") : '<li class="no-error"><span>正式报告未记录运行错误。这不代表语义结果已经正确。</span></li>'}
+          </ul>
+        </article>
+        <article class="detail-panel">
+          <h3>人工复核清单</h3>
+          <ul class="review-list">
+            <li><a href="#intermediates">目标遗漏与中文名称 / 英文查询是否一致</a></li>
+            <li><a href="#intermediates">SAM3 返回 0 区域的查询与候选召回</a></li>
+            <li><a href="#intermediates">完整物体粒度、颜色与候选有效性</a></li>
+            <li><a href="#memory">跨图片的对象身份归并与观测时间线</a></li>
           </ul>
         </article>
       </div>
+      <article class="detail-panel timing-panel">
+        <h3>模型与耗时</h3>
+        <div class="timing-grid">
+          ${timingMetric("Qwen 加载", qwen.model_load_seconds, `${number(qwen.load_count)} 次驻留`)}
+          ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.total_calls)} 次调用`)}
+          ${timingMetric("SAM3 推理", sam.inference_seconds, `峰值 ${number(sam.peak_memory_mib).toFixed(0)} MiB`)}
+        </div>
+      </article>
+      <details class="technical-details">
+        <summary>技术检查详情 · ${checks.length + demoCoverage.length} 项</summary>
+        <ul class="check-list">
+          ${checks.length ? checks.map(([name, ok]) => `<li class="${ok ? "ok" : "bad"}"><span>${ok ? "通过" : "未通过"} · <code>${escapeHtml(name)}</code></span></li>`).join("") : '<li class="bad"><span>报告没有结构检查字段</span></li>'}
+          ${demoCoverage.map(([name, ok]) => `<li class="${ok ? "ok" : "bad"}"><span>${ok ? "覆盖" : "未覆盖"} · demo · <code>${escapeHtml(name)}</code></span></li>`).join("")}
+        </ul>
+      </details>
     `);
   }
 
-  function summaryMetric(label, value, hint) {
-    return `<article class="funnel-card"><span>${escapeHtml(label)}</span><strong>${formatInteger(value)}</strong><small>${escapeHtml(hint)}</small></article>`;
+  function summaryStageCard(index, title, rows, note = "") {
+    return `<article class="summary-stage-card">
+      <div class="summary-stage-title"><span>${escapeHtml(index)}</span><h3>${escapeHtml(title)}</h3></div>
+      <dl>${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${formatInteger(value)}</dd></div>`).join("")}</dl>
+      ${note ? `<p>${escapeHtml(note)}</p>` : ""}
+    </article>`;
   }
 
   function timingMetric(label, seconds, hint) {
@@ -1485,9 +1769,135 @@
     return `<div class="empty-state"><span class="empty-symbol" aria-hidden="true">${escapeHtml(symbol)}</span><strong>${escapeHtml(title)}</strong><p>${escapeHtml(description)}</p></div>`;
   }
 
+  function clearSelectedMemoryViews({ invalidate = false } = {}) {
+    if (invalidate) state.viewEpoch += 1;
+    Object.assign(state, {
+      report: null,
+      serverSummary: null,
+      memory: null,
+      candidateAssetKinds: new Map(),
+      lastIntermediateRenderKey: "",
+      pendingIntermediateRender: false,
+    });
+    renderSummary();
+    renderMemory();
+    renderIntermediates({ force: true });
+  }
+
+  function setSelectedMemoryId(memoryId, { clear = false } = {}) {
+    const next = String(memoryId || "default");
+    if (next === state.selectedMemoryId) return false;
+    state.selectedMemoryId = next;
+    state.viewEpoch += 1;
+    if (clear) clearSelectedMemoryViews({ invalidate: false });
+    return true;
+  }
+
+  async function selectMemoryLibrary(memoryId) {
+    if (memoryControlsLocked() || memoryId === state.selectedMemoryId) {
+      renderMemoryLibraryControl();
+      return;
+    }
+    const previousMemoryId = state.selectedMemoryId;
+    setSelectedMemoryId(memoryId, { clear: true });
+    state.catalogMutationInFlight = true;
+    renderMemoryLibraryControl();
+    renderControlAvailability();
+    try {
+      await apiJson(`/api/memories/${encodeURIComponent(memoryId)}/select`, {
+        method: "POST",
+      });
+      state.catalogMutationInFlight = false;
+      await refreshMemoryLibraries({ quiet: true, preferServerSelection: true });
+      await Promise.all([
+        refreshMemory({ quiet: true }),
+        refreshResults({ quiet: true }),
+      ]);
+      renderIntermediates({ force: true });
+    } catch (error) {
+      setSelectedMemoryId(previousMemoryId, { clear: true });
+      state.catalogMutationInFlight = false;
+      await refreshMemoryLibraries({ quiet: true, preferServerSelection: true });
+      await Promise.all([
+        refreshMemory({ quiet: true }),
+        refreshResults({ quiet: true }),
+      ]);
+      toast(`无法切换记忆库：${error.message}`, "error");
+    }
+  }
+
+  async function createMemoryLibrary() {
+    if (memoryControlsLocked()) return;
+    const label = window.prompt(
+      "为新的空白记忆库命名（最多 40 个字符）。\n\n名称只用于页面识别，系统会生成安全的内部编号。",
+      ""
+    );
+    if (label == null) return;
+    state.viewEpoch += 1;
+    state.catalogMutationInFlight = true;
+    renderControlAvailability();
+    try {
+      const payload = await apiJson("/api/memories", {
+        method: "POST",
+        body: JSON.stringify({ label }),
+        headers: { "Content-Type": "application/json" },
+      });
+      setSelectedMemoryId(payload.selected_id, { clear: true });
+      state.catalogMutationInFlight = false;
+      await refreshMemoryLibraries({ quiet: false, preferServerSelection: true });
+      await Promise.all([refreshMemory({ quiet: true }), refreshResults({ quiet: true })]);
+      toast(`已创建并选中“${payload.item?.label || "新记忆库"}”`);
+    } catch (error) {
+      state.catalogMutationInFlight = false;
+      renderControlAvailability();
+      toast(`无法新建记忆库：${error.message}`, "error");
+    }
+  }
+
+  async function deleteMemoryLibrary() {
+    if (memoryControlsLocked()) return;
+    const library = selectedLibrary();
+    if (!library) return;
+    const counts = library.counts || {};
+    const action = library.id === "default" ? "清空" : "永久删除";
+    const typed = window.prompt(
+      `${action}“${library.label}”？\n\n这会删除该库的 SQLite、源图副本、候选资产、对象观测、原始模型回答和库内运行报告；实验输入图片不会删除。页面无法撤销此操作。\n\n当前包含 ${formatInteger(counts.active_objects)} 个活跃对象、${formatInteger(counts.observations)} 条观测、${formatInteger(counts.runs)} 次运行。\n\n请输入完整名称以确认：`,
+      ""
+    );
+    if (typed == null || typed !== library.label) {
+      if (typed != null) toast("名称不一致，未删除记忆库", "error");
+      return;
+    }
+    state.viewEpoch += 1;
+    state.catalogMutationInFlight = true;
+    renderControlAvailability();
+    try {
+      const payload = await apiJson(
+        `/api/memories/${encodeURIComponent(library.id)}?confirm=${encodeURIComponent(library.id)}`,
+        { method: "DELETE" }
+      );
+      setSelectedMemoryId(payload.selected_id || "default", { clear: true });
+      if (state.memory !== null || state.report !== null) {
+        clearSelectedMemoryViews({ invalidate: false });
+      }
+      state.catalogMutationInFlight = false;
+      await refreshMemoryLibraries({ quiet: false, preferServerSelection: true });
+      await Promise.all([refreshMemory({ quiet: true }), refreshResults({ quiet: true })]);
+      if (payload.cleanup_pending) {
+        toast("记忆库已从页面移除，但服务器仍有一份待清理的临时隔离副本。", "error");
+      } else {
+        toast(payload.action === "cleared" ? "默认记忆库已清空" : "记忆库已删除");
+      }
+    } catch (error) {
+      state.catalogMutationInFlight = false;
+      renderControlAvailability();
+      toast(`无法删除记忆库：${error.message}`, "error");
+    }
+  }
+
   async function uploadFiles(fileList) {
     const files = [...fileList];
-    if (!files.length || isRunningStatus(state.run.status)) return;
+    if (!files.length || memoryControlsLocked()) return;
     const form = new FormData();
     files.forEach((file) => form.append("files", file));
     elements.uploadButton.disabled = true;
@@ -1504,7 +1914,7 @@
   }
 
   async function deleteInput(path) {
-    if (isRunningStatus(state.run.status)) return;
+    if (memoryControlsLocked()) return;
     const confirmed = window.confirm(`确定从本次实验输入中移除“${fileName(path)}”吗？\n\n已经生成的对象记忆不会受到影响。`);
     if (!confirmed) return;
     try {
@@ -1517,16 +1927,25 @@
   }
 
   async function startRun() {
-    if (isRunningStatus(state.run.status) || !state.inputSummary.total) return;
+    if (memoryControlsLocked() || !state.inputSummary.total) return;
+    const library = selectedLibrary();
+    if (!library?.continuable) return;
+    const counts = library.counts || {};
+    const memoryContext = library.status === "empty"
+      ? "这是空白库，本次会创建一份独立对象记忆，并执行首次 Demo 结构覆盖检查。"
+      : `本次结果会并入现有 ${formatInteger(counts.active_objects)} 个对象和 ${formatInteger(counts.observations)} 条观测，不会生成独立副本，也不会重复套用空白库的首次覆盖条件。`;
     const confirmed = window.confirm(
-      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n运行期间会锁定输入，并顺序加载 Qwen3-VL、SAM3、Qwen3-VL。是否继续？`
+      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n目标记忆库：${library.label}（${memoryStatusText(library.status)}）\n${memoryContext}\n\n运行期间会锁定输入和记忆库管理，并顺序加载 Qwen3-VL、SAM3、Qwen3-VL。是否继续？`
     );
     if (!confirmed) return;
-    elements.startRunButton.disabled = true;
+    state.viewEpoch += 1;
+    state.catalogMutationInFlight = true;
+    renderMemoryLibraryControl();
+    renderControlAvailability();
     try {
       const payload = await apiJson("/api/runs", {
         method: "POST",
-        body: JSON.stringify({ validate_demo: true }),
+        body: JSON.stringify({ memory_id: state.selectedMemoryId }),
         headers: { "Content-Type": "application/json" },
       });
       const incomingRun = payload.state || payload.run || payload;
@@ -1535,30 +1954,55 @@
         latestSequence: 0,
         report: null,
         serverSummary: null,
+        memory: null,
         candidateAssetKinds: new Map(),
         lastIntermediateRenderKey: "",
         pendingIntermediateRender: false,
         lastDataRefresh: 0,
       });
       state.run = { ...incomingRun, status: payload.status || incomingRun.status || "starting" };
+      setSelectedMemoryId(incomingRun.memory_id || state.selectedMemoryId, { clear: false });
+      state.catalogMutationInFlight = false;
+      state.serverCatalogLocked = true;
+      renderMemoryLibraryControl();
+      renderRun();
       renderSummary();
       renderIntermediates({ force: true });
       toast("实验已启动，页面将持续显示真实阶段事件");
       await refreshRun();
     } catch (error) {
+      state.catalogMutationInFlight = false;
       toast(`无法启动实验：${error.message}`, "error");
       renderControlAvailability();
+      await Promise.all([
+        refreshResults({ quiet: true }),
+        refreshMemory({ quiet: true }),
+        refreshMemoryLibraries({ quiet: true, preferServerSelection: true }),
+      ]);
     }
+  }
+
+  function releaseStagePointer() {
+    if (!state.stagePointerActive) return;
+    state.stagePointerActive = false;
+    window.setTimeout(() => {
+      if (
+        state.stagePointerActive
+        || !state.pendingIntermediateRender
+        || hasActiveStageSelection()
+      ) return;
+      renderIntermediates();
+    }, 0);
   }
 
   function bindEvents() {
     elements.uploadButton.addEventListener("click", () => elements.fileInput.click());
     elements.fileInput.addEventListener("change", () => uploadFiles(elements.fileInput.files));
     elements.dropZone.addEventListener("click", () => {
-      if (!isRunningStatus(state.run.status)) elements.fileInput.click();
+      if (!memoryControlsLocked()) elements.fileInput.click();
     });
     elements.dropZone.addEventListener("keydown", (event) => {
-      if ((event.key === "Enter" || event.key === " ") && !isRunningStatus(state.run.status)) {
+      if ((event.key === "Enter" || event.key === " ") && !memoryControlsLocked()) {
         event.preventDefault();
         elements.fileInput.click();
       }
@@ -1566,7 +2010,7 @@
     ["dragenter", "dragover"].forEach((name) =>
       elements.dropZone.addEventListener(name, (event) => {
         event.preventDefault();
-        if (!isRunningStatus(state.run.status)) elements.dropZone.classList.add("dragging");
+        if (!memoryControlsLocked()) elements.dropZone.classList.add("dragging");
       })
     );
     ["dragleave", "drop"].forEach((name) =>
@@ -1577,6 +2021,11 @@
     );
     elements.dropZone.addEventListener("drop", (event) => uploadFiles(event.dataTransfer.files));
     elements.startRunButton.addEventListener("click", startRun);
+    elements.memoryLibrarySelect.addEventListener("change", () => {
+      selectMemoryLibrary(elements.memoryLibrarySelect.value);
+    });
+    elements.newMemoryButton.addEventListener("click", createMemoryLibrary);
+    elements.deleteMemoryButton.addEventListener("click", deleteMemoryLibrary);
 
     elements.inputGrid.addEventListener("click", (event) => {
       const button = event.target.closest("[data-delete-input]");
@@ -1598,6 +2047,13 @@
         renderMemory();
       });
     });
+
+    elements.stagePanel.addEventListener("pointerdown", () => {
+      state.stagePointerActive = true;
+    });
+    window.addEventListener("pointerup", releaseStagePointer);
+    window.addEventListener("pointercancel", releaseStagePointer);
+    window.addEventListener("blur", releaseStagePointer);
 
     elements.stagePanel.addEventListener("click", (event) => {
       const button = event.target.closest("[data-asset-url]");
@@ -1621,6 +2077,7 @@
 
   async function initialize() {
     bindEvents();
+    await refreshMemoryLibraries({ quiet: true, preferServerSelection: true });
     await Promise.all([
       refreshInputs({ quiet: true }),
       refreshResults({ quiet: true }),

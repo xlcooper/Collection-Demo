@@ -24,11 +24,12 @@ from object_memory.scene_guidance import (
 def target_payload(
     target_id: str,
     *,
+    object_name_zh: str = "水瓶",
     sam_text_prompt: str = "water bottle",
 ) -> dict[str, Any]:
     return {
         "target_id": target_id,
-        "object_name_zh": "水瓶",
+        "object_name_zh": object_name_zh,
         "sam_text_prompt": sam_text_prompt,
         "priority": "high",
         "confidence": 0.93,
@@ -91,6 +92,37 @@ class SceneGuidanceResponseTests(unittest.TestCase):
         self.assertEqual(response.images[0].targets[0].sam_text_prompt, "water bottle")
         self.assertEqual(response.images[1].targets, [])
 
+    def test_response_preserves_transparent_water_bottle_prompt(self) -> None:
+        raw = json.dumps(
+            {
+                "images": [
+                    guidance_payload(
+                        "src_one",
+                        targets=[
+                            target_payload(
+                                "target_001",
+                                object_name_zh="透明水瓶",
+                                sam_text_prompt="transparent water bottle",
+                            )
+                        ],
+                    )
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+        response = parse_scene_guidance_response(
+            raw,
+            expected_source_ids=["src_one"],
+            max_targets_per_image=12,
+        )
+
+        self.assertEqual(response.images[0].targets[0].object_name_zh, "透明水瓶")
+        self.assertEqual(
+            response.images[0].targets[0].sam_text_prompt,
+            "transparent water bottle",
+        )
+
     def test_response_rejects_missing_source(self) -> None:
         raw = json.dumps({"images": [guidance_payload("src_one")]})
 
@@ -101,17 +133,10 @@ class SceneGuidanceResponseTests(unittest.TestCase):
                 max_targets_per_image=12,
             )
 
-    def test_response_allows_with_for_features_of_the_same_object(self) -> None:
-        for prompt in (
-            "plastic cup with red straw",
-            "transparent water bottle with handle",
-            "white plastic water bottle with handle",
-            "red plastic drink cup lid with straw",
-            "transparent plastic drink cup with red text",
-            "transparent plastic drink cup with removable red straw",
-            "plastic drink cup with straw and cartoon lid",
-            "water bottle with handle and white cap",
-            "bottle of water",
+    def test_schema_keeps_with_and_backward_compatible(self) -> None:
+        for object_name_zh, prompt in (
+            ("带红色吸管的饮料杯", "plastic cup with red straw"),
+            ("带吸管和卡通杯盖的饮料杯", "plastic drink cup with straw and cartoon lid"),
         ):
             with self.subTest(prompt=prompt):
                 raw = json.dumps(
@@ -122,6 +147,7 @@ class SceneGuidanceResponseTests(unittest.TestCase):
                                 targets=[
                                     target_payload(
                                         "target_001",
+                                        object_name_zh=object_name_zh,
                                         sam_text_prompt=prompt,
                                     )
                                 ],
@@ -234,9 +260,13 @@ class SceneGuidancePromptTests(unittest.TestCase):
             self.assertIn("computer mouse", all_text)
             self.assertIn("water bottle", all_text)
             self.assertIn("drink cup", all_text)
-            self.assertIn("Do not add color, material, transparency", all_text)
-            self.assertIn("`with` and `and` may describe", all_text)
-            self.assertIn("never use them to join separate objects", all_text)
+            self.assertIn("stable base category from visible shape", all_text)
+            self.assertIn("`transparent water bottle`", all_text)
+            self.assertIn("Never relabel a bottle as a cup", all_text)
+            self.assertIn("at most one clearly visible", all_text)
+            self.assertIn("verify this cross-language match", all_text)
+            self.assertIn("Do not append feature clauses with `with` or `and`", all_text)
+            self.assertIn("Never use `and` to join separate objects", all_text)
             self.assertIn("Never use `or`", all_text)
             self.assertIn("name the whole object concept", all_text)
             self.assertIn("within 64 characters", all_text)

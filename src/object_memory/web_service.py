@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -27,9 +28,10 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
+from pydantic import BaseModel, ConfigDict
 
 from .config import load_config, resolve_memory_root
-from .memory_store import CORE_TABLES
+from .memory_store import CORE_TABLES, SCHEMA_VERSION
 from .pipeline import SUPPORTED_IMAGE_SUFFIXES
 
 
@@ -46,6 +48,11 @@ MEMORY_IMAGE_PREFIXES = frozenset({"sources", "proposals", "objects"})
 AUDIT_JSON_PREFIXES = frozenset({"raw_responses", "run_reports"})
 ACTIVE_RUN_STATUSES = frozenset({"starting", "running"})
 PROCESS_LOG_TAIL_BYTES = 16 * 1024
+MEMORY_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+MEMORY_DIRECTORY_PREFIX = "memory_"
+MEMORY_METADATA_FILENAME = "memory_info.json"
+MEMORY_SELECTION_FILENAME = "selected_memory.json"
+MAX_MEMORY_LABEL_LENGTH = 40
 
 
 class SafePathError(ValueError):
@@ -62,6 +69,28 @@ class ExperimentBusyError(RuntimeError):
 
 class MemoryReadError(RuntimeError):
     """Raised when an initialized memory database cannot be read safely."""
+
+
+class MemoryLibraryError(ValueError):
+    """Raised when a managed memory library request is invalid."""
+
+
+class MemoryMutationError(RuntimeError):
+    """Raised when a library mutation cannot preserve its storage invariants."""
+
+
+class MemoryCreateRequest(BaseModel):
+    """Human-facing label for a new server-generated memory library."""
+
+    model_config = ConfigDict(extra="forbid")
+    label: str = ""
+
+
+class RunStartRequest(BaseModel):
+    """Only the opaque managed library ID may be selected by the browser."""
+
+    model_config = ConfigDict(extra="forbid")
+    memory_id: str = "default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +175,388 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise MemoryReadError(f"JSON artifact {path.name} must contain an object")
     return payload
+
+
+def _validated_memory_id(value: str) -> str:
+    memory_id = str(value or "").strip()
+    if not MEMORY_ID.fullmatch(memory_id):
+        raise MemoryLibraryError(
+            "Memory library ID must use lowercase letters, digits, underscores, "
+            "or hyphens"
+        )
+    return memory_id
+
+
+def _validated_memory_label(value: str) -> str:
+    label = " ".join(str(value or "").strip().split())
+    if not label:
+        return datetime.now().astimezone().strftime("实验记忆 %Y-%m-%d %H:%M")
+    if len(label) > MAX_MEMORY_LABEL_LENGTH:
+        raise MemoryLibraryError(
+            f"Memory library name must not exceed {MAX_MEMORY_LABEL_LENGTH} characters"
+        )
+    if any(ord(character) < 32 for character in label):
+        raise MemoryLibraryError("Memory library name contains control characters")
+    return label
+
+
+def resolve_memory_library_root(settings: WebSettings, memory_id: str) -> Path:
+    """Resolve one opaque library ID to an exact direct child of data/."""
+
+    safe_id = _validated_memory_id(memory_id)
+    project_root = settings.project_root.expanduser().resolve()
+    catalog_root = project_root / "data"
+    if catalog_root.is_symlink():
+        raise SafePathError("The managed data directory must not be a symbolic link")
+    if catalog_root.resolve() != catalog_root.absolute():
+        raise SafePathError("The managed data directory must resolve inside the project")
+    if catalog_root.exists() and not catalog_root.is_dir():
+        raise SafePathError("The managed data path must be a directory")
+    if catalog_root.parent != project_root:
+        raise SafePathError("The managed data directory is outside the project root")
+    default_root = catalog_root / "memory"
+    configured_root = settings.memory_root.expanduser()
+    if not configured_root.is_absolute():
+        configured_root = settings.project_root / configured_root
+    if configured_root.absolute() != default_root:
+        raise SafePathError("The Web default memory library must be project data/memory")
+    if default_root.is_symlink():
+        raise SafePathError("The default memory library must not be a symbolic link")
+    unresolved = (
+        default_root
+        if safe_id == "default"
+        else catalog_root / f"{MEMORY_DIRECTORY_PREFIX}{safe_id}"
+    )
+    if unresolved.is_symlink():
+        raise SafePathError("Symbolic-link memory libraries are not allowed")
+    resolved = unresolved.resolve()
+    if resolved == catalog_root or resolved.parent != catalog_root:
+        raise SafePathError("Memory library is outside the managed data directory")
+    if safe_id != "default" and resolved == default_root:
+        raise SafePathError("Memory library ID collides with the default library")
+    return resolved
+
+
+def _memory_library_metadata(root: Path) -> dict[str, Any]:
+    metadata_path = root / MEMORY_METADATA_FILENAME
+    if metadata_path.is_symlink() or not metadata_path.is_file():
+        return {}
+    try:
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _memory_library_has_partial_content(root: Path) -> bool:
+    if not root.is_dir():
+        return False
+    try:
+        return any(path.name != MEMORY_METADATA_FILENAME for path in root.iterdir())
+    except OSError:
+        return True
+
+
+def _memory_library_item(
+    settings: WebSettings,
+    memory_id: str,
+    *,
+    active_id: str | None = None,
+) -> dict[str, Any]:
+    """Return a small read-only health summary for one managed library."""
+
+    safe_id = _validated_memory_id(memory_id)
+    root = resolve_memory_library_root(settings, safe_id)
+    metadata = _memory_library_metadata(root)
+    label_value = metadata.get("label")
+    label = (
+        str(label_value).strip()
+        if isinstance(label_value, str) and str(label_value).strip()
+        else ("默认记忆库" if safe_id == "default" else f"实验记忆 {safe_id}")
+    )
+    database = root / settings.database_filename
+    counts = {"active_objects": 0, "observations": 0, "runs": 0}
+    latest_run_at: str | None = None
+    schema_version: int | None = None
+    issue: str | None = None
+    issue_code: str | None = None
+    status = "empty"
+    continuable = True
+
+    if root.exists() and not root.is_dir():
+        status = "unreadable"
+        continuable = False
+        issue_code = "invalid_library_root"
+        issue = "Memory library root must be a directory"
+    elif database.is_symlink():
+        status = "unreadable"
+        continuable = False
+        issue_code = "database_symlink"
+        issue = "memory.sqlite must not be a symbolic link"
+    elif database.is_file():
+        try:
+            with closing(_open_read_only_database(database)) as connection:
+                schema_version = int(
+                    connection.execute("PRAGMA user_version").fetchone()[0]
+                )
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                missing = set(CORE_TABLES) - tables
+                if schema_version not in {1, SCHEMA_VERSION}:
+                    raise MemoryReadError(
+                        f"Unsupported schema version {schema_version}"
+                    )
+                if missing:
+                    raise MemoryReadError(
+                        f"Memory database is missing tables: {sorted(missing)}"
+                    )
+                counts = {
+                    "active_objects": int(
+                        connection.execute(
+                            "SELECT COUNT(*) FROM objects WHERE status = 'active'"
+                        ).fetchone()[0]
+                    ),
+                    "observations": int(
+                        connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0]
+                    ),
+                    "runs": int(
+                        connection.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+                    ),
+                }
+                latest = connection.execute(
+                    "SELECT started_at FROM runs ORDER BY started_at DESC, id DESC LIMIT 1"
+                ).fetchone()
+                latest_run_at = str(latest[0]) if latest and latest[0] else None
+                incomplete_runs = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM runs WHERE status != 'completed'"
+                    ).fetchone()[0]
+                )
+                incomplete_sources = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM source_images WHERE status != 'completed'"
+                    ).fetchone()[0]
+                )
+                incomplete_proposals = int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM proposals WHERE status IN ('pending', 'failed')"
+                    ).fetchone()[0]
+                )
+                if incomplete_runs or incomplete_sources or incomplete_proposals:
+                    status = "review_only"
+                    continuable = False
+                    issue_code = "incomplete_run"
+                    issue = (
+                        "This library contains an incomplete or failed run; review it "
+                        "or start a new blank library"
+                    )
+                else:
+                    status = "ready"
+                    required_directories = (
+                        "sources",
+                        "proposals",
+                        "objects",
+                        "raw_responses",
+                        "run_reports",
+                    )
+                    invalid_directories = [
+                        name
+                        for name in required_directories
+                        if (root / name).is_symlink() or not (root / name).is_dir()
+                    ]
+                    if invalid_directories:
+                        status = "review_only"
+                        continuable = False
+                        issue_code = "missing_asset_directories"
+                        issue = (
+                            "This library is missing required asset directories: "
+                            f"{invalid_directories}"
+                        )
+        except (MemoryReadError, sqlite3.Error, OSError) as exc:
+            status = "unreadable"
+            continuable = False
+            issue_code = "database_unreadable"
+            issue = str(exc)
+    elif _memory_library_has_partial_content(root):
+        status = "review_only"
+        continuable = False
+        issue_code = "partial_without_database"
+        issue = "This directory contains partial assets but no memory.sqlite"
+
+    modified_at: str | None = None
+    try:
+        if root.exists():
+            modified_at = datetime.fromtimestamp(
+                max(
+                    [root.stat().st_mtime]
+                    + [path.stat().st_mtime for path in root.iterdir() if not path.is_symlink()]
+                ),
+                timezone.utc,
+            ).isoformat()
+    except OSError:
+        modified_at = None
+
+    if active_id == safe_id:
+        status = "running"
+        continuable = False
+        issue_code = None
+        issue = None
+
+    return {
+        "id": safe_id,
+        "label": label,
+        "status": status,
+        "continuable": continuable,
+        "deletable": active_id != safe_id,
+        "active": active_id == safe_id,
+        "initialized": database.is_file() and status != "unreadable",
+        "schema_version": schema_version,
+        "counts": counts,
+        "latest_run_at_utc": latest_run_at,
+        "modified_at_utc": modified_at,
+        "issue_code": issue_code,
+        "issue": issue,
+    }
+
+
+def list_memory_libraries(
+    settings: WebSettings,
+    *,
+    active_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Enumerate only the canonical default and safe direct-child memory roots."""
+
+    ids = {"default"}
+    resolve_memory_library_root(settings, "default")
+    catalog_root = settings.project_root.expanduser().resolve() / "data"
+    if catalog_root.is_dir():
+        for path in catalog_root.iterdir():
+            if path.is_symlink() or not path.is_dir():
+                continue
+            if not path.name.startswith(MEMORY_DIRECTORY_PREFIX):
+                continue
+            memory_id = path.name[len(MEMORY_DIRECTORY_PREFIX) :]
+            if memory_id != "default" and MEMORY_ID.fullmatch(memory_id):
+                ids.add(memory_id)
+    items = [
+        _memory_library_item(settings, memory_id, active_id=active_id)
+        for memory_id in ids
+    ]
+    default_items = [item for item in items if item["id"] == "default"]
+    managed_items = sorted(
+        (item for item in items if item["id"] != "default"),
+        key=lambda item: (
+            str(item.get("modified_at_utc") or ""),
+            str(item["id"]),
+        ),
+        reverse=True,
+    )
+    return default_items + managed_items
+
+
+def read_memory_report_for_run(
+    memory_root: Path,
+    run_id: str,
+) -> dict[str, Any] | None:
+    """Read the exact internal report whose filename and payload match a run ID."""
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", run_id):
+        raise MemoryReadError("Run ID is not safe for an internal report filename")
+    unresolved_root = memory_root.expanduser()
+    if unresolved_root.is_symlink():
+        raise MemoryReadError("Memory root must not be a symbolic link")
+    root = unresolved_root.resolve()
+    report_root = root / "run_reports"
+    report_path = report_root / f"{run_id}.json"
+    if report_root.is_symlink() or report_path.is_symlink():
+        raise MemoryReadError("Internal report paths must not be symbolic links")
+    if report_path.resolve().parent != report_root:
+        raise MemoryReadError("Internal report is outside its memory library")
+    report = _read_json_object(report_path)
+    if report is None:
+        return None
+    report_run = report.get("run") if isinstance(report.get("run"), dict) else {}
+    if str(report_run.get("run_id") or "") != run_id:
+        raise MemoryReadError("Internal report run ID does not match its filename")
+    return report
+
+
+def read_latest_memory_report(
+    memory_root: Path,
+    database_filename: str = "memory.sqlite",
+) -> dict[str, Any] | None:
+    """Read the report for the newest SQLite run, never by file mtime."""
+
+    unresolved_root = memory_root.expanduser()
+    if unresolved_root.is_symlink():
+        raise MemoryReadError("Memory root must not be a symbolic link")
+    root = unresolved_root.resolve()
+    database = root / database_filename
+    if database.is_symlink():
+        raise MemoryReadError("memory.sqlite must not be a symbolic link")
+    if not database.is_file():
+        return None
+    try:
+        with closing(_open_read_only_database(database)) as connection:
+            latest = connection.execute(
+                "SELECT id FROM runs ORDER BY started_at DESC, id DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise MemoryReadError(f"Cannot find latest memory run: {exc}") from exc
+    if latest is None:
+        return None
+    return read_memory_report_for_run(root, str(latest[0]))
+
+
+def read_memory_run_timing(
+    memory_root: Path,
+    run_id: str,
+    database_filename: str = "memory.sqlite",
+) -> dict[str, Any]:
+    """Recover stable timing fields for a historical library report."""
+
+    unresolved_root = memory_root.expanduser()
+    if unresolved_root.is_symlink():
+        raise MemoryReadError("Memory root must not be a symbolic link")
+    root = unresolved_root.resolve()
+    database = root / database_filename
+    if database.is_symlink():
+        raise MemoryReadError("memory.sqlite must not be a symbolic link")
+    if not database.is_file():
+        return {}
+    try:
+        with closing(_open_read_only_database(database)) as connection:
+            row = connection.execute(
+                "SELECT started_at, completed_at FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise MemoryReadError(f"Cannot read memory run timing: {exc}") from exc
+    if row is None:
+        return {}
+    started_at = str(row[0]) if row[0] else None
+    completed_at = str(row[1]) if row[1] else None
+    elapsed_seconds: float | None = None
+    if started_at and completed_at:
+        try:
+            started = datetime.fromisoformat(started_at)
+            completed = datetime.fromisoformat(completed_at)
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if completed.tzinfo is None:
+                completed = completed.replace(tzinfo=timezone.utc)
+            elapsed_seconds = round(max(0.0, (completed - started).total_seconds()), 3)
+        except ValueError:
+            elapsed_seconds = None
+    return {
+        "started_at_utc": started_at,
+        "completed_at_utc": completed_at,
+        "elapsed_seconds": elapsed_seconds,
+    }
 
 
 def _is_formal_failure_report(report: dict[str, Any] | None) -> bool:
@@ -469,6 +880,88 @@ class ExperimentManager:
         self._process: subprocess.Popen[bytes] | None = None
         self._log_handle: Any = None
         self._current_run_dir = self._find_latest_run_dir()
+        self._selected_memory_id = self._load_selected_memory_id()
+
+    def _selection_path(self) -> Path:
+        return self.settings.run_state_root / MEMORY_SELECTION_FILENAME
+
+    def _load_selected_memory_id(self) -> str:
+        """Restore the last explicit UI selection without trusting browser paths."""
+
+        path = self._selection_path()
+        if path.is_symlink():
+            raise SafePathError("The memory selection file must not be a symbolic link")
+        candidate: object = None
+        try:
+            payload = _read_json_object(path)
+        except MemoryReadError:
+            payload = None
+        if payload is not None:
+            candidate = payload.get("memory_id")
+        if candidate is None and self._current_run_dir is not None:
+            try:
+                state = _read_json_object(self._state_path(self._current_run_dir))
+            except MemoryReadError:
+                state = None
+            if state is not None:
+                candidate = state.get("memory_id")
+        try:
+            memory_id = _validated_memory_id(str(candidate or "default"))
+        except MemoryLibraryError:
+            memory_id = "default"
+        root = resolve_memory_library_root(self.settings, memory_id)
+        if memory_id != "default" and not root.is_dir():
+            return "default"
+        return memory_id
+
+    def _set_selected_memory_id_locked(self, memory_id: str) -> str:
+        safe_id = _validated_memory_id(memory_id)
+        root = resolve_memory_library_root(self.settings, safe_id)
+        if safe_id != "default" and not root.is_dir():
+            raise FileNotFoundError(safe_id)
+        selection_path = self._selection_path()
+        if selection_path.is_symlink():
+            raise SafePathError("The memory selection file must not be a symbolic link")
+        _write_json_atomic(
+            selection_path,
+            {"memory_id": safe_id, "updated_at_utc": _utc_now()},
+        )
+        self._selected_memory_id = safe_id
+        return safe_id
+
+    def _memory_for_read_locked(
+        self,
+        memory_id: str | None,
+    ) -> tuple[str, Path]:
+        """Resolve an explicit ID or the durable UI selection under one lock."""
+
+        explicit = memory_id is not None
+        safe_id = _validated_memory_id(
+            memory_id if explicit else self._selected_memory_id
+        )
+        root = resolve_memory_library_root(self.settings, safe_id)
+        if safe_id != "default" and not root.is_dir():
+            if explicit:
+                raise FileNotFoundError(safe_id)
+            safe_id = self._set_selected_memory_id_locked("default")
+            root = resolve_memory_library_root(self.settings, safe_id)
+        return safe_id, root
+
+    def selected_memory_id(self) -> str:
+        """Return the persisted selection, repairing a vanished managed root."""
+
+        with self._lock:
+            safe_id, _ = self._memory_for_read_locked(None)
+            return safe_id
+
+    def memory_for_read(
+        self,
+        memory_id: str | None = None,
+    ) -> tuple[str, Path]:
+        """Resolve one readable managed root without accepting browser paths."""
+
+        with self._lock:
+            return self._memory_for_read_locked(memory_id)
 
     def _find_latest_run_dir(self) -> Path | None:
         root = self.settings.run_state_root
@@ -660,28 +1153,262 @@ class ExperimentManager:
         with self._lock:
             return self._running_locked()
 
+    def _active_memory_id_locked(self) -> str | None:
+        state = self._refresh_locked()
+        if not state or state.get("status") not in ACTIVE_RUN_STATUSES:
+            return None
+        try:
+            return _validated_memory_id(str(state.get("memory_id") or "default"))
+        except MemoryLibraryError:
+            return "default"
+
+    def memory_libraries(self) -> dict[str, Any]:
+        """List server-managed libraries and the immutable active selection."""
+
+        with self._lock:
+            active_id = self._active_memory_id_locked()
+            items = list_memory_libraries(self.settings, active_id=active_id)
+            known_ids = {str(item["id"]) for item in items}
+            selected_id = active_id or self._selected_memory_id
+            if selected_id not in known_ids:
+                selected_id = self._set_selected_memory_id_locked("default")
+            return {
+                "selected_id": selected_id,
+                "active_id": active_id,
+                "locked": active_id is not None,
+                "items": items,
+            }
+
+    def select_memory_library(self, memory_id: str) -> dict[str, Any]:
+        """Persist one existing library as the UI selection between page loads."""
+
+        with self._lock:
+            if self._running_locked():
+                raise ExperimentBusyError(
+                    "Memory libraries are locked while an experiment is running"
+                )
+            safe_id = self._set_selected_memory_id_locked(memory_id)
+            return _memory_library_item(self.settings, safe_id)
+
+    def memory_root_for_read(self, memory_id: str | None = None) -> Path:
+        """Resolve a listed library without permitting browser paths."""
+
+        _, root = self.memory_for_read(memory_id)
+        return root
+
+    def create_memory_library(self, label: str) -> dict[str, Any]:
+        """Create one empty Git-manageable root with a server-generated ID."""
+
+        with self._lock:
+            if self._running_locked():
+                raise ExperimentBusyError(
+                    "Memory libraries are locked while an experiment is running"
+                )
+            safe_label = _validated_memory_label(label)
+            existing_labels = {
+                str(item["label"]).casefold()
+                for item in list_memory_libraries(self.settings)
+            }
+            if safe_label.casefold() in existing_labels:
+                raise FileExistsError(safe_label)
+            for _ in range(8):
+                timestamp = datetime.now(timezone.utc).strftime(
+                    "%Y%m%dT%H%M%S%fZ"
+                ).lower()
+                memory_id = f"{timestamp}_{secrets.token_hex(3)}"
+                root = resolve_memory_library_root(self.settings, memory_id)
+                try:
+                    root.mkdir(parents=False, exist_ok=False)
+                except FileExistsError:
+                    continue
+                previous_selection = self._selected_memory_id
+                try:
+                    _write_json_atomic(
+                        root / MEMORY_METADATA_FILENAME,
+                        {
+                            "schema_version": 1,
+                            "id": memory_id,
+                            "label": safe_label,
+                            "created_at_utc": _utc_now(),
+                        },
+                    )
+                    self._set_selected_memory_id_locked(memory_id)
+                except Exception:
+                    self._selected_memory_id = previous_selection
+                    shutil.rmtree(root)
+                    raise
+                return _memory_library_item(self.settings, memory_id)
+            raise FileExistsError("Could not allocate a unique memory library ID")
+
+    def delete_memory_library(self, memory_id: str) -> dict[str, Any]:
+        """Transactionally remove one library from the managed catalog."""
+
+        with self._lock:
+            if self._running_locked():
+                raise ExperimentBusyError(
+                    "Memory libraries are locked while an experiment is running"
+                )
+            safe_id = _validated_memory_id(memory_id)
+            root = resolve_memory_library_root(self.settings, safe_id)
+            if safe_id != "default" and not root.is_dir():
+                raise FileNotFoundError(safe_id)
+            if root.is_symlink():
+                raise SafePathError("Symbolic-link memory libraries are not allowed")
+            if root.exists() and not root.is_dir():
+                raise MemoryLibraryError("Memory library root must be a directory")
+            owned_run_id: str | None = None
+            try:
+                owned_report = read_latest_memory_report(
+                    root,
+                    self.settings.database_filename,
+                )
+                owned_run = (
+                    owned_report.get("run")
+                    if isinstance(owned_report, dict)
+                    and isinstance(owned_report.get("run"), dict)
+                    else {}
+                )
+                owned_run_id = str(owned_run.get("run_id") or "") or None
+            except (MemoryReadError, OSError):
+                owned_run_id = None
+            state = self._read_state_locked()
+            state_belongs_to_library = bool(
+                state is not None
+                and str(state.get("memory_id") or "default") == safe_id
+                and self._current_run_dir is not None
+            )
+            original_state = dict(state) if state_belongs_to_library and state else None
+            original_selection = self._selected_memory_id
+            deletion_root = self.settings.run_state_root / "deletions"
+            if deletion_root.is_symlink():
+                raise SafePathError("Deletion staging directory must not be a symbolic link")
+            deletion_root.mkdir(parents=True, exist_ok=True)
+            tombstone = deletion_root / f"{root.name}.{uuid4().hex}.deleting"
+            if tombstone.resolve().parent != deletion_root.resolve():
+                raise SafePathError("Deletion staging path is outside the Web run state")
+
+            moved_root = False
+            recreated_default = False
+            selection_changed = False
+            state_changed = False
+            try:
+                if root.exists():
+                    os.replace(root, tombstone)
+                    moved_root = True
+                if safe_id == "default":
+                    root.mkdir(parents=False, exist_ok=False)
+                    recreated_default = True
+                if self._selected_memory_id == safe_id and safe_id != "default":
+                    self._set_selected_memory_id_locked("default")
+                    selection_changed = True
+                if state_belongs_to_library and state is not None:
+                    updated_state = {**state, "memory_deleted_at_utc": _utc_now()}
+                    assert self._current_run_dir is not None
+                    _write_json_atomic(
+                        self._state_path(self._current_run_dir),
+                        updated_state,
+                    )
+                    state_changed = True
+            except Exception as exc:
+                rollback_errors: list[str] = []
+                if recreated_default:
+                    try:
+                        root.rmdir()
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"default root: {rollback_exc}")
+                if moved_root and tombstone.exists():
+                    try:
+                        os.replace(tombstone, root)
+                    except OSError as rollback_exc:
+                        rollback_errors.append(f"library root: {rollback_exc}")
+                if selection_changed:
+                    try:
+                        self._set_selected_memory_id_locked(original_selection)
+                    except Exception as rollback_exc:  # noqa: BLE001
+                        rollback_errors.append(f"selection: {rollback_exc}")
+                else:
+                    self._selected_memory_id = original_selection
+                if state_changed and original_state is not None:
+                    try:
+                        assert self._current_run_dir is not None
+                        _write_json_atomic(
+                            self._state_path(self._current_run_dir),
+                            original_state,
+                        )
+                    except Exception as rollback_exc:  # noqa: BLE001
+                        rollback_errors.append(f"run state: {rollback_exc}")
+                if rollback_errors:
+                    raise MemoryMutationError(
+                        "Memory deletion failed and rollback needs manual review: "
+                        + "; ".join(rollback_errors)
+                    ) from exc
+                raise
+
+            cleanup_pending = False
+            if moved_root:
+                try:
+                    shutil.rmtree(tombstone)
+                except OSError:
+                    cleanup_pending = True
+            if owned_run_id and self.settings.report_path.is_file():
+                try:
+                    external_report = _read_json_object(self.settings.report_path)
+                    external_run = (
+                        external_report.get("run")
+                        if isinstance(external_report, dict)
+                        and isinstance(external_report.get("run"), dict)
+                        else {}
+                    )
+                    if str(external_run.get("run_id") or "") == owned_run_id:
+                        self.settings.report_path.unlink()
+                except (MemoryReadError, OSError):
+                    pass
+
+            response: dict[str, Any] = {
+                "deleted_id": safe_id,
+                "action": "cleared" if safe_id == "default" else "deleted",
+                "selected_id": self._selected_memory_id,
+                "cleanup_pending": cleanup_pending,
+            }
+            if safe_id == "default":
+                response["item"] = _memory_library_item(self.settings, "default")
+            return response
+
     def _new_run_dir(self) -> Path:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         run_dir = self.settings.run_state_root / f"web_run_{timestamp}"
         run_dir.mkdir(parents=True, exist_ok=False)
         return run_dir
 
-    def _command(self, events_path: Path) -> list[str]:
-        return [
+    def _command(
+        self,
+        events_path: Path,
+        memory_root: Path | None = None,
+        *,
+        validate_demo: bool = True,
+    ) -> list[str]:
+        selected_root = (memory_root or self.settings.memory_root).resolve()
+        command = [
             str(self.settings.python_executable),
             str(self.settings.project_root / "scripts" / "run_object_memory.py"),
             "--input-dir",
             str(self.settings.input_root),
             "--memory-root",
-            str(self.settings.memory_root),
-            "--validate-demo",
-            "--report",
-            str(self.settings.report_path),
-            "--progress-file",
-            str(events_path),
+            str(selected_root),
         ]
+        if validate_demo:
+            command.append("--validate-demo")
+        command.extend(
+            [
+                "--report",
+                str(self.settings.report_path),
+                "--progress-file",
+                str(events_path),
+            ]
+        )
+        return command
 
-    def start(self) -> dict[str, Any]:
+    def start(self, memory_id: str = "default") -> dict[str, Any]:
         """Start the canonical CLI with fixed paths and no browser-supplied flags."""
 
         with self._lock:
@@ -689,6 +1416,17 @@ class ExperimentManager:
                 raise ExperimentBusyError("An experiment is already running")
             if not list_input_images(self.settings.input_root):
                 raise InputValidationError("Upload at least one input image first")
+            safe_memory_id = _validated_memory_id(memory_id)
+            memory_root = resolve_memory_library_root(self.settings, safe_memory_id)
+            if safe_memory_id != "default" and not memory_root.is_dir():
+                raise FileNotFoundError(safe_memory_id)
+            library = _memory_library_item(self.settings, safe_memory_id)
+            if not library["continuable"]:
+                raise MemoryLibraryError(
+                    str(library.get("issue") or "This memory library cannot be continued")
+                )
+            self._set_selected_memory_id_locked(safe_memory_id)
+            validate_demo = int(library["counts"].get("runs") or 0) == 0
 
             run_dir = self._new_run_dir()
             self._current_run_dir = run_dir
@@ -712,6 +1450,14 @@ class ExperimentManager:
                 "pid": None,
                 "exit_code": None,
                 "result_status": None,
+                "memory_id": safe_memory_id,
+                "memory_label": library["label"],
+                "validation_mode": (
+                    "fresh_demo" if validate_demo else "incremental"
+                ),
+                "memory_root_relative": memory_root.relative_to(
+                    self.settings.project_root
+                ).as_posix(),
                 "report_mtime_before_ns": (
                     self.settings.report_path.stat().st_mtime_ns
                     if self.settings.report_path.is_file()
@@ -725,7 +1471,11 @@ class ExperimentManager:
             child_environment.pop("OBJECT_MEMORY_WEB_PASSWORD", None)
             try:
                 process = subprocess.Popen(
-                    self._command(events_path),
+                    self._command(
+                        events_path,
+                        memory_root,
+                        validate_demo=validate_demo,
+                    ),
                     cwd=self.settings.project_root,
                     env=child_environment,
                     stdin=subprocess.DEVNULL,
@@ -770,82 +1520,174 @@ class ExperimentManager:
             watcher.start()
             return self.current(after_sequence=0)
 
+    def _release_watched_process_locked(
+        self,
+        run_dir: Path,
+        process: subprocess.Popen[bytes],
+    ) -> None:
+        """Clear only the handles owned by one watcher while holding ``_lock``."""
+
+        owns_process = self._process is process
+        owns_run_without_process = (
+            self._process is None and self._current_run_dir == run_dir
+        )
+        if owns_process or owns_run_without_process:
+            log_handle = self._log_handle
+            self._log_handle = None
+            if log_handle is not None:
+                try:
+                    log_handle.close()
+                except OSError:
+                    pass
+        if owns_process:
+            self._process = None
+
     def _watch_process(
         self,
         run_dir: Path,
         process: subprocess.Popen[bytes],
     ) -> None:
-        while process.poll() is None:
+        last_state: dict[str, Any] = {}
+        watcher_error: Exception | None = None
+        exit_code: int | None = None
+        try:
+            while process.poll() is None:
+                with self._lock:
+                    if self._current_run_dir == run_dir:
+                        try:
+                            refreshed = self._refresh_locked()
+                            if refreshed is not None:
+                                last_state = dict(refreshed)
+                        except Exception as exc:  # noqa: BLE001 - persist evidence
+                            watcher_error = watcher_error or exc
+                time.sleep(0.5)
+            exit_code = process.wait()
             with self._lock:
-                if self._current_run_dir == run_dir:
-                    self._refresh_locked()
-            time.sleep(0.5)
-        exit_code = process.wait()
-        with self._lock:
-            if self._current_run_dir != run_dir:
-                return
-            state = self._read_state_locked() or {}
-            state = self._apply_latest_event_locked(state)
-            report = self._current_report_locked(state)
-            result_status = report.get("status") if report else None
-            completed = exit_code == 0
-            has_failure_report = _is_formal_failure_report(report)
-            unexpected_exit = not completed and not has_failure_report
-            if completed:
-                message = "Experiment completed."
-            elif unexpected_exit:
-                message = (
-                    "Experiment process exited unexpectedly; inspect "
-                    "process_error.log_tail."
+                if self._current_run_dir != run_dir:
+                    self._release_watched_process_locked(run_dir, process)
+                    return
+                try:
+                    state = self._read_state_locked() or dict(last_state)
+                    state = self._apply_latest_event_locked(state)
+                    last_state = dict(state)
+                except Exception as exc:  # noqa: BLE001 - repair broken state JSON
+                    watcher_error = watcher_error or exc
+                    state = dict(last_state)
+
+                report: dict[str, Any] | None = None
+                if watcher_error is None:
+                    try:
+                        report = self._current_report_locked(state)
+                    except Exception as exc:  # noqa: BLE001 - persist report failure
+                        watcher_error = exc
+
+                if watcher_error is not None:
+                    now = _utc_now()
+                    state.setdefault("web_run_id", run_dir.name)
+                    state.setdefault("memory_id", self._selected_memory_id)
+                    state.setdefault("status", "running")
+                    state.setdefault("stage", "watcher")
+                    state.setdefault("overall_percent", 0.0)
+                    state.setdefault("last_sequence", 0)
+                    state.setdefault("started_at_utc", now)
+                    process_error = self._unexpected_process_error_locked(
+                        run_dir,
+                        exit_code=exit_code,
+                        kind="watcher_artifact_error",
+                    )
+                    process_error.update(
+                        {
+                            "error_type": type(watcher_error).__name__,
+                            "message": str(watcher_error),
+                        }
+                    )
+                    state.update(
+                        {
+                            "status": "failed",
+                            "stage_status": "failed",
+                            "completed_at_utc": now,
+                            "updated_at_utc": now,
+                            "elapsed_seconds": round(
+                                _elapsed_since(state.get("started_at_utc")),
+                                3,
+                            ),
+                            "exit_code": exit_code,
+                            "result_status": None,
+                            "message": (
+                                "Experiment watcher could not read its state or report; "
+                                "inspect process_error."
+                            ),
+                            "process_error": process_error,
+                        }
+                    )
+                    self._release_watched_process_locked(run_dir, process)
+                    _write_json_atomic(self._state_path(run_dir), state)
+                    return
+
+                result_status = report.get("status") if report else None
+                completed = (
+                    exit_code == 0
+                    and report is not None
+                    and result_status == "passed"
                 )
-            else:
-                message = (
-                    "Experiment finished with a failed result; inspect "
-                    "the report and audit trail."
+                has_failure_report = _is_formal_failure_report(report)
+                unexpected_exit = not completed and not has_failure_report
+                if completed:
+                    message = "Experiment completed."
+                elif unexpected_exit:
+                    message = (
+                        "Experiment process exited unexpectedly; inspect "
+                        "process_error.log_tail."
+                    )
+                else:
+                    message = (
+                        "Experiment finished with a failed result; inspect "
+                        "the report and audit trail."
+                    )
+                state.update(
+                    {
+                        "status": "completed" if completed else "failed",
+                        "stage_status": "completed" if completed else "failed",
+                        "completed_at_utc": _utc_now(),
+                        "updated_at_utc": _utc_now(),
+                        "elapsed_seconds": round(
+                            _elapsed_since(state.get("started_at_utc")),
+                            3,
+                        ),
+                        "exit_code": exit_code,
+                        "result_status": result_status,
+                        "message": message,
+                    }
                 )
-            state.update(
-                {
-                    "status": "completed" if completed else "failed",
-                    "stage_status": "completed" if completed else "failed",
-                    "completed_at_utc": _utc_now(),
-                    "updated_at_utc": _utc_now(),
-                    "elapsed_seconds": round(
-                        _elapsed_since(state.get("started_at_utc")),
-                        3,
-                    ),
-                    "exit_code": exit_code,
-                    "result_status": result_status,
-                    "message": message,
-                }
-            )
-            if unexpected_exit:
-                state["process_error"] = self._unexpected_process_error_locked(
-                    run_dir,
-                    exit_code=exit_code,
-                    kind="unexpected_process_exit",
-                )
-            else:
-                state.pop("process_error", None)
-            if completed:
-                state["overall_percent"] = 100.0
-            _write_json_atomic(self._state_path(run_dir), state)
-            if self._log_handle is not None:
-                self._log_handle.close()
-            self._log_handle = None
-            self._process = None
+                if unexpected_exit:
+                    state["process_error"] = self._unexpected_process_error_locked(
+                        run_dir,
+                        exit_code=exit_code,
+                        kind="unexpected_process_exit",
+                    )
+                else:
+                    state.pop("process_error", None)
+                if completed:
+                    state["overall_percent"] = 100.0
+                self._release_watched_process_locked(run_dir, process)
+                _write_json_atomic(self._state_path(run_dir), state)
+        finally:
+            with self._lock:
+                self._release_watched_process_locked(run_dir, process)
 
     def _current_report_locked(
         self,
         state: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        report = _read_json_object(self.settings.report_path)
-        if report is None or state is None:
-            return report
-        before = state.get("report_mtime_before_ns")
+        if not self.settings.report_path.is_file():
+            return None
         current = self.settings.report_path.stat().st_mtime_ns
+        if state is None:
+            return _read_json_object(self.settings.report_path)
+        before = state.get("report_mtime_before_ns")
         if before == current:
             return None
-        return report
+        return _read_json_object(self.settings.report_path)
 
     def current(self, *, after_sequence: int = 0) -> dict[str, Any]:
         with self._lock:
@@ -874,15 +1716,106 @@ class ExperimentManager:
                 "events": events,
             }
 
-    def result_report(self) -> tuple[dict[str, Any] | None, bool, dict[str, Any]]:
+    def result_for_memory(
+        self,
+        memory_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read one library's report and ownership state under one manager lock."""
+
         with self._lock:
-            state = self._refresh_locked()
-            report = self._current_report_locked(state)
-            if report is None:
-                return None, False, state or {"status": "idle"}
-            if state is None:
-                return report, True, {"status": "idle"}
-            return report, state.get("status") not in ACTIVE_RUN_STATUSES, state
+            current_state = self._refresh_locked()
+            selected_id, memory_root = self._memory_for_read_locked(memory_id)
+            library = _memory_library_item(self.settings, selected_id)
+            belongs_to_current = bool(
+                current_state
+                and current_state.get("web_run_id")
+                and not current_state.get("memory_deleted_at_utc")
+                and str(current_state.get("memory_id") or "default") == selected_id
+            )
+            if belongs_to_current:
+                assert current_state is not None
+                try:
+                    report = self._current_report_locked(current_state)
+                except (MemoryReadError, OSError):
+                    process_error = current_state.get("process_error")
+                    if not (
+                        isinstance(process_error, dict)
+                        and process_error.get("kind") == "watcher_artifact_error"
+                    ):
+                        raise
+                    report = None
+                expected_run_id = str(current_state.get("run_id") or "")
+                if expected_run_id:
+                    report_run = (
+                        report.get("run")
+                        if isinstance(report, dict)
+                        and isinstance(report.get("run"), dict)
+                        else {}
+                    )
+                    report_run_id = str(report_run.get("run_id") or "")
+                    if report_run_id != expected_run_id:
+                        exact_report = read_memory_report_for_run(
+                            memory_root,
+                            expected_run_id,
+                        )
+                        if exact_report is not None:
+                            report = exact_report
+                        elif report_run_id or not _is_formal_failure_report(report):
+                            report = None
+                state = {
+                    **current_state,
+                    "memory_id": selected_id,
+                    "memory_label": current_state.get("memory_label")
+                    or library["label"],
+                }
+                is_current = report is not None
+                is_latest_for_library = report is not None
+            else:
+                report = read_latest_memory_report(
+                    memory_root,
+                    self.settings.database_filename,
+                )
+                report_run = (
+                    report.get("run")
+                    if isinstance(report, dict)
+                    and isinstance(report.get("run"), dict)
+                    else {}
+                )
+                run_id = str(report_run.get("run_id") or "")
+                timing = (
+                    read_memory_run_timing(
+                        memory_root,
+                        run_id,
+                        self.settings.database_filename,
+                    )
+                    if run_id
+                    else {}
+                )
+                state = {
+                    "status": report.get("status") if report else "idle",
+                    "stage": "completed" if report else None,
+                    "overall_percent": 100.0 if report else 0.0,
+                    "last_sequence": 0,
+                    "memory_id": selected_id,
+                    "memory_label": library["label"],
+                    **timing,
+                }
+                is_current = False
+                is_latest_for_library = report is not None
+
+            return {
+                "available": report is not None,
+                "is_current_run": is_current,
+                "is_latest_for_library": is_latest_for_library,
+                "memory_id": selected_id,
+                "state": state,
+                "report": report,
+                "summary": (
+                    deterministic_result_summary(report, state)
+                    if report is not None
+                    else None
+                ),
+            }
 
 
 def _open_read_only_database(path: Path) -> sqlite3.Connection:
@@ -1057,7 +1990,15 @@ def read_memory_snapshot(
 ) -> dict[str, Any]:
     """Read a short, query-only snapshot for cards, timelines, and lineage."""
 
-    database = memory_root.expanduser().resolve() / database_filename
+    unresolved_root = memory_root.expanduser()
+    if unresolved_root.is_symlink():
+        raise MemoryReadError("Memory root must not be a symbolic link")
+    root = unresolved_root.resolve()
+    database = root / database_filename
+    if database.is_symlink():
+        raise MemoryReadError("memory.sqlite must not be a symbolic link")
+    if database.resolve().parent != root:
+        raise MemoryReadError("Memory database is outside its library root")
     empty_counts = {table: 0 for table in CORE_TABLES}
     empty_counts["active_objects"] = 0
     if not database.is_file():
@@ -1218,9 +2159,16 @@ def deterministic_result_summary(
                             error,
                         )
     elapsed = state.get("elapsed_seconds") if isinstance(state, dict) else None
+    sam_metrics = (
+        report.get("models", {}).get("sam3", {})
+        if isinstance(report.get("models"), dict)
+        else {}
+    )
     return {
         "status": report.get("status"),
         "run_id": run.get("run_id"),
+        "memory_id": state.get("memory_id") if isinstance(state, dict) else None,
+        "memory_label": state.get("memory_label") if isinstance(state, dict) else None,
         "input_files": len(image_items),
         "unique_sources": sum(int(value or 0) for value in source_counts.values()),
         "duplicate_sources_skipped": int(run.get("duplicate_sources_skipped") or 0),
@@ -1231,6 +2179,11 @@ def deterministic_result_summary(
         "sam_above_threshold_candidates": raw_candidates,
         "sam_kept": kept_candidates,
         "sam_filtered": filtered_candidates,
+        "sam_confidence_threshold": (
+            sam_metrics.get("confidence_threshold")
+            if isinstance(sam_metrics, dict)
+            else None
+        ),
         "proposal_counts": proposal_counts,
         "decision_counts": decision_counts,
         "observations_added": int(run.get("observations_added") or 0),
@@ -1284,6 +2237,22 @@ def _input_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=404, detail="Input image not found")
     return HTTPException(status_code=500, detail="Input operation failed")
+
+
+def _memory_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ExperimentBusyError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, FileExistsError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, (MemoryLibraryError, SafePathError)):
+        return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=404, detail="Memory library not found")
+    if isinstance(exc, MemoryReadError):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, MemoryMutationError):
+        return HTTPException(status_code=500, detail=str(exc))
+    return HTTPException(status_code=500, detail="Memory library operation failed")
 
 
 def _asset_response(
@@ -1383,12 +2352,57 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             raise _input_http_error(exc) from exc
         return {"deleted": path, **payload}
 
-    @app.post("/api/runs", status_code=202)
-    def start_run() -> dict[str, Any]:
+    @app.get("/api/memories")
+    def get_memories() -> dict[str, Any]:
         try:
-            return manager.start()
+            return manager.memory_libraries()
+        except (MemoryReadError, MemoryLibraryError, SafePathError) as exc:
+            raise _memory_http_error(exc) from exc
+
+    @app.post("/api/memories", status_code=201)
+    def create_memory(payload: MemoryCreateRequest | None = None) -> dict[str, Any]:
+        try:
+            item = manager.create_memory_library((payload or MemoryCreateRequest()).label)
+        except Exception as exc:
+            raise _memory_http_error(exc) from exc
+        return {"created": True, "selected_id": item["id"], "item": item}
+
+    @app.post("/api/memories/{memory_id}/select")
+    def select_memory(memory_id: str) -> dict[str, Any]:
+        try:
+            item = manager.select_memory_library(memory_id)
+        except Exception as exc:
+            raise _memory_http_error(exc) from exc
+        return {"selected_id": item["id"], "item": item}
+
+    @app.delete("/api/memories/{memory_id}")
+    def delete_memory(
+        memory_id: str,
+        confirm: str = Query(..., min_length=1),
+    ) -> dict[str, Any]:
+        try:
+            safe_id = _validated_memory_id(memory_id)
+            safe_confirmation = _validated_memory_id(confirm)
+        except MemoryLibraryError as exc:
+            raise _memory_http_error(exc) from exc
+        if safe_id != safe_confirmation:
+            raise HTTPException(
+                status_code=400,
+                detail="Deletion confirmation does not match the memory library ID",
+            )
+        try:
+            return manager.delete_memory_library(safe_id)
+        except Exception as exc:
+            raise _memory_http_error(exc) from exc
+
+    @app.post("/api/runs", status_code=202)
+    def start_run(payload: RunStartRequest | None = None) -> dict[str, Any]:
+        try:
+            return manager.start((payload or RunStartRequest()).memory_id)
         except (ExperimentBusyError, InputValidationError) as exc:
             raise _input_http_error(exc) from exc
+        except (MemoryLibraryError, SafePathError, FileNotFoundError) as exc:
+            raise _memory_http_error(exc) from exc
         except OSError as exc:
             raise HTTPException(
                 status_code=500,
@@ -1402,32 +2416,33 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         return manager.current(after_sequence=after_sequence)
 
     @app.get("/api/results")
-    def get_results() -> dict[str, Any]:
+    def get_results(
+        memory_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
         try:
-            report, is_current, state = manager.result_report()
-        except MemoryReadError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-        return {
-            "available": report is not None,
-            "is_current_run": is_current,
-            "state": state,
-            "report": report,
-            "summary": (
-                deterministic_result_summary(report, state)
-                if report is not None
-                else None
-            ),
-        }
+            return manager.result_for_memory(memory_id)
+        except Exception as exc:
+            raise _memory_http_error(exc) from exc
 
     @app.get("/api/memory")
-    def get_memory() -> dict[str, Any]:
+    def get_memory(
+        memory_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
         try:
-            return read_memory_snapshot(
-                resolved.memory_root,
+            safe_id, root = manager.memory_for_read(memory_id)
+            library = _memory_library_item(resolved, safe_id)
+            snapshot = read_memory_snapshot(
+                root,
                 resolved.database_filename,
             )
-        except MemoryReadError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _memory_http_error(exc) from exc
+        return {
+            "memory_id": safe_id,
+            "memory_label": library["label"],
+            "library": library,
+            **snapshot,
+        }
 
     @app.get("/api/input-asset")
     def get_input_asset(path: str = Query(..., min_length=1)) -> FileResponse:
@@ -1438,6 +2453,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             )
         except SafePathError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except MemoryLibraryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
@@ -1445,10 +2462,16 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             ) from exc
 
     @app.get("/api/memory-asset")
-    def get_memory_asset(path: str = Query(..., min_length=1)) -> FileResponse:
+    def get_memory_asset(
+        path: str = Query(..., min_length=1),
+        memory_id: str | None = Query(default=None),
+    ) -> FileResponse:
         try:
-            return _asset_response(resolve_memory_image(resolved.memory_root, path))
+            _, root = manager.memory_for_read(memory_id)
+            return _asset_response(resolve_memory_image(root, path))
         except SafePathError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except MemoryLibraryError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(
@@ -1457,13 +2480,19 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             ) from exc
 
     @app.get("/api/audit-json")
-    def get_audit_json(path: str = Query(..., min_length=1)) -> JSONResponse:
+    def get_audit_json(
+        path: str = Query(..., min_length=1),
+        memory_id: str | None = Query(default=None),
+    ) -> JSONResponse:
         try:
-            artifact = resolve_audit_json(resolved.memory_root, path)
+            _, root = manager.memory_for_read(memory_id)
+            artifact = resolve_audit_json(root, path)
             if artifact.stat().st_size > resolved.max_audit_json_bytes:
                 raise HTTPException(status_code=413, detail="Audit JSON is too large")
             payload = json.loads(artifact.read_text(encoding="utf-8"))
         except SafePathError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except MemoryLibraryError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Audit JSON not found") from exc
@@ -1496,6 +2525,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 __all__ = [
     "ExperimentManager",
     "InputValidationError",
+    "MemoryLibraryError",
+    "MemoryReadError",
     "SafePathError",
     "WebSettings",
     "create_app",
@@ -1504,9 +2535,14 @@ __all__ = [
     "deterministic_result_summary",
     "input_listing_payload",
     "list_input_images",
+    "list_memory_libraries",
+    "read_latest_memory_report",
+    "read_memory_report_for_run",
+    "read_memory_run_timing",
     "read_memory_snapshot",
     "resolve_audit_json",
     "resolve_input_file",
+    "resolve_memory_library_root",
     "resolve_memory_image",
     "save_input_uploads",
 ]

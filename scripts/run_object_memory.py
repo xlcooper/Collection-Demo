@@ -94,8 +94,12 @@ def validate_directory_separation(input_root: Path, memory_root: Path) -> None:
         )
 
 
-def failure_report(exc: Exception) -> dict[str, Any]:
-    return {
+def failure_report(
+    exc: Exception,
+    *,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
         "schema_version": 6,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "test": "object_memory_demo_batch",
@@ -105,6 +109,10 @@ def failure_report(exc: Exception) -> dict[str, Any]:
             "message": str(exc),
         },
     }
+    if run_id:
+        report["run"] = {"run_id": run_id}
+        report["run_report"] = f"run_reports/{run_id}.json"
+    return report
 
 
 def add_demo_coverage(report: dict[str, Any]) -> None:
@@ -137,6 +145,7 @@ def add_demo_coverage(report: dict[str, Any]) -> None:
 def main() -> int:
     args = parse_args()
     progress: ProgressReporter | None = None
+    paths: MemoryPaths | None = None
     try:
         if args.progress_file:
             progress_path = Path(args.progress_file).expanduser().resolve()
@@ -200,7 +209,8 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["status"] == "passed" else 4
     except Exception as exc:  # noqa: BLE001 - CLI must preserve failure evidence
-        report = failure_report(exc)
+        run_id = progress.run_id if progress is not None else None
+        report = failure_report(exc, run_id=run_id)
         if progress is not None:
             try:
                 progress.emit(
@@ -222,6 +232,14 @@ def main() -> int:
                 report["progress_error"] = {
                     "type": type(progress_exc).__name__,
                     "message": str(progress_exc),
+                }
+        if paths is not None and run_id:
+            try:
+                write_json_atomic(paths.run_reports / f"{run_id}.json", report)
+            except Exception as internal_report_exc:  # noqa: BLE001
+                report["internal_report_error"] = {
+                    "type": type(internal_report_exc).__name__,
+                    "message": str(internal_report_exc),
                 }
         if args.report:
             write_json_atomic(Path(args.report).expanduser().resolve(), report)
