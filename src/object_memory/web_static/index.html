@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Collection-Demo 对象记忆实验流程、候选证据与 SQLite 记忆可视化界面"
+    />
+    <title>Object Memory Lab · 对象记忆实验台</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="返回页面顶部">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>
+          <strong>Object Memory Lab</strong>
+          <small>Collection-Demo 实验台</small>
+        </span>
+      </a>
+      <div class="header-status" aria-live="polite">
+        <span class="status-dot" id="header-status-dot"></span>
+        <span id="header-status-text">正在连接实验服务</span>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero section-shell" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow">END-TO-END OBJECT MEMORY</p>
+          <h1>把一次对象记忆实验，<br />从输入到档案完整摊开。</h1>
+          <p class="hero-description">
+            管理当前输入图片，启动单卡端到端流程，逐步核对 Qwen 目标、SAM3 候选、对象判断与最终 SQLite 记忆。
+            所有失败和不确定结果都会原样保留，便于审计。
+          </p>
+        </div>
+
+        <aside class="run-console" aria-labelledby="run-console-title">
+          <div class="console-topline">
+            <div>
+              <p class="mini-label">CURRENT RUN</p>
+              <h2 id="run-console-title">实验控制台</h2>
+            </div>
+            <span class="status-pill neutral" id="run-status-pill">空闲</span>
+          </div>
+          <div class="run-primary">
+            <div>
+              <span class="run-stage-label">当前阶段</span>
+              <strong id="run-stage">等待启动</strong>
+              <small id="run-unit">准备读取输入目录</small>
+            </div>
+            <div class="timer" aria-label="实验已用时间">
+              <span>已用时间</span>
+              <strong id="run-timer">00:00:00</strong>
+            </div>
+          </div>
+          <div
+            class="progress-track"
+            role="progressbar"
+            aria-label="实验总体进度"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+            id="progress-track"
+          >
+            <span id="progress-bar"></span>
+          </div>
+          <div class="progress-caption">
+            <span id="progress-message">尚未开始实验</span>
+            <strong id="progress-percent">0%</strong>
+          </div>
+          <button class="primary-button" id="start-run-button" type="button" disabled>
+            <span>运行完整实验</span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <p class="console-note" id="run-lock-note">
+            启动后会锁定输入；同一时间只运行一个实验。
+          </p>
+        </aside>
+      </section>
+
+      <section class="flow-section section-shell" aria-labelledby="flow-title">
+        <div class="section-heading compact">
+          <div>
+            <p class="eyebrow">PIPELINE</p>
+            <h2 id="flow-title">数据如何流过实验</h2>
+          </div>
+          <p>这里只标出大模块；每一步的证据在下方展开。</p>
+        </div>
+        <ol class="pipeline-flow" id="pipeline-flow">
+          <li data-flow-stage="input">
+            <span class="flow-number">01</span>
+            <strong>输入与去重</strong>
+            <small>图片 · SHA-256</small>
+          </li>
+          <li data-flow-stage="scene_guidance">
+            <span class="flow-number">02</span>
+            <strong>Qwen 目标规划</strong>
+            <small>场景 · 文本概念</small>
+          </li>
+          <li data-flow-stage="sam3">
+            <span class="flow-number">03</span>
+            <strong>SAM3 分割</strong>
+            <small>mask · 筛选</small>
+          </li>
+          <li data-flow-stage="candidate_reasoning">
+            <span class="flow-number">04</span>
+            <strong>Qwen 对象判断</strong>
+            <small>有效性 · 身份</small>
+          </li>
+          <li data-flow-stage="memory">
+            <span class="flow-number">05</span>
+            <strong>SQLite 记忆</strong>
+            <small>对象 · 观测</small>
+          </li>
+          <li data-flow-stage="report">
+            <span class="flow-number">06</span>
+            <strong>结果摘要</strong>
+            <small>计数 · 错误</small>
+          </li>
+        </ol>
+      </section>
+
+      <nav class="page-nav section-shell" aria-label="页面内容导航">
+        <a href="#inputs">实验输入</a>
+        <a href="#intermediates">中间结果</a>
+        <a href="#memory">对象记忆</a>
+        <a href="#summary">结果摘要</a>
+      </nav>
+
+      <section class="content-section section-shell" id="inputs" aria-labelledby="inputs-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">01 · INPUT</p>
+            <h2 id="inputs-title">实验输入</h2>
+            <p>这里直接对应服务器的 <code>data/input/</code>。内容重复的图片会保留，但在实验中按哈希跳过。</p>
+          </div>
+          <div class="heading-actions">
+            <input
+              id="file-input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              hidden
+            />
+            <button class="secondary-button" id="upload-button" type="button" disabled>
+              上传图片
+            </button>
+          </div>
+        </div>
+
+        <div class="metric-strip" id="input-metrics" aria-live="polite">
+          <article><span>文件总数</span><strong>—</strong></article>
+          <article><span>唯一内容</span><strong>—</strong></article>
+          <article><span>重复副本</span><strong>—</strong></article>
+          <article><span>支持格式</span><strong>JPG · PNG · WEBP</strong></article>
+        </div>
+
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="点击或拖拽上传图片">
+          <span class="drop-icon" aria-hidden="true">＋</span>
+          <div>
+            <strong>拖拽图片到这里</strong>
+            <small>或点击选择多个文件；同名文件不会被覆盖</small>
+          </div>
+        </div>
+
+        <div class="image-grid" id="input-grid" aria-live="polite">
+          <div class="empty-state loading-state">
+            <span class="loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <strong>正在读取输入图片</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section section-shell" id="intermediates" aria-labelledby="intermediates-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">02 · EVIDENCE</p>
+            <h2 id="intermediates-title">逐阶段中间结果</h2>
+            <p>页面只展示真实落盘事件和资产。模型加载期间不会用虚假的线性进度填充。</p>
+          </div>
+          <span class="data-freshness" id="event-freshness">等待实验事件</span>
+        </div>
+
+        <div class="stage-layout">
+          <div class="stage-tabs" role="tablist" aria-label="中间结果阶段">
+            <button role="tab" aria-selected="true" data-stage-tab="input" type="button">
+              <span>01</span><strong>去重结果</strong><small id="tab-count-input">—</small>
+            </button>
+            <button role="tab" aria-selected="false" data-stage-tab="scene_guidance" type="button">
+              <span>02</span><strong>首轮目标</strong><small id="tab-count-scene">—</small>
+            </button>
+            <button role="tab" aria-selected="false" data-stage-tab="sam3" type="button">
+              <span>03</span><strong>SAM3 候选</strong><small id="tab-count-sam">—</small>
+            </button>
+            <button role="tab" aria-selected="false" data-stage-tab="candidate_reasoning" type="button">
+              <span>04</span><strong>对象判断</strong><small id="tab-count-reasoning">—</small>
+            </button>
+          </div>
+          <div class="stage-panel" id="stage-panel" role="tabpanel" aria-live="polite">
+            <div class="empty-state">
+              <span class="empty-symbol" aria-hidden="true">◎</span>
+              <strong>运行实验后，这里会逐步出现证据</strong>
+              <p>当前也会读取已有的最新报告与 SQLite 记忆。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section memory-section section-shell" id="memory" aria-labelledby="memory-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">03 · MEMORY</p>
+            <h2 id="memory-title">SQLite 对象记忆</h2>
+            <p>默认按“对象卡—观测时间线”阅读长期记忆；候选血缘表用于反查每条记录从哪里来。</p>
+          </div>
+          <div class="view-switch" role="group" aria-label="记忆视图">
+            <button class="active" data-memory-view="objects" type="button">对象卡</button>
+            <button data-memory-view="lineage" type="button">候选血缘</button>
+          </div>
+        </div>
+
+        <div class="memory-overview" id="memory-overview">
+          <article><span>活跃对象</span><strong>—</strong><small>长期档案</small></article>
+          <article><span>观测记录</span><strong>—</strong><small>跨视角证据</small></article>
+          <article><span>正式候选</span><strong>—</strong><small>含过滤与待定</small></article>
+          <article><span>数据库状态</span><strong>未初始化</strong><small>memory.sqlite</small></article>
+        </div>
+
+        <div id="memory-content" aria-live="polite">
+          <div class="empty-state">
+            <span class="empty-symbol" aria-hidden="true">□</span>
+            <strong>当前还没有对象记忆</strong>
+            <p>首次实验会自动创建 SQLite 与对象资产。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="content-section summary-section section-shell" id="summary" aria-labelledby="summary-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">04 · SUMMARY</p>
+            <h2 id="summary-title">结果摘要</h2>
+            <p>程序结构状态和对象语义效果分开呈现，避免把 <code>passed</code> 误读为实验验收通过。</p>
+          </div>
+          <span class="status-pill neutral" id="summary-status">暂无报告</span>
+        </div>
+
+        <div id="summary-content" aria-live="polite">
+          <div class="empty-state">
+            <span class="empty-symbol" aria-hidden="true">∴</span>
+            <strong>完成一次实验后生成摘要</strong>
+            <p>摘要会覆盖输入、目标、候选、四类决策、对象、观测、耗时和错误。</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer section-shell">
+      <p>Collection-Demo · 自动对象发现、语义标注与持续对象记忆</p>
+      <p>结构通过 ≠ 语义验收通过，关键结果仍需人工复核。</p>
+    </footer>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

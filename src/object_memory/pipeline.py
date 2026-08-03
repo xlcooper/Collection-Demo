@@ -23,6 +23,7 @@ from .identity import (
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
 from .mllm_adapter import MllmPrediction
+from .progress import ProgressReporter, ProgressWriteError
 from .sam3_adapter import Sam3Prediction
 from .sam3_postprocess import process_candidates
 from .scene_guidance import (
@@ -80,6 +81,8 @@ class ImageWork:
     scene_prompts: tuple[str, ...] = ()
     scene_guidance: dict[str, Any] | None = None
     kept: tuple[Proposal, ...] = ()
+    filtered: tuple[Proposal, ...] = ()
+    filter_counts: dict[str, int] = field(default_factory=dict)
     filtered_count: int = 0
     raw_candidate_count: int = 0
     candidate_source_counts: dict[str, int] = field(default_factory=dict)
@@ -194,6 +197,7 @@ class ObjectMemoryPipeline:
         paths: MemoryPaths,
         sam_runtime: SamRuntime,
         mllm_runtime: MllmRuntime,
+        progress: ProgressReporter | None = None,
     ) -> None:
         self.config = config
         self.paths = paths
@@ -201,6 +205,7 @@ class ObjectMemoryPipeline:
         self.loop = MemoryLoop(self.store)
         self.sam_runtime = sam_runtime
         self.mllm_runtime = mllm_runtime
+        self.progress = progress
 
     def run(
         self,
@@ -215,18 +220,88 @@ class ObjectMemoryPipeline:
             missing = next(path for path in normalized_images if not path.is_file())
             raise FileNotFoundError(f"Input image not found: {missing}")
 
+        resolved_run_id = run_id or self._new_run_id()
+        if self.progress is not None:
+            self.progress.set_run_id(resolved_run_id)
         self.store.initialize()
         run = Run(
-            id=run_id or self._new_run_id(),
+            id=resolved_run_id,
             config_digest=config_digest(self.config),
             sam_model_id=str(self.config.models.sam3_checkpoint),
             qwen_model_id=self.config.models.qwen_model_id,
         )
-        self.loop.begin_run(run)
         works = [ImageWork(input_path=path) for path in normalized_images]
+        self.loop.begin_run(run)
+        try:
+            return self._run_active(run, works)
+        except BaseException as exc:
+            self._close_interrupted_run(run, works, exc)
+            raise
+
+    def _run_active(
+        self,
+        run: Run,
+        works: list[ImageWork],
+    ) -> dict[str, Any]:
+        """Execute an already-open run under the lifecycle guard in ``run``."""
+
+        self._emit_progress(
+            event="run_started",
+            stage="run",
+            status="running",
+            current=0,
+            total=len(works),
+            overall_percent=0.0,
+            message="Object-memory run started",
+            data={
+                "input_count": len(works),
+                "memory_root": str(self.paths.root),
+            },
+        )
         external_errors: list[str] = []
-        for work in works:
+        self._emit_progress(
+            event="input_registration_started",
+            stage="input_registration",
+            status="running",
+            current=0,
+            total=len(works),
+            message="Registering input images and applying the SHA-256 gate",
+            data={},
+        )
+        for index, work in enumerate(works, start=1):
             self._register_image(run, work, external_errors)
+            registration_status = (
+                "failed"
+                if work.status == "failed"
+                else "skipped"
+                if work.duplicate
+                else "completed"
+            )
+            self._emit_progress(
+                event="input_registered",
+                stage="input_registration",
+                status=registration_status,
+                current=index,
+                total=len(works),
+                message=(
+                    f"Input registration {registration_status}: "
+                    f"{work.input_path.name}"
+                ),
+                data=self._registration_progress_data(work),
+            )
+        self._emit_progress(
+            event="input_registration_completed",
+            stage="input_registration",
+            status=("completed_with_errors" if external_errors else "completed"),
+            current=len(works),
+            total=len(works),
+            message="Input registration finished",
+            data={
+                "registered": sum(work.status == "registered" for work in works),
+                "duplicates": sum(work.duplicate for work in works),
+                "failed": sum(work.status == "failed" for work in works),
+            },
+        )
 
         scene_metrics = self._run_scene_guidance(run, works)
         sam_metrics = self._run_sam(run, works)
@@ -250,6 +325,15 @@ class ObjectMemoryPipeline:
             report_status = "failed"
         else:
             report_status = summary.status.value
+        self._emit_progress(
+            event="report_started",
+            stage="report",
+            status="running",
+            current=0,
+            total=1,
+            message="Building the final run report",
+            data={"run_status": summary.status.value},
+        )
         report = {
             "schema_version": 6,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -319,7 +403,113 @@ class ObjectMemoryPipeline:
         report_path = self.paths.run_reports / f"{run.id}.json"
         report["run_report"] = self.paths.relative_asset(report_path)
         write_json_atomic(report_path, report)
+        self._emit_progress(
+            event="report_completed",
+            stage="report",
+            status="completed",
+            current=1,
+            total=1,
+            message="Final run report was written",
+            data={
+                "report_status": report_status,
+                "run_report": report["run_report"],
+                "run": report["run"],
+            },
+        )
+        self._emit_progress(
+            event="run_completed",
+            stage="run",
+            status=report_status,
+            current=1,
+            total=1,
+            overall_percent=100.0,
+            message=f"Object-memory run completed with status={report_status}",
+            data={"run_report": report["run_report"]},
+        )
         return report
+
+    def _close_interrupted_run(
+        self,
+        run: Run,
+        works: Sequence[ImageWork],
+        original_error: BaseException,
+    ) -> None:
+        """Best-effort SQLite cleanup without replacing the triggering error."""
+
+        error_message = f"{type(original_error).__name__}: {original_error}"
+        cleanup_errors: list[str] = []
+        for work in works:
+            if (
+                work.source is None
+                or work.duplicate
+                or work.status in {"completed", "failed"}
+            ):
+                continue
+            try:
+                self.loop.fail_source(work.source.id, error_message)
+                work.status = "failed"
+                work.error = error_message
+            except BaseException as cleanup_error:  # noqa: BLE001
+                cleanup_errors.append(
+                    "fail source "
+                    f"{work.source.id}: {type(cleanup_error).__name__}: "
+                    f"{cleanup_error}"
+                )
+
+        try:
+            self.store.complete_run(run.id, error_message=error_message)
+        except BaseException as cleanup_error:  # noqa: BLE001
+            cleanup_errors.append(
+                "complete run "
+                f"{run.id}: {type(cleanup_error).__name__}: {cleanup_error}"
+            )
+
+        if cleanup_errors:
+            try:
+                original_error.add_note(
+                    "Object-memory cleanup also encountered: "
+                    + "; ".join(cleanup_errors)
+                )
+            except BaseException:  # noqa: BLE001 - preserve original at all costs
+                pass
+
+    def _emit_progress(
+        self,
+        *,
+        event: str,
+        stage: str,
+        status: str,
+        current: int,
+        total: int,
+        message: str,
+        data: dict[str, Any],
+        overall_percent: float | None = None,
+    ) -> None:
+        if self.progress is None:
+            return
+        self.progress.emit(
+            event=event,
+            stage=stage,
+            status=status,
+            current=current,
+            total=total,
+            message=message,
+            data=data,
+            overall_percent=overall_percent,
+        )
+
+    @staticmethod
+    def _registration_progress_data(work: ImageWork) -> dict[str, Any]:
+        return {
+            "input_path": str(work.input_path),
+            "filename": work.input_path.name,
+            "source_id": work.source.id if work.source else None,
+            "sha256": work.source.sha256 if work.source else None,
+            "stored_source": work.source.relative_path if work.source else None,
+            "duplicate": work.duplicate,
+            "work_status": work.status,
+            "error": work.error,
+        }
 
     @staticmethod
     def _new_run_id() -> str:
@@ -403,8 +593,42 @@ class ObjectMemoryPipeline:
             "snapshot": None,
             "external_errors": [],
         }
+        batch_size = self.config.mllm_pipeline.scene_batch_size
+        total_batches = (
+            (len(pending) + batch_size - 1) // batch_size if pending else 0
+        )
+        self._emit_progress(
+            event="scene_guidance_started",
+            stage="scene_guidance",
+            status="running",
+            current=0,
+            total=total_batches,
+            message="First-pass Qwen scene guidance started",
+            data={
+                "image_count": len(pending),
+                "batch_size": batch_size,
+            },
+        )
         if not pending:
+            self._emit_progress(
+                event="scene_guidance_completed",
+                stage="scene_guidance",
+                status="skipped",
+                current=0,
+                total=0,
+                message="First-pass Qwen scene guidance had no new images",
+                data={"reason": "no_registered_images"},
+            )
             return metrics
+        self._emit_progress(
+            event="model_loading",
+            stage="scene_guidance",
+            status="running",
+            current=0,
+            total=total_batches,
+            message="Loading Qwen for first-pass scene guidance",
+            data={"model_id": self.config.models.qwen_model_id},
+        )
         try:
             self.mllm_runtime.load()
             metrics["loaded"] = True
@@ -420,6 +644,18 @@ class ObjectMemoryPipeline:
                 f"Qwen scene-guidance load: {message}"
             )
             for work in pending:
+                work.scene_guidance = {
+                    "prompt_version": (
+                        self.config.mllm_pipeline.scene_prompt_version
+                    ),
+                    "batch_index": None,
+                    "scope_id": None,
+                    "target_count": None,
+                    "targets": None,
+                    "qwen_calls": 0,
+                    "raw_response": None,
+                    "errors": [message],
+                }
                 self._fail_source_work(work, message, metrics)
             try:
                 self.mllm_runtime.close()
@@ -428,17 +664,78 @@ class ObjectMemoryPipeline:
                     "Qwen scene-guidance close: "
                     f"{type(close_exc).__name__}: {close_exc}"
                 )
+            self._emit_progress(
+                event="scene_guidance_completed",
+                stage="scene_guidance",
+                status="failed",
+                current=total_batches,
+                total=total_batches,
+                message="Qwen scene-guidance model could not be loaded",
+                data={"error": message},
+            )
             return metrics
 
-        batch_size = self.config.mllm_pipeline.scene_batch_size
+        self._emit_progress(
+            event="model_loaded",
+            stage="scene_guidance",
+            status="completed",
+            current=0,
+            total=total_batches,
+            message="Qwen was loaded for first-pass scene guidance",
+            data={
+                "model_load_seconds": metrics["model_load_seconds"],
+                "placement": metrics["placement"],
+                "snapshot": metrics["snapshot"],
+            },
+        )
+        failed_batches = 0
         try:
             for batch_offset in range(0, len(pending), batch_size):
                 batch = pending[batch_offset : batch_offset + batch_size]
-                self._process_scene_guidance_batch(
+                batch_index = batch_offset // batch_size + 1
+                self._emit_progress(
+                    event="scene_guidance_batch_started",
+                    stage="scene_guidance",
+                    status="running",
+                    current=batch_index - 1,
+                    total=total_batches,
+                    message=(
+                        f"Analyzing scene-guidance batch {batch_index}/"
+                        f"{total_batches}"
+                    ),
+                    data={
+                        "batch_index": batch_index,
+                        "source_ids": [
+                            work.source.id for work in batch if work.source is not None
+                        ],
+                    },
+                )
+                result = self._process_scene_guidance_batch(
                     run,
                     batch,
-                    batch_index=batch_offset // batch_size + 1,
+                    batch_index=batch_index,
                     metrics=metrics,
+                )
+                batch_status = (
+                    "completed" if result.evaluation is not None else "failed"
+                )
+                if batch_status == "failed":
+                    failed_batches += 1
+                self._emit_progress(
+                    event="scene_guidance_batch_completed",
+                    stage="scene_guidance",
+                    status=batch_status,
+                    current=batch_index,
+                    total=total_batches,
+                    message=(
+                        f"Scene-guidance batch {batch_index}/{total_batches} "
+                        f"finished with status={batch_status}"
+                    ),
+                    data=self._scene_batch_progress_data(
+                        batch,
+                        result,
+                        batch_index=batch_index,
+                    ),
                 )
             metrics["peak_memory_mib"] = round(
                 self.mllm_runtime.peak_memory_mib,
@@ -453,6 +750,31 @@ class ObjectMemoryPipeline:
                     f"{type(exc).__name__}: {exc}"
                 )
         metrics["inference_seconds"] = round(metrics["inference_seconds"], 3)
+        stage_status = (
+            "completed_with_errors"
+            if failed_batches or metrics["external_errors"]
+            else "completed"
+        )
+        self._emit_progress(
+            event="scene_guidance_completed",
+            stage="scene_guidance",
+            status=stage_status,
+            current=total_batches,
+            total=total_batches,
+            message=(
+                "First-pass Qwen scene guidance finished with "
+                f"status={stage_status}"
+            ),
+            data={
+                "failed_batches": failed_batches,
+                "metrics": {
+                    key: value
+                    for key, value in metrics.items()
+                    if key != "external_errors"
+                },
+                "errors": list(metrics["external_errors"]),
+            },
+        )
         return metrics
 
     def _process_scene_guidance_batch(
@@ -462,10 +784,10 @@ class ObjectMemoryPipeline:
         *,
         batch_index: int,
         metrics: dict[str, Any],
-    ) -> None:
+    ) -> SceneGuidanceCallResult:
         batch = list(works)
         if not batch:
-            return
+            raise ValueError("Scene-guidance batch must not be empty")
         if any(work.source is None for work in batch):
             raise ValueError("Scene-guidance work requires registered sources")
         scope_id = f"scene_batch_{batch_index:04d}"
@@ -484,7 +806,7 @@ class ObjectMemoryPipeline:
                 batch_index=batch_index,
                 metrics=metrics,
             )
-            return
+            return result
         for work in batch:
             self._record_scene_guidance_failure(
                 work,
@@ -492,6 +814,32 @@ class ObjectMemoryPipeline:
                 batch_index=batch_index,
                 metrics=metrics,
             )
+        return result
+
+    @staticmethod
+    def _scene_batch_progress_data(
+        works: Sequence[ImageWork],
+        result: SceneGuidanceCallResult,
+        *,
+        batch_index: int,
+    ) -> dict[str, Any]:
+        return {
+            "batch_index": batch_index,
+            "scope_id": result.scope_id,
+            "qwen_calls": result.qwen_calls,
+            "raw_response": result.raw_response,
+            "errors": list(result.errors),
+            "images": [
+                {
+                    "input_path": str(work.input_path),
+                    "source_id": work.source.id if work.source else None,
+                    "work_status": work.status,
+                    "scene_guidance": work.scene_guidance,
+                    "error": work.error,
+                }
+                for work in works
+            ],
+        }
 
     def _call_scene_guidance_scope(
         self,
@@ -648,8 +996,42 @@ class ObjectMemoryPipeline:
             "peak_memory_mib": 0.0,
             "external_errors": [],
         }
+        total_images = len(pending)
+        self._emit_progress(
+            event="sam3_started",
+            stage="sam3",
+            status="running",
+            current=0,
+            total=total_images,
+            message="SAM3 text-guided segmentation started",
+            data={
+                "image_count": total_images,
+                "confidence_threshold": (
+                    self.config.sam3_pipeline.confidence_threshold
+                ),
+            },
+        )
         if not pending:
+            self._emit_progress(
+                event="sam3_completed",
+                stage="sam3",
+                status="skipped",
+                current=0,
+                total=0,
+                message="SAM3 had no scene-guidance targets to process",
+                data={"reason": "no_images_awaiting_sam"},
+            )
             return metrics
+        self._emit_progress(
+            event="model_loading",
+            stage="sam3",
+            status="running",
+            current=0,
+            total=total_images,
+            message="Loading SAM3",
+            data={"checkpoint": str(self.config.models.sam3_checkpoint)},
+        )
+        attempted_images = 0
         try:
             self.sam_runtime.load()
             metrics["loaded"] = True
@@ -657,8 +1039,47 @@ class ObjectMemoryPipeline:
                 self.sam_runtime.model_load_seconds,
                 3,
             )
-            for work in pending:
+            self._emit_progress(
+                event="model_loaded",
+                stage="sam3",
+                status="completed",
+                current=0,
+                total=total_images,
+                message="SAM3 was loaded",
+                data={"model_load_seconds": metrics["model_load_seconds"]},
+            )
+            for index, work in enumerate(pending, start=1):
+                self._emit_progress(
+                    event="sam3_image_started",
+                    stage="sam3",
+                    status="running",
+                    current=index - 1,
+                    total=total_images,
+                    message=(
+                        f"Running SAM3 for image {index}/{total_images}: "
+                        f"{work.input_path.name}"
+                    ),
+                    data={
+                        "input_path": str(work.input_path),
+                        "source_id": work.source.id if work.source else None,
+                        "prompts": list(work.scene_prompts),
+                    },
+                )
                 self._process_image_with_sam(run, work)
+                attempted_images = index
+                image_status = "failed" if work.status == "failed" else "completed"
+                self._emit_progress(
+                    event="sam3_image_completed",
+                    stage="sam3",
+                    status=image_status,
+                    current=index,
+                    total=total_images,
+                    message=(
+                        f"SAM3 image {index}/{total_images} finished with "
+                        f"status={image_status}"
+                    ),
+                    data=self._sam_progress_data(work),
+                )
             metrics["inference_seconds"] = round(
                 sum(work.sam_inference_seconds for work in pending),
                 3,
@@ -667,6 +1088,8 @@ class ObjectMemoryPipeline:
                 self.sam_runtime.peak_memory_mib,
                 2,
             )
+        except ProgressWriteError:
+            raise
         except Exception as exc:  # model-load or unexpected stage failure
             message = f"{type(exc).__name__}: {exc}"
             metrics["external_errors"].append(f"SAM3 stage: {message}")
@@ -680,6 +1103,33 @@ class ObjectMemoryPipeline:
                 metrics["external_errors"].append(
                     f"SAM3 close: {type(exc).__name__}: {exc}"
                 )
+        stage_status = (
+            "completed_with_errors"
+            if metrics["external_errors"]
+            or any(work.status == "failed" for work in pending)
+            else "completed"
+        )
+        self._emit_progress(
+            event="sam3_completed",
+            stage="sam3",
+            status=stage_status,
+            current=(
+                total_images if metrics["external_errors"] else attempted_images
+            ),
+            total=total_images,
+            message=f"SAM3 stage finished with status={stage_status}",
+            data={
+                "kept": sum(len(work.kept) for work in pending),
+                "filtered": sum(work.filtered_count for work in pending),
+                "attempted_images": attempted_images,
+                "errors": list(metrics["external_errors"]),
+                "metrics": {
+                    key: value
+                    for key, value in metrics.items()
+                    if key != "external_errors"
+                },
+            },
+        )
         return metrics
 
     def _process_image_with_sam(
@@ -708,6 +1158,8 @@ class ObjectMemoryPipeline:
             work.sam_inference_seconds = prediction.inference_seconds
             work.filtered_count = len(result.filtered)
             work.kept = result.kept
+            work.filtered = result.filtered
+            work.filter_counts = result.filter_counts
             if work.kept:
                 work.status = "awaiting_candidate_reasoning"
             else:
@@ -718,6 +1170,46 @@ class ObjectMemoryPipeline:
             work.error = message
             self.loop.fail_source(work.source.id, message)
             work.status = "failed"
+
+    def _sam_progress_data(self, work: ImageWork) -> dict[str, Any]:
+        return {
+            "input_path": str(work.input_path),
+            "source_id": work.source.id if work.source else None,
+            "work_status": work.status,
+            "prompts": list(work.scene_prompts),
+            "above_confidence_threshold_candidates": work.raw_candidate_count,
+            "prompt_detection_counts": work.candidate_source_counts,
+            "zero_candidate_prompts": [
+                prompt
+                for prompt, count in work.candidate_source_counts.items()
+                if count == 0
+            ],
+            "inference_seconds": round(work.sam_inference_seconds, 3),
+            "kept": [self._proposal_progress_data(item) for item in work.kept],
+            "filtered": [
+                self._proposal_progress_data(item) for item in work.filtered
+            ],
+            "filter_counts": work.filter_counts,
+            "error": work.error,
+        }
+
+    @staticmethod
+    def _proposal_progress_data(proposal: Proposal) -> dict[str, Any]:
+        return {
+            "proposal_id": proposal.id,
+            "raw_candidate_id": proposal.raw_candidate_id,
+            "sam_text_prompt": proposal.prompt,
+            "score": proposal.score,
+            "bbox": proposal.bbox.model_dump(mode="json"),
+            "mask_area_pixels": proposal.mask_area_pixels,
+            "mask_area_ratio": proposal.mask_area_ratio,
+            "status": proposal.status.value,
+            "filter_reason": proposal.filter_reason,
+            "error": proposal.error_message,
+            "crop": proposal.crop_path,
+            "mask": proposal.mask_path,
+            "overlay": proposal.overlay_path,
+        }
 
     def _fail_source_work(
         self,
@@ -757,8 +1249,36 @@ class ObjectMemoryPipeline:
             "snapshot": None,
             "external_errors": [],
         }
+        total_images = len(pending)
+        self._emit_progress(
+            event="candidate_reasoning_started",
+            stage="candidate_reasoning",
+            status="running",
+            current=0,
+            total=total_images,
+            message="Second-pass Qwen candidate reasoning started",
+            data={"image_count": total_images},
+        )
         if not pending:
+            self._emit_progress(
+                event="candidate_reasoning_completed",
+                stage="candidate_reasoning",
+                status="skipped",
+                current=0,
+                total=0,
+                message="Second-pass Qwen had no retained candidates to process",
+                data={"reason": "no_images_awaiting_candidate_reasoning"},
+            )
             return metrics
+        self._emit_progress(
+            event="model_loading",
+            stage="candidate_reasoning",
+            status="running",
+            current=0,
+            total=total_images,
+            message="Loading Qwen for candidate and memory reasoning",
+            data={"model_id": self.config.models.qwen_model_id},
+        )
         try:
             self.mllm_runtime.load()
             metrics["loaded"] = True
@@ -782,11 +1302,76 @@ class ObjectMemoryPipeline:
                     "Qwen candidate-reasoning close: "
                     f"{type(close_exc).__name__}: {close_exc}"
                 )
+            self._emit_progress(
+                event="candidate_reasoning_completed",
+                stage="candidate_reasoning",
+                status="failed",
+                current=total_images,
+                total=total_images,
+                message="Qwen candidate-reasoning model could not be loaded",
+                data={"error": message},
+            )
             return metrics
 
+        self._emit_progress(
+            event="model_loaded",
+            stage="candidate_reasoning",
+            status="completed",
+            current=0,
+            total=total_images,
+            message="Qwen was loaded for candidate and memory reasoning",
+            data={
+                "model_load_seconds": metrics["model_load_seconds"],
+                "placement": metrics["placement"],
+                "snapshot": metrics["snapshot"],
+            },
+        )
         try:
-            for work in pending:
+            for index, work in enumerate(pending, start=1):
+                self._emit_progress(
+                    event="candidate_reasoning_image_started",
+                    stage="candidate_reasoning",
+                    status="running",
+                    current=index - 1,
+                    total=total_images,
+                    message=(
+                        f"Reasoning over image {index}/{total_images}: "
+                        f"{work.input_path.name}"
+                    ),
+                    data={
+                        "input_path": str(work.input_path),
+                        "source_id": work.source.id if work.source else None,
+                        "proposal_ids": [item.id for item in work.kept],
+                    },
+                )
                 self._process_image_candidate_reasoning(run, work, metrics)
+                image_has_errors = bool(
+                    work.error
+                    or (work.candidate_reasoning or {}).get("errors")
+                    or any(
+                        decision.get("status") in {"pending", "failed"}
+                        for decision in work.decisions
+                    )
+                )
+                image_status = (
+                    "failed"
+                    if work.status == "failed"
+                    else "completed_with_errors"
+                    if image_has_errors
+                    else "completed"
+                )
+                self._emit_progress(
+                    event="candidate_reasoning_image_completed",
+                    stage="candidate_reasoning",
+                    status=image_status,
+                    current=index,
+                    total=total_images,
+                    message=(
+                        f"Candidate reasoning image {index}/{total_images} "
+                        f"finished with status={image_status}"
+                    ),
+                    data=self._candidate_reasoning_progress_data(work),
+                )
             metrics["peak_memory_mib"] = round(
                 self.mllm_runtime.peak_memory_mib,
                 2,
@@ -800,7 +1385,60 @@ class ObjectMemoryPipeline:
                     f"{type(exc).__name__}: {exc}"
                 )
         metrics["inference_seconds"] = round(metrics["inference_seconds"], 3)
+        stage_has_errors = bool(
+            metrics["external_errors"]
+            or any(
+                work.error
+                or (work.candidate_reasoning or {}).get("errors")
+                or any(
+                    decision.get("status") in {"pending", "failed"}
+                    for decision in work.decisions
+                )
+                for work in pending
+            )
+        )
+        stage_status = (
+            "completed_with_errors" if stage_has_errors else "completed"
+        )
+        self._emit_progress(
+            event="candidate_reasoning_completed",
+            stage="candidate_reasoning",
+            status=stage_status,
+            current=total_images,
+            total=total_images,
+            message=(
+                "Second-pass Qwen candidate reasoning finished with "
+                f"status={stage_status}"
+            ),
+            data={
+                "decision_counts": {
+                    decision: sum(
+                        item.get("decision") == decision
+                        for work in pending
+                        for item in work.decisions
+                    )
+                    for decision in ("new", "existing", "ignored", "uncertain")
+                },
+                "errors": list(metrics["external_errors"]),
+                "metrics": {
+                    key: value
+                    for key, value in metrics.items()
+                    if key != "external_errors"
+                },
+            },
+        )
         return metrics
+
+    @staticmethod
+    def _candidate_reasoning_progress_data(work: ImageWork) -> dict[str, Any]:
+        return {
+            "input_path": str(work.input_path),
+            "source_id": work.source.id if work.source else None,
+            "work_status": work.status,
+            "candidate_reasoning": work.candidate_reasoning,
+            "decisions": work.decisions,
+            "error": work.error,
+        }
 
     def _process_image_candidate_reasoning(
         self,

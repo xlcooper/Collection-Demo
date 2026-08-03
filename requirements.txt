@@ -21,3 +21,9 @@ regex
 iopath>=0.1.10
 typing_extensions
 huggingface_hub
+
+# Web experiment console. The frontend is static HTML/CSS/JS, so no Node
+# runtime or separate frontend build tool is required on the server.
+fastapi==0.141.1
+uvicorn==0.52.1
+python-multipart==0.0.32

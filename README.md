@@ -4,6 +4,8 @@
 
 Collection-Demo 接收一批不断增加的场景图片，在不要求用户提供物体类别的前提下提出候选对象、生成结构化标签、建立对象档案，并尝试把同一具体物体在不同图片中的观测持续归并到同一档案。
 
+项目同时提供服务器 Web 实验台：可以浏览、上传和删除当前输入，启动完整端到端实验，按真实进度事件查看每一步中间结果，并以对象卡、观测时间线和候选血缘查看 SQLite 记忆。
+
 **愿景：**构建能够从持续视觉观测中发现、识别并长期维护真实对象身份与知识，最终为主动感知、规划和机器人交互提供可审计对象记忆的智能系统。
 
 ## 系统架构
@@ -44,6 +46,8 @@ SAM3 与 Qwen3-VL 在单张 GPU 上分阶段驻留：Qwen 先完成新图场景�
 - 第二轮把当次视图描述写入 observation，把经过比较后的稳定累计信息写入对象卡；提示规则要求完整物体与仍附着的盖子、吸管、把手等部件不得互相归并。
 - 使用 `new`、`existing`、`ignored`、`uncertain` 四类决策创建对象、追加观测、排除无效候选或保留待定项。
 - 通过 Pydantic schema、候选覆盖检查、对象 ID 范围校验、SQLite 事务和失败回滚保证数据边界可追踪。
+- 提供单用户 Web 实验台；同一时间只允许一个实验进程，运行期间锁定输入。页面按输入登记、首轮 Qwen、SAM3、第二轮 Qwen 和报告写盘的真实工作单元显示进度、墙钟时间与中间证据，不按预估耗时伪造进度。
+- Web 端的 SQLite 可视化以“长期对象卡 + 跨视角观测时间线”为主，并提供 `source → proposal → decision → object` 候选血缘表；程序结构状态与需要人工复核的语义效果分开呈现。
 
 这里的“无需使用者提供类别”表示类别概念由首轮 Qwen 从场景中生成。首轮漏掉的对象不会进入 SAM3，因此该流程不能被描述为可以绝对穷举任意场景中的所有物体。
 
@@ -77,6 +81,7 @@ SAM3 与 Qwen3-VL 在单张 GPU 上分阶段驻留：Qwen 先完成新图场景�
 | 图像处理 | Pillow、NumPy | crop、mask、overlay 与几何后处理 |
 | 数据校验 | Pydantic | 模型输出和持久化边界 |
 | 持久化 | SQLite + 本地文件系统 | 结构化索引与图像资产 |
+| Web 实验台 | FastAPI、Uvicorn、原生 HTML/CSS/JS | 输入管理、单实验编排、阶段证据和对象记忆可视化 |
 
 参考实验环境为 Linux、Python 3.12、PyTorch 2.10、CUDA 12.8 和单张 NVIDIA RTX 4090 24 GiB；项目使用 Conda 管理环境，模型权重和缓存保存在项目数据盘且不进入 Git。
 
@@ -130,6 +135,31 @@ python scripts/run_object_memory.py \
 
 `scripts/check_server_env.py` 可用于检查服务器依赖、模型路径、GPU 和缓存配置。
 
+### Web 实验台
+
+Web 入口仍使用项目 Conda 环境和相同模型缓存。仅通过本机 SSH 隧道访问时：
+
+```bash
+export HF_HOME="$PWD/weights/qwen"
+export HF_HUB_CACHE="$HF_HOME/hub"
+
+python scripts/run_object_memory_web.py \
+  --host 127.0.0.1 \
+  --port 6006
+```
+
+通过 AutoDL 自定义服务监听非回环地址时，必须先提供至少12字符的 Basic 密码：
+
+```bash
+export OBJECT_MEMORY_WEB_PASSWORD='<设置一个至少12字符的强密码>'
+
+python scripts/run_object_memory_web.py \
+  --host 0.0.0.0 \
+  --port 6006
+```
+
+浏览器打开对应的本机隧道地址或 AutoDL 提供的 HTTPS 自定义服务地址即可；不要把带 Basic 认证的原始 HTTP 端口直接暴露到公网。Web 页面固定调用正式入口，不接受浏览器传入任意服务器路径、模型参数或命令；运行日志与进度事件保存在本地忽略的 `temp/web_runs/`，最终对象记忆和正式报告仍写入 `data/memory/` 与 `environment/run_report.json`。
+
 ## 项目结构
 
 ```text
@@ -143,8 +173,10 @@ Collection-Demo/
 ├─ environment/               # 服务器事实与运行时生成的 Demo 报告
 ├─ scripts/
 │  ├─ run_object_memory.py    # 正式端到端入口
+│  ├─ run_object_memory_web.py # Web 实验台服务器入口
 │  └─ check_server_env.py     # 服务器环境检查
 ├─ src/object_memory/         # 对象记忆实现
+│  └─ web_static/             # 无需构建的 Web 页面资源
 ├─ tests/                     # 当前功能回归测试
 ├─ AGENTS.md                  # AI 协作与项目管理规范
 ├─ PROGRESS.md                # 当前实验、审计分析与实验历史

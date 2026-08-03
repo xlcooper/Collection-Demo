@@ -29,6 +29,10 @@ from object_memory.pipeline import (  # noqa: E402
     discover_images,
     write_json_atomic,
 )
+from object_memory.progress import (  # noqa: E402
+    JsonlProgressWriter,
+    ProgressReporter,
+)
 from object_memory.sam3_adapter import Sam3Adapter  # noqa: E402
 
 
@@ -54,6 +58,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report",
         help="Optional second copy of the run report, such as an environment report.",
+    )
+    parser.add_argument(
+        "--progress-file",
+        help=(
+            "Optional JSONL progress event file. Each event is flushed "
+            "immediately for live monitoring."
+        ),
     )
     return parser.parse_args()
 
@@ -125,7 +136,11 @@ def add_demo_coverage(report: dict[str, Any]) -> None:
 
 def main() -> int:
     args = parse_args()
+    progress: ProgressReporter | None = None
     try:
+        if args.progress_file:
+            progress_path = Path(args.progress_file).expanduser().resolve()
+            progress = ProgressReporter(JsonlProgressWriter(progress_path))
         config = runtime_config(load_config(args.config), args)
         input_root = Path(args.input_dir).expanduser().resolve()
         memory_root = resolve_memory_root(
@@ -153,6 +168,7 @@ def main() -> int:
             paths=paths,
             sam_runtime=sam_runtime,
             mllm_runtime=mllm_runtime,
+            progress=progress,
         )
         report = pipeline.run(image_paths)
         if args.validate_demo:
@@ -160,10 +176,53 @@ def main() -> int:
             write_json_atomic(paths.resolve_asset(report["run_report"]), report)
         if args.report:
             write_json_atomic(Path(args.report).expanduser().resolve(), report)
+        if progress is not None:
+            progress.emit(
+                event="cli_completed",
+                stage="cli",
+                status=report["status"],
+                current=1,
+                total=1,
+                overall_percent=100.0,
+                message=(
+                    "Command-line run completed with "
+                    f"report status={report['status']}"
+                ),
+                data={
+                    "report_status": report["status"],
+                    "external_report": (
+                        str(Path(args.report).expanduser().resolve())
+                        if args.report
+                        else None
+                    ),
+                },
+            )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["status"] == "passed" else 4
     except Exception as exc:  # noqa: BLE001 - CLI must preserve failure evidence
         report = failure_report(exc)
+        if progress is not None:
+            try:
+                progress.emit(
+                    event="cli_failed",
+                    stage="cli",
+                    status="failed",
+                    current=0,
+                    total=0,
+                    overall_percent=progress.last_overall_percent,
+                    message=f"Command-line run failed: {type(exc).__name__}: {exc}",
+                    data={
+                        "error": {
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        }
+                    },
+                )
+            except Exception as progress_exc:  # noqa: BLE001 - expose both failures
+                report["progress_error"] = {
+                    "type": type(progress_exc).__name__,
+                    "message": str(progress_exc),
+                }
         if args.report:
             write_json_atomic(Path(args.report).expanduser().resolve(), report)
         print(json.dumps(report, ensure_ascii=False, indent=2))
