@@ -8,7 +8,7 @@ Collection Demo 是一个端到端对象记忆研究 Demo。使用者不需要�
 
 [架构](#架构) · [工作原理](#工作原理) · [快速开始](#快速开始) · [结果与审计](#结果与审计) · [项目文档](#项目文档)
 
-> [查看 GitHub 项目：xlcooper/Collection-Demo](https://github.com/xlcooper/Collection-Demo)
+> [查看 GitHub 项目：xlcooper/Collection-Demo](https://github.com/xlcooper/Collection-Demo) · [打开 Web 展示](https://u1007307-d8ye-2cdf5bc4.bjb2.seetacloud.com:8443)
 
 ## 架构
 
