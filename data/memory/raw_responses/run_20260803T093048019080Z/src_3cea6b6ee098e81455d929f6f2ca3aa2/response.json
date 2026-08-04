@@ -1,0 +1,68 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v3",
+  "expected_proposal_ids": [
+    "prop_62d81fc0cc4148afb0071c76234e3e1c"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_62d81fc0cc4148afb0071c76234e3e1c",
+        "validity": "valid",
+        "validity_confidence": 1.0,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "完整独立物体，非部件或背景",
+        "temporary_annotation": {
+          "coarse_category": "电子设备",
+          "fine_category": "鼠标",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "银灰色"
+          ],
+          "shape": "流线型椭圆体",
+          "description": "表面光滑，有滚轮和左右按键区域",
+          "annotation_confidence": 1.0
+        },
+        "decision": "existing",
+        "matched_object_id": "obj_dd2089b5fac9411f88786979a948b0e5",
+        "confidence": 0.95,
+        "reason_code": "visual_instance_match",
+        "short_reason": "与记忆卡视觉特征完全匹配",
+        "final_annotation": {
+          "coarse_category": "电子设备",
+          "fine_category": "鼠标",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "银灰色"
+          ],
+          "shape": "流线型椭圆体",
+          "description": "表面光滑，有滚轮和左右按键区域",
+          "annotation_confidence": 0.95
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 3,
+    "object_card_ids": [
+      "obj_dd2089b5fac9411f88786979a948b0e5",
+      "obj_57298eb6e56344be9ef62917ce67736c",
+      "obj_7094ad1125b74c048abc526451f8828f"
+    ],
+    "reference_image_count": 5,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_62d81fc0cc4148afb0071c76234e3e1c\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 1.0,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"完整独立物体，非部件或背景\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"电子设备\",\n        \"fine_category\": \"鼠标\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"银灰色\"],\n        \"shape\": \"流线型椭圆体\",\n        \"description\": \"表面光滑，有滚轮和左右按键区域\",\n        \"annotation_confidence\": 1.0\n      },\n      \"decision\": \"existing\",\n      \"matched_object_id\": \"obj_dd2089b5fac9411f88786979a948b0e5\",\n      \"confidence\": 0.95,\n      \"reason_code\": \"visual_instance_match\",\n      \"short_reason\": \"与记忆卡视觉特征完全匹配\",\n      \"final_annotation\": {\n        \"coarse_category\": \"电子设备\",\n        \"fine_category\": \"鼠标\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"银灰色\"],\n        \"shape\": \"流线型椭圆体\",\n        \"description\": \"表面光滑，有滚轮和左右按键区域\",\n        \"annotation_confidence\": 0.95\n      }\n    }\n  ]\n}",
+      "input_tokens": 4051,
+      "generated_tokens": 339,
+      "inference_seconds": 22.903445210307837
+    }
+  ]
+}

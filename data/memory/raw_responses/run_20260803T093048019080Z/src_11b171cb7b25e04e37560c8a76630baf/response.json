@@ -1,0 +1,69 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v3",
+  "expected_proposal_ids": [
+    "prop_3d9a223c9aed42dbbe61256cdee72bda"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_3d9a223c9aed42dbbe61256cdee72bda",
+        "validity": "valid",
+        "validity_confidence": 1.0,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "完整独立物体，含瓶身与瓶盖，非部件",
+        "temporary_annotation": {
+          "coarse_category": "饮料容器",
+          "fine_category": "带盖水瓶",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "透明",
+            "白色"
+          ],
+          "shape": "圆柱体",
+          "description": "透明塑料瓶身，内含清水，白色塑料瓶盖带提手，瓶盖顶部有圆形凹陷",
+          "annotation_confidence": 1.0
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 1.0,
+        "reason_code": "new_object",
+        "short_reason": "无匹配卡片，为新物体",
+        "final_annotation": {
+          "coarse_category": "饮料容器",
+          "fine_category": "带盖水瓶",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "透明",
+            "白色"
+          ],
+          "shape": "圆柱体",
+          "description": "透明塑料瓶身，内含清水，白色塑料瓶盖带提手，瓶盖顶部有圆形凹陷",
+          "annotation_confidence": 1.0
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 2,
+    "object_card_ids": [
+      "obj_dd2089b5fac9411f88786979a948b0e5",
+      "obj_57298eb6e56344be9ef62917ce67736c"
+    ],
+    "reference_image_count": 3,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_3d9a223c9aed42dbbe61256cdee72bda\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 1.0,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"完整独立物体，含瓶身与瓶盖，非部件\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"饮料容器\",\n        \"fine_category\": \"带盖水瓶\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"透明\", \"白色\"],\n        \"shape\": \"圆柱体\",\n        \"description\": \"透明塑料瓶身，内含清水，白色塑料瓶盖带提手，瓶盖顶部有圆形凹陷\",\n        \"annotation_confidence\": 1.0\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 1.0,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"无匹配卡片，为新物体\",\n      \"final_annotation\": {\n        \"coarse_category\": \"饮料容器\",\n        \"fine_category\": \"带盖水瓶\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"透明\", \"白色\"],\n        \"shape\": \"圆柱体\",\n        \"description\": \"透明塑料瓶身，内含清水，白色塑料瓶盖带提手，瓶盖顶部有圆形凹陷\",\n        \"annotation_confidence\": 1.0\n      }\n    }\n  ]\n}",
+      "input_tokens": 3680,
+      "generated_tokens": 340,
+      "inference_seconds": 22.809530027210712
+    }
+  ]
+}

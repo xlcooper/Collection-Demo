@@ -1,0 +1,98 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v4",
+  "scope_id": "scene_batch_0002",
+  "batch_index": 2,
+  "expected_source_ids": [
+    "src_ebd9a7980e4eebecde06d3ab3317d51c",
+    "src_11b171cb7b25e04e37560c8a76630baf",
+    "src_cd11b8f53eee5bf00b87e637aa6c481f",
+    "src_01577d5285c9315307e807b77e802c81"
+  ],
+  "error": null,
+  "scene_guidance_response": {
+    "images": [
+      {
+        "source_id": "src_ebd9a7980e4eebecde06d3ab3317d51c",
+        "scene_summary": "白色桌面上的红色饮料杯盖和吸管",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "饮料杯",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "带吸管的完整饮料杯，可抓取移动"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_11b171cb7b25e04e37560c8a76630baf",
+        "scene_summary": "白色桌面上的透明水瓶",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "水瓶",
+            "sam_text_prompt": "water bottle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "带盖和提手的完整水瓶，可抓取移动"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_cd11b8f53eee5bf00b87e637aa6c481f",
+        "scene_summary": "白色桌面上的水瓶和鼠标",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "水瓶",
+            "sam_text_prompt": "water bottle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "完整水瓶，可抓取移动"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "电脑鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "完整鼠标，可抓取移动"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_01577d5285c9315307e807b77e802c81",
+        "scene_summary": "白色桌面上的透明饮料杯",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "饮料杯",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "带吸管的完整饮料杯，可抓取移动"
+          }
+        ],
+        "no_target_reason": null
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_ebd9a7980e4eebecde06d3ab3317d51c\",\n      \"scene_summary\": \"白色桌面上的红色饮料杯盖和吸管\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"饮料杯\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"带吸管的完整饮料杯，可抓取移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_11b171cb7b25e04e37560c8a76630baf\",\n      \"scene_summary\": \"白色桌面上的透明水瓶\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"水瓶\",\n          \"sam_text_prompt\": \"water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"带盖和提手的完整水瓶，可抓取移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_cd11b8f53eee5bf00b87e637aa6c481f\",\n      \"scene_summary\": \"白色桌面上的水瓶和鼠标\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"水瓶\",\n          \"sam_text_prompt\": \"water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"完整水瓶，可抓取移动\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"电脑鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"完整鼠标，可抓取移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_01577d5285c9315307e807b77e802c81\",\n      \"scene_summary\": \"白色桌面上的透明饮料杯\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"饮料杯\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"带吸管的完整饮料杯，可抓取移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 5178,
+      "generated_tokens": 719,
+      "inference_seconds": 47.92476173490286
+    }
+  ]
+}

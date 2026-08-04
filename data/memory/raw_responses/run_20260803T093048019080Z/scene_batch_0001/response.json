@@ -1,0 +1,116 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v4",
+  "scope_id": "scene_batch_0001",
+  "batch_index": 1,
+  "expected_source_ids": [
+    "src_c5a2b20d9299071e3915298423480189",
+    "src_4cf691844b8baeee414cff6a9d6e441e",
+    "src_38f13969e802dc30e46f45461efef2ac",
+    "src_76482d84fc76d1c7e2061993bfa67a79"
+  ],
+  "error": null,
+  "scene_guidance_response": {
+    "images": [
+      {
+        "source_id": "src_c5a2b20d9299071e3915298423480189",
+        "scene_summary": "白色桌面上的无线鼠标和透明水瓶",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取操作的独立设备"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动的液体容器"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_4cf691844b8baeee414cff6a9d6e441e",
+        "scene_summary": "带白色盖子的透明水瓶，旁边有鼠标",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的独立容器"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "medium",
+            "confidence": 0.95,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动的独立设备"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_38f13969e802dc30e46f45461efef2ac",
+        "scene_summary": "带红色吸管和卡通盖子的奶茶杯",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "奶茶杯",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的独立饮品容器"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_76482d84fc76d1c7e2061993bfa67a79",
+        "scene_summary": "带白色盖子的透明水瓶和无线鼠标",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "透明水瓶",
+            "sam_text_prompt": "drink cup",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的独立容器"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "无线鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "medium",
+            "confidence": 0.96,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动的独立设备"
+          }
+        ],
+        "no_target_reason": null
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_c5a2b20d9299071e3915298423480189\",\n      \"scene_summary\": \"白色桌面上的无线鼠标和透明水瓶\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"无线鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取操作的独立设备\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的液体容器\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_4cf691844b8baeee414cff6a9d6e441e\",\n      \"scene_summary\": \"带白色盖子的透明水瓶，旁边有鼠标\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的独立容器\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"无线鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.95,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的独立设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_38f13969e802dc30e46f45461efef2ac\",\n      \"scene_summary\": \"带红色吸管和卡通盖子的奶茶杯\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"奶茶杯\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的独立饮品容器\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_76482d84fc76d1c7e2061993bfa67a79\",\n      \"scene_summary\": \"带白色盖子的透明水瓶和无线鼠标\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"透明水瓶\",\n          \"sam_text_prompt\": \"drink cup\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的独立容器\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"无线鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"medium\",\n          \"confidence\": 0.96,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动的独立设备\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 5180,
+      "generated_tokens": 871,
+      "inference_seconds": 58.87981512397528
+    }
+  ]
+}

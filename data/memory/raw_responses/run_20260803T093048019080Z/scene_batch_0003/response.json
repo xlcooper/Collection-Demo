@@ -1,0 +1,116 @@
+{
+  "stage": "scene_guidance",
+  "prompt_version": "robot-scene-guidance-v4",
+  "scope_id": "scene_batch_0003",
+  "batch_index": 3,
+  "expected_source_ids": [
+    "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+    "src_f37cbe405bc095713b4c5096c9b3bafa",
+    "src_54ac1b5d01f7f5f4123518653092ee1b",
+    "src_3c29806ddef097e7d2dff530f49d18e4"
+  ],
+  "error": null,
+  "scene_guidance_response": {
+    "images": [
+      {
+        "source_id": "src_3cea6b6ee098e81455d929f6f2ca3aa2",
+        "scene_summary": "白色桌面上有一个带提手的白色水瓶和一个电脑鼠标。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带提手的水瓶",
+            "sam_text_prompt": "water bottle with handle",
+            "priority": "high",
+            "confidence": 0.98,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动、可抓取的容器，适合抓取和搬运"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "电脑鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的常用工具，适合抓取和移动"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_f37cbe405bc095713b4c5096c9b3bafa",
+        "scene_summary": "桌面上有一个带吸管和盖子的饮料杯。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "带吸管的饮料杯",
+            "sam_text_prompt": "drink cup with straw",
+            "priority": "high",
+            "confidence": 0.97,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动、可抓取的消耗品，适合抓取和搬运"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_54ac1b5d01f7f5f4123518653092ee1b",
+        "scene_summary": "桌面上有一个装水的透明水瓶和一个电脑鼠标。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "装水的水瓶",
+            "sam_text_prompt": "water bottle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动、可抓取的容器，适合抓取和搬运"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "电脑鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的常用工具，适合抓取和移动"
+          }
+        ],
+        "no_target_reason": null
+      },
+      {
+        "source_id": "src_3c29806ddef097e7d2dff530f49d18e4",
+        "scene_summary": "桌面上有一个装水的透明水瓶和一个电脑鼠标。",
+        "targets": [
+          {
+            "target_id": "target_001",
+            "object_name_zh": "装水的水瓶",
+            "sam_text_prompt": "water bottle",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可移动、可抓取的容器，适合抓取和搬运"
+          },
+          {
+            "target_id": "target_002",
+            "object_name_zh": "电脑鼠标",
+            "sam_text_prompt": "computer mouse",
+            "priority": "high",
+            "confidence": 0.99,
+            "selection_reason_code": "manipulable",
+            "selection_short_reason": "可抓取的常用工具，适合抓取和移动"
+          }
+        ],
+        "no_target_reason": null
+      }
+    ]
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"images\": [\n    {\n      \"source_id\": \"src_3cea6b6ee098e81455d929f6f2ca3aa2\",\n      \"scene_summary\": \"白色桌面上有一个带提手的白色水瓶和一个电脑鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带提手的水瓶\",\n          \"sam_text_prompt\": \"water bottle with handle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.98,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动、可抓取的容器，适合抓取和搬运\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"电脑鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的常用工具，适合抓取和移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_f37cbe405bc095713b4c5096c9b3bafa\",\n      \"scene_summary\": \"桌面上有一个带吸管和盖子的饮料杯。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"带吸管的饮料杯\",\n          \"sam_text_prompt\": \"drink cup with straw\",\n          \"priority\": \"high\",\n          \"confidence\": 0.97,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动、可抓取的消耗品，适合抓取和搬运\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_54ac1b5d01f7f5f4123518653092ee1b\",\n      \"scene_summary\": \"桌面上有一个装水的透明水瓶和一个电脑鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"装水的水瓶\",\n          \"sam_text_prompt\": \"water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动、可抓取的容器，适合抓取和搬运\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"电脑鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的常用工具，适合抓取和移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    },\n    {\n      \"source_id\": \"src_3c29806ddef097e7d2dff530f49d18e4\",\n      \"scene_summary\": \"桌面上有一个装水的透明水瓶和一个电脑鼠标。\",\n      \"targets\": [\n        {\n          \"target_id\": \"target_001\",\n          \"object_name_zh\": \"装水的水瓶\",\n          \"sam_text_prompt\": \"water bottle\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可移动、可抓取的容器，适合抓取和搬运\"\n        },\n        {\n          \"target_id\": \"target_002\",\n          \"object_name_zh\": \"电脑鼠标\",\n          \"sam_text_prompt\": \"computer mouse\",\n          \"priority\": \"high\",\n          \"confidence\": 0.99,\n          \"selection_reason_code\": \"manipulable\",\n          \"selection_short_reason\": \"可抓取的常用工具，适合抓取和移动\"\n        }\n      ],\n      \"no_target_reason\": null\n    }\n  ]\n}",
+      "input_tokens": 5177,
+      "generated_tokens": 944,
+      "inference_seconds": 62.92791532725096
+    }
+  ]
+}

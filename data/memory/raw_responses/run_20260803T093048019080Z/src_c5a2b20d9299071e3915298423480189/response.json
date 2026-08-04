@@ -1,0 +1,64 @@
+{
+  "stage": "candidate_reasoning",
+  "prompt_version": "guided-image-batch-memory-reasoning-v3",
+  "expected_proposal_ids": [
+    "prop_188d911f64f341e4b42df24467fd3e32"
+  ],
+  "error": null,
+  "candidate_reasoning_response": {
+    "candidates": [
+      {
+        "proposal_id": "prop_188d911f64f341e4b42df24467fd3e32",
+        "validity": "valid",
+        "validity_confidence": 1.0,
+        "validity_reason_code": "valid_candidate",
+        "validity_short_reason": "完整独立物体，非部件或冗余遮挡",
+        "temporary_annotation": {
+          "coarse_category": "电子设备",
+          "fine_category": "鼠标",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "白色"
+          ],
+          "shape": "流线型椭圆体",
+          "description": "表面光滑，中央有滚轮，滚轮有竖向纹理，两侧有黑色分隔线，整体为白色塑料材质",
+          "annotation_confidence": 1.0
+        },
+        "decision": "new",
+        "matched_object_id": null,
+        "confidence": 1.0,
+        "reason_code": "new_object",
+        "short_reason": "无匹配记忆卡，为新物体",
+        "final_annotation": {
+          "coarse_category": "电子设备",
+          "fine_category": "鼠标",
+          "material": [
+            "塑料"
+          ],
+          "color": [
+            "白色"
+          ],
+          "shape": "流线型椭圆体",
+          "description": "表面光滑，中央有滚轮，滚轮有竖向纹理，两侧有黑色分隔线，整体为白色塑料材质",
+          "annotation_confidence": 1.0
+        }
+      }
+    ]
+  },
+  "memory_context": {
+    "object_card_count": 0,
+    "object_card_ids": [],
+    "reference_image_count": 0,
+    "selection": "all_active_objects"
+  },
+  "predictions": [
+    {
+      "raw_text": "{\n  \"candidates\": [\n    {\n      \"proposal_id\": \"prop_188d911f64f341e4b42df24467fd3e32\",\n      \"validity\": \"valid\",\n      \"validity_confidence\": 1.0,\n      \"validity_reason_code\": \"valid_candidate\",\n      \"validity_short_reason\": \"完整独立物体，非部件或冗余遮挡\",\n      \"temporary_annotation\": {\n        \"coarse_category\": \"电子设备\",\n        \"fine_category\": \"鼠标\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"白色\"],\n        \"shape\": \"流线型椭圆体\",\n        \"description\": \"表面光滑，中央有滚轮，滚轮有竖向纹理，两侧有黑色分隔线，整体为白色塑料材质\",\n        \"annotation_confidence\": 1.0\n      },\n      \"decision\": \"new\",\n      \"matched_object_id\": null,\n      \"confidence\": 1.0,\n      \"reason_code\": \"new_object\",\n      \"short_reason\": \"无匹配记忆卡，为新物体\",\n      \"final_annotation\": {\n        \"coarse_category\": \"电子设备\",\n        \"fine_category\": \"鼠标\",\n        \"material\": [\"塑料\"],\n        \"color\": [\"白色\"],\n        \"shape\": \"流线型椭圆体\",\n        \"description\": \"表面光滑，中央有滚轮，滚轮有竖向纹理，两侧有黑色分隔线，整体为白色塑料材质\",\n        \"annotation_confidence\": 1.0\n      }\n    }\n  ]\n}",
+      "input_tokens": 2595,
+      "generated_tokens": 344,
+      "inference_seconds": 22.90903688594699
+    }
+  ]
+}
