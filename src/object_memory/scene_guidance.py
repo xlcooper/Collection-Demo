@@ -1,8 +1,9 @@
-"""First-pass Qwen scene survey for robot-oriented SAM3 text guidance."""
+"""Single Qwen call for discovery, SAM guidance, and text-memory iteration."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
@@ -11,77 +12,94 @@ from pydantic import ValidationError
 from .config import MllmPipelineConfig
 from .identity import MllmOutputError, extract_json_object
 from .mllm_adapter import MllmPrediction
-from .schemas import SceneGuidanceBatchResponse
+from .schemas import (
+    IdentityHypothesis,
+    ObjectCard,
+    SceneGuidanceResponse,
+    SceneImageGuidance,
+)
 
 
-SCENE_GUIDANCE_SYSTEM_PROMPT = """You are the scene-survey planner for autonomous object-memory acquisition by a robot arm.
+SYSTEM_PROMPT = """You are the only vision-language call for one image in a robot-oriented object-memory system.
 
-Each supplied image is one viewpoint of a specific task workspace or an unfamiliar operational scene. This first pass does not segment pixels, compare persistent memory, identify cross-image instances, or decide new/existing. Its only job is to decide which visible physical object concepts deserve targeted SAM3 segmentation and later detailed inspection.
+You receive one current source image and the compact text summaries of all active memory objects. In this one response you must:
+1. discover every visible complete independent physical object worth remembering;
+2. emit a concise English whole-object category for SAM3;
+3. describe current visible identity evidence in Chinese;
+4. make a text-based new/existing/uncertain identity hypothesis against the supplied summaries;
+5. propose the single updated object summary that may be committed only if later DINOv3 visual evidence agrees.
 
-Select independent physical objects whose appearance, shape, state, identity, or affordance could support later recognition, multi-view memory, grasping, manipulation, task planning, or change detection.
+Discovery and SAM3 rules:
+- Prefer complete movable, graspable, detachable, task-relevant, or identity-worthy objects.
+- Exclude supports, walls, fixed structures, shadows, reflections, textures, people, animals, merged groups, fragments, and attached parts when the complete object is visible.
+- Give every visible instance a separate target, even when multiple instances share the same sam_text_prompt.
+- sam_text_prompt is only retrieval metadata. Use a lowercase concrete base category or one stable useful modifier plus that category. Do not use positions, alternatives, feature clauses, or lists of attributes.
+- A bottle-shaped vessel remains `water bottle`; a wide-rim cup or tumbler is `drink cup`. Name the same complete object in Chinese and English.
 
-Prioritize:
-- free-standing, movable, graspable, detachable, or otherwise task-interactable objects;
-- tools, containers, consumables, portable control devices, and loose components in the working area;
-- objects with distinctive identity or state that benefits from closer or multi-view observation;
-- unfamiliar, transparent, partially occluded, or category-uncertain regions when they still plausibly form one independent physical object.
+Text-memory rules:
+- Category-level facts are not enough for instance identity. Examine intra-class differences: asymmetry, silhouette, proportions, component layout, texture, markings, visible brand/model text, and distinctive wear or damage.
+- Record a brand, model, or marking only when it is visibly legible; never infer it from shape.
+- Attach color and material to a named part in part_appearance. Do not output flat object color/material lists.
+- current_view_facts contains only facts visible now. A feature not visible in this view is not evidence that it disappeared.
+- proposed_object_summary is the one complete accumulated card after accepting this view. For existing, preserve supported old facts and add only non-conflicting visible evidence. Never add object IDs, match claims, tables, nearby objects, positions, reflections, or annotation-box colors.
+- Same category, color, or material alone never proves the same physical instance. If the text evidence cannot distinguish plausible objects, use uncertain.
+- When memory is empty, every selected target must use new. Otherwise existing must name exactly one supplied object_id.
 
-Prefer the complete object. Do not separately select an attached cap, handle, label, button, straw, or other part. Select such a part only when it is visibly detached and independently manipulable.
-When an attached part is the most visible region of a partially visible object, name the whole object concept. A lid and straw attached to a cup must be returned as a `drink cup`, not as a lid or straw. The Chinese object name and the SAM3 text must refer to that same complete object.
-
-Exclude:
-- floors, walls, desktops, shelves, support boards, structural partitions, and other scene-support surfaces;
-- decoration, fixed connectors, installed fasteners, permanently routed cables, and robot/camera hardware;
-- shadows, reflections, lighting, textures, printed patterns, screen contents, stains, and empty regions;
-- merged multi-object regions, meaningless fragments, and duplicate descriptions of the same visible object;
-- people and animals.
-
-Recall policy:
-This stage gates downstream discovery. Do not restrict selection to familiar categories, previously known objects, or only the most obvious items. When a bounded foreground region plausibly represents an independent task-relevant object, include it with a concrete but not overly narrow category rather than silently omitting it.
-
-SAM3 prompt policy:
-SAM3 retrieval text is not an image caption. For each target, return exactly one concise lowercase English concrete noun phrase within 64 characters that names one complete physical object. Choose the complete object's stable base category from visible shape and structure before adding any modifier. Transparency, color, material, contents, or attached parts must never change the base category.
-Stable base-category examples include `computer mouse`, `water bottle`, and `drink cup`.
-Use either the stable base category or at most one clearly visible, stable, retrieval-useful modifier followed by that category. `water bottle` and `transparent water bottle` are valid. Prefer the base category when a modifier is uncertain or unnecessary. Do not stack modifiers or append a detailed list of color, material, contents, cap, lid, straw, handle, or state. A partially occluded object still uses its whole-object category.
-For beverage containers, use `water bottle` for a bottle-shaped body with a neck, spout, or resealable bottle opening, even when it is clear or transparent. Use `drink cup` only for a cup- or tumbler-shaped vessel with a wide rim or cup-shaped drinking form. Never relabel a bottle as a cup merely because it is transparent.
-Do not append feature clauses with `with` or `and`; use only the base category or one useful prefix modifier. Never use `and` to join separate objects, and never use `or` or punctuation-separated alternatives. Never use scene-relative position or vague words such as object, item, thing, stuff, region, foreground, or background. If multiple visible instances share the same concept, one prompt is enough because SAM3 returns matching instances.
-
-Use Chinese for scene summaries, object names, and brief reasons. Keep JSON keys and enum values exactly as specified. Return one JSON object covering every supplied source_id exactly once. Do not return Markdown, extra text, or hidden chain-of-thought.
+Return one JSON object only. Use Chinese for descriptive values, keep keys and enum values exact, and do not return Markdown or hidden reasoning.
 """
 
 
-def _output_rules(max_targets_per_image: int) -> str:
+def _output_rules(max_targets: int) -> str:
     return f"""Required JSON structure:
 {{
-  "images": [
-    {{
-      "source_id": "exact supplied source ID",
-      "scene_summary": "brief Chinese scene summary",
-      "targets": [
-        {{
-          "target_id": "target_001",
-          "object_name_zh": "concise Chinese object name",
-          "sam_text_prompt": "short lowercase English noun phrase",
-          "priority": "high | medium",
-          "confidence": 0.0,
-          "selection_reason_code": "manipulable | task_relevant | identity_worthy | uncertain_standalone",
-          "selection_short_reason": "brief Chinese reason"
+  "image": {{
+    "source_id": "exact supplied source ID",
+    "scene_summary": "brief Chinese scene summary",
+    "targets": [
+      {{
+        "target_id": "target_001",
+        "object_name_zh": "instance-aware Chinese object name",
+        "sam_text_prompt": "short lowercase English noun phrase",
+        "current_view_facts": {{
+          "category": "visible category",
+          "visible_identity_features": ["visible intra-class feature"],
+          "brand_or_markings": ["only clearly legible marking"],
+          "part_appearance": [
+            {{"part": "part name", "color": ["color"], "material": ["material"]}}
+          ]
+        }},
+        "identity_hypothesis": "new | existing | uncertain",
+        "matched_object_id": "supplied object ID only for existing, otherwise null",
+        "identity_short_reason": "brief visible-evidence reason",
+        "proposed_object_summary": {{
+          "object_name_zh": "current accumulated object name",
+          "coarse_category": "broad category",
+          "fine_category": "specific category",
+          "stable_description": "concise accumulated description with intra-class cues",
+          "stable_identity_features": ["stable distinguishing feature"],
+          "brand_or_markings": ["confirmed marking"],
+          "part_appearance": [
+            {{"part": "part name", "color": ["color"], "material": ["material"]}}
+          ],
+          "summary_confidence": 0.0
+        }},
+        "temporary_target_anchor": {{
+          "x_min": 0.0, "y_min": 0.0, "x_max": 1.0, "y_max": 1.0
         }}
-      ],
-      "no_target_reason": null
-    }}
-  ]
+      }}
+    ],
+    "no_target_reason": null
+  }}
 }}
 
 Rules:
-1. Output every supplied source_id exactly once and do not invent source IDs. Judge each image only from its own visible pixels; never copy or infer a target for one source merely because it appears in another source.
-2. Return at most {max_targets_per_image} targets per image, ordered by priority and usefulness.
-3. target_id values must be unique within an image.
-4. object_name_zh and the English base category in sam_text_prompt must name the same complete independent object; before returning JSON, verify this cross-language match and verify that removing the optional modifier leaves a valid stable category. Never name an attached part when the larger object is visible.
-5. sam_text_prompt values must be unique within an image and follow the SAM3 prompt policy. Use stable category-level retrieval text rather than a detailed caption. Valid pairs include `透明水瓶` / `transparent water bottle` and `水瓶` / `water bottle`; `透明水瓶` / `drink cup` is invalid.
-6. If no qualifying target is visible, return an empty targets list and a brief non-empty no_target_reason.
-7. If targets is non-empty, no_target_reason must be null.
-8. Confidence expresses confidence that the region is an independent worthwhile object, not confidence in its exact category name.
+1. Return the supplied source_id exactly and at most {max_targets} targets.
+2. target_id values are unique. Duplicate sam_text_prompt values are allowed for different visible instances.
+3. temporary_target_anchor is a tight normalized [0,1] box around this instance and is used only for target-to-mask association.
+4. existing requires one exact supplied object_id. new and uncertain require matched_object_id null.
+5. When no memory cards are supplied, every target is new.
+6. If no qualifying target is visible, targets is empty and no_target_reason is non-empty; otherwise no_target_reason is null.
+7. proposed_object_summary is required for every target but will be committed only after the final identity decision.
 """
 
 
@@ -97,126 +115,133 @@ class SceneImageInput:
 
 @dataclass(frozen=True, slots=True)
 class SceneGuidanceEvaluation:
-    response: SceneGuidanceBatchResponse
+    response: SceneImageGuidance
     prediction: MllmPrediction
+    object_card_count: int
+    object_card_ids: tuple[str, ...]
+
+
+def _card_payload(card: ObjectCard) -> dict[str, Any]:
+    return {
+        "object_id": card.object_id,
+        "summary": card.summary.model_dump(mode="json"),
+    }
 
 
 def parse_scene_guidance_response(
     raw_text: str,
     *,
-    expected_source_ids: Sequence[str],
+    expected_source_id: str,
+    allowed_object_ids: set[str],
     max_targets_per_image: int,
-) -> SceneGuidanceBatchResponse:
-    """Validate source coverage and the Qwen-to-SAM3 text contract."""
+) -> SceneImageGuidance:
+    """Validate exact image coverage and all text-memory references."""
 
-    expected = list(expected_source_ids)
-    if not expected or len(expected) != len(set(expected)):
-        raise ValueError("expected source IDs must be non-empty and unique")
     try:
-        response = SceneGuidanceBatchResponse.model_validate(
-            extract_json_object(raw_text)
-        )
+        response = SceneGuidanceResponse.model_validate(extract_json_object(raw_text))
     except (ValidationError, ValueError) as exc:
         raise MllmOutputError(
-            f"Qwen scene-guidance response failed schema validation: {exc}"
+            f"Qwen single-pass response failed schema validation: {exc}"
         ) from exc
-
-    received = [item.source_id for item in response.images]
-    if len(received) != len(set(received)):
-        raise MllmOutputError("Qwen returned a source ID more than once")
-    if set(received) != set(expected):
-        missing = sorted(set(expected) - set(received))
-        unexpected = sorted(set(received) - set(expected))
+    image = response.image
+    if image.source_id != expected_source_id:
         raise MllmOutputError(
-            "Qwen scene coverage does not match the request; "
-            f"missing={missing}, unexpected={unexpected}"
+            "Qwen source coverage does not match the request; "
+            f"expected={expected_source_id}, received={image.source_id}"
         )
-    for image in response.images:
-        if len(image.targets) > max_targets_per_image:
+    if len(image.targets) > max_targets_per_image:
+        raise MllmOutputError(
+            f"Qwen returned too many targets for {expected_source_id}"
+        )
+    for target in image.targets:
+        if not allowed_object_ids and target.identity_hypothesis is not IdentityHypothesis.NEW:
             raise MllmOutputError(
-                f"Qwen returned too many scene targets for {image.source_id}"
+                "Every target must be new when no object cards were supplied: "
+                f"{target.target_id}"
             )
-    return response
+        if (
+            target.matched_object_id is not None
+            and target.matched_object_id not in allowed_object_ids
+        ):
+            raise MllmOutputError(
+                "Qwen referenced an object absent from the supplied cards: "
+                f"{target.matched_object_id}"
+            )
+    return image
 
 
 def build_scene_guidance_messages(
     *,
-    images: Sequence[SceneImageInput],
+    image: SceneImageInput,
+    cards: Sequence[ObjectCard],
     settings: MllmPipelineConfig,
 ) -> list[dict[str, Any]]:
-    """Build one first-pass request for up to the configured number of scenes."""
+    """Build the one permitted Qwen request for a source image."""
 
-    image_list = list(images)
-    if not image_list:
-        raise ValueError("Scene guidance requires at least one source image")
-    if len(image_list) > settings.scene_batch_size:
-        raise ValueError("Scene guidance batch exceeds configured batch size")
-    source_ids = [item.source_id for item in image_list]
-    if len(source_ids) != len(set(source_ids)):
-        raise ValueError("Scene-guidance source IDs must be unique")
-
+    image_path = image.image_path.expanduser().resolve()
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Scene source image not found: {image_path}")
+    card_list = list(cards)
+    object_ids = [card.object_id for card in card_list]
+    if len(object_ids) != len(set(object_ids)):
+        raise ValueError("Object-card IDs must be unique")
     content: list[dict[str, Any]] = [
         {
             "type": "text",
             "text": (
-                f"SCENE_BATCH begins. It contains {len(image_list)} independent "
-                "source viewpoints. Analyze and report each source separately."
+                f"CURRENT_SOURCE source_id={image.source_id}. "
+                "The following image is the only current visual input."
             ),
-        }
-    ]
-    for index, item in enumerate(image_list, start=1):
-        image_path = item.image_path.expanduser().resolve()
-        if not image_path.is_file():
-            raise FileNotFoundError(f"Scene source image not found: {image_path}")
-        content.extend(
-            [
-                {
-                    "type": "text",
-                    "text": (
-                        f"SCENE_{index} source_id={item.source_id}. "
-                        "The following image is one viewpoint of this exact scene."
-                    ),
-                },
-                {
-                    "type": "image",
-                    "image": image_path.as_uri(),
-                    "max_pixels": settings.max_pixels,
-                },
-            ]
-        )
-    content.append(
+        },
+        {
+            "type": "image",
+            "image": image_path.as_uri(),
+            "max_pixels": settings.max_pixels,
+        },
         {
             "type": "text",
             "text": (
-                "Create the robot-oriented observation plan now.\n"
-                + _output_rules(settings.max_scene_targets_per_image)
+                f"ACTIVE_OBJECT_CARDS count={len(card_list)}:\n"
+                + json.dumps(
+                    [_card_payload(card) for card in card_list],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
             ),
-        }
-    )
-    return [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": SCENE_GUIDANCE_SYSTEM_PROMPT}],
         },
+        {
+            "type": "text",
+            "text": _output_rules(settings.max_scene_targets_per_image),
+        },
+    ]
+    return [
+        {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
         {"role": "user", "content": content},
     ]
 
 
-def evaluate_scene_guidance_batch(
+def evaluate_scene_guidance(
     predictor: MllmPredictor,
     *,
-    images: Sequence[SceneImageInput],
+    image: SceneImageInput,
+    cards: Sequence[ObjectCard],
     settings: MllmPipelineConfig,
 ) -> SceneGuidanceEvaluation:
-    """Run and validate one batched first-pass scene survey."""
+    """Run the one Qwen call and validate its object-memory contract."""
 
-    image_list = list(images)
+    card_list = list(cards)
     prediction = predictor.predict(
-        build_scene_guidance_messages(images=image_list, settings=settings)
+        build_scene_guidance_messages(image=image, cards=card_list, settings=settings)
     )
     response = parse_scene_guidance_response(
         prediction.raw_text,
-        expected_source_ids=[item.source_id for item in image_list],
+        expected_source_id=image.source_id,
+        allowed_object_ids={card.object_id for card in card_list},
         max_targets_per_image=settings.max_scene_targets_per_image,
     )
-    return SceneGuidanceEvaluation(response=response, prediction=prediction)
+    return SceneGuidanceEvaluation(
+        response=response,
+        prediction=prediction,
+        object_card_count=len(card_list),
+        object_card_ids=tuple(card.object_id for card in card_list),
+    )

@@ -1,4 +1,4 @@
-"""Validated data exchanged between pipeline stages."""
+"""Validated data exchanged between the single-pass object-memory stages."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ Identifier = Annotated[
 ]
 RelativeAssetPath = Annotated[str, BeforeValidator(_relative_asset_path)]
 Confidence = Annotated[float, Field(ge=0.0, le=1.0)]
+CosineScore = Annotated[float, Field(ge=-1.0, le=1.0)]
 NonEmptyText = Annotated[str, Field(min_length=1)]
 
 
@@ -80,46 +81,109 @@ class ObjectStatus(str, Enum):
 class DecisionType(str, Enum):
     NEW = "new"
     EXISTING = "existing"
-    IGNORED = "ignored"
     UNCERTAIN = "uncertain"
 
 
 class DecisionReasonCode(str, Enum):
-    VALID_CANDIDATE = "valid_candidate"
     NEW_OBJECT = "new_object"
     VISUAL_INSTANCE_MATCH = "visual_instance_match"
-    INVALID_CANDIDATE = "invalid_candidate"
     AMBIGUOUS_MATCH = "ambiguous_match"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
-class CandidateValidity(str, Enum):
-    VALID = "valid"
-    IGNORED = "ignored"
+class IdentityHypothesis(str, Enum):
+    NEW = "new"
+    EXISTING = "existing"
+    UNCERTAIN = "uncertain"
 
 
-class SceneTargetPriority(str, Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
+class VisualMatchType(str, Enum):
+    MATCH = "match"
+    NO_MATCH = "no_match"
+    AMBIGUOUS = "ambiguous"
 
 
-class SceneTargetReasonCode(str, Enum):
-    MANIPULABLE = "manipulable"
-    TASK_RELEVANT = "task_relevant"
-    IDENTITY_WORTHY = "identity_worthy"
-    UNCERTAIN_STANDALONE = "uncertain_standalone"
+class PartAppearance(StrictModel):
+    part: NonEmptyText
+    color: list[NonEmptyText] = Field(default_factory=list)
+    material: list[NonEmptyText] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_values(self) -> "PartAppearance":
+        if len(self.color) != len(set(self.color)):
+            raise ValueError("part color values must be unique")
+        if len(self.material) != len(set(self.material)):
+            raise ValueError("part material values must be unique")
+        return self
+
+
+class ObjectSummary(StrictModel):
+    """The only long-lived text description for one physical object."""
+
+    object_name_zh: NonEmptyText
+    coarse_category: NonEmptyText
+    fine_category: NonEmptyText
+    stable_description: NonEmptyText
+    stable_identity_features: list[NonEmptyText] = Field(default_factory=list)
+    brand_or_markings: list[NonEmptyText] = Field(default_factory=list)
+    part_appearance: list[PartAppearance] = Field(default_factory=list)
+    summary_confidence: Confidence
+
+    @model_validator(mode="after")
+    def validate_unique_summary_entries(self) -> "ObjectSummary":
+        part_names = [item.part for item in self.part_appearance]
+        if len(part_names) != len(set(part_names)):
+            raise ValueError("object summary part names must be unique")
+        if len(self.stable_identity_features) != len(
+            set(self.stable_identity_features)
+        ):
+            raise ValueError("stable identity features must be unique")
+        if len(self.brand_or_markings) != len(set(self.brand_or_markings)):
+            raise ValueError("brand or marking values must be unique")
+        return self
+
+
+class CurrentViewFacts(StrictModel):
+    """Visible facts retained in the audited Qwen response, not the object card."""
+
+    category: NonEmptyText
+    visible_identity_features: list[NonEmptyText] = Field(default_factory=list)
+    brand_or_markings: list[NonEmptyText] = Field(default_factory=list)
+    part_appearance: list[PartAppearance] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_view_entries(self) -> "CurrentViewFacts":
+        part_names = [item.part for item in self.part_appearance]
+        if len(part_names) != len(set(part_names)):
+            raise ValueError("current-view part names must be unique")
+        return self
+
+
+class NormalizedBoundingBox(StrictModel):
+    x_min: Annotated[float, Field(ge=0.0, le=1.0)]
+    y_min: Annotated[float, Field(ge=0.0, le=1.0)]
+    x_max: Annotated[float, Field(ge=0.0, le=1.0)]
+    y_max: Annotated[float, Field(ge=0.0, le=1.0)]
+
+    @model_validator(mode="after")
+    def validate_corners(self) -> "NormalizedBoundingBox":
+        if self.x_max <= self.x_min or self.y_max <= self.y_min:
+            raise ValueError("Normalized bounding-box maximums must exceed minimums")
+        return self
 
 
 class SceneTarget(StrictModel):
-    """One first-pass object concept that may be sent to SAM3."""
+    """One Qwen-discovered instance, its SAM query, and its text identity guess."""
 
     target_id: Identifier
     object_name_zh: NonEmptyText
     sam_text_prompt: NonEmptyText
-    priority: SceneTargetPriority
-    confidence: Confidence
-    selection_reason_code: SceneTargetReasonCode
-    selection_short_reason: NonEmptyText
+    current_view_facts: CurrentViewFacts
+    identity_hypothesis: IdentityHypothesis
+    matched_object_id: Identifier | None = None
+    identity_short_reason: NonEmptyText
+    proposed_object_summary: ObjectSummary
+    temporary_target_anchor: NormalizedBoundingBox
 
     @field_validator("sam_text_prompt")
     @classmethod
@@ -135,54 +199,31 @@ class SceneTarget(StrictModel):
             raise ValueError(
                 "sam_text_prompt must describe one object concept without alternatives"
             )
-        position_words = {
-            "left",
-            "right",
-            "upper",
-            "lower",
-            "top",
-            "bottom",
-            "front",
-            "rear",
-            "near",
-            "on",
-            "in",
-            "under",
-            "above",
-            "below",
-            "behind",
-            "beside",
-            "between",
-            "next",
-            "to",
-            "by",
-            "from",
+        forbidden = {
+            "left", "right", "upper", "lower", "top", "bottom", "front",
+            "rear", "near", "on", "in", "under", "above", "below",
+            "behind", "beside", "between", "next", "to", "by", "from",
+            "object", "objects", "item", "items", "thing", "things",
+            "stuff", "scene", "region", "area", "background", "foreground",
         }
-        if position_words.intersection(words):
+        if forbidden.intersection(words):
             raise ValueError(
-                "sam_text_prompt must not use scene-relative position words"
+                "sam_text_prompt must use a concrete category without scene position"
             )
-        vague_words = {
-            "object",
-            "objects",
-            "item",
-            "items",
-            "thing",
-            "things",
-            "stuff",
-            "scene",
-            "region",
-            "area",
-            "background",
-            "foreground",
-        }
-        if vague_words.intersection(words):
-            raise ValueError("sam_text_prompt must use a concrete object category")
         return value
+
+    @model_validator(mode="after")
+    def validate_identity_hypothesis(self) -> "SceneTarget":
+        if self.identity_hypothesis is IdentityHypothesis.EXISTING:
+            if self.matched_object_id is None:
+                raise ValueError("existing hypothesis requires matched_object_id")
+        elif self.matched_object_id is not None:
+            raise ValueError("only existing hypothesis may carry matched_object_id")
+        return self
 
 
 class SceneImageGuidance(StrictModel):
-    """First-pass scene survey for one exact source image."""
+    """The only Qwen response for one exact source image."""
 
     source_id: Identifier
     scene_summary: NonEmptyText
@@ -192,11 +233,8 @@ class SceneImageGuidance(StrictModel):
     @model_validator(mode="after")
     def validate_scene_targets(self) -> "SceneImageGuidance":
         target_ids = [target.target_id for target in self.targets]
-        prompts = [target.sam_text_prompt for target in self.targets]
         if len(target_ids) != len(set(target_ids)):
             raise ValueError("scene target IDs must be unique within one image")
-        if len(prompts) != len(set(prompts)):
-            raise ValueError("SAM3 text prompts must be unique within one image")
         if self.targets and self.no_target_reason is not None:
             raise ValueError("no_target_reason is only valid when targets is empty")
         if not self.targets and not (self.no_target_reason or "").strip():
@@ -204,10 +242,8 @@ class SceneImageGuidance(StrictModel):
         return self
 
 
-class SceneGuidanceBatchResponse(StrictModel):
-    """One Qwen response covering a batch of source-scene images."""
-
-    images: list[SceneImageGuidance] = Field(min_length=1)
+class SceneGuidanceResponse(StrictModel):
+    image: SceneImageGuidance
 
 
 class BoundingBox(StrictModel):
@@ -231,6 +267,7 @@ class Run(StrictModel):
     config_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     sam_model_id: NonEmptyText
     qwen_model_id: NonEmptyText
+    dinov3_model_id: NonEmptyText
     error_message: str | None = None
 
 
@@ -252,6 +289,9 @@ class Proposal(StrictModel):
     source_image_id: Identifier
     raw_candidate_id: NonEmptyText
     prompt: NonEmptyText = "unknown"
+    target_id: Identifier | None = None
+    target_object_name_zh: str | None = None
+    target_anchor: NormalizedBoundingBox | None = None
     score: Confidence
     bbox: BoundingBox
     mask_area_pixels: int = Field(default=0, ge=0)
@@ -259,6 +299,7 @@ class Proposal(StrictModel):
     mask_path: RelativeAssetPath | None = None
     crop_path: RelativeAssetPath | None = None
     overlay_path: RelativeAssetPath | None = None
+    fingerprint: VisualFingerprint | None = None
     status: ProposalStatus = ProposalStatus.PENDING
     filter_reason: str | None = None
     error_message: str | None = None
@@ -268,152 +309,87 @@ class Proposal(StrictModel):
 
 class MemoryObject(StrictModel):
     id: Identifier = Field(default_factory=lambda: new_id("obj"))
-    coarse_category: NonEmptyText
-    fine_category: NonEmptyText
-    material: list[str] = Field(default_factory=list)
-    color: list[str] = Field(default_factory=list)
-    shape: NonEmptyText
-    description: NonEmptyText
-    annotation_confidence: Confidence
+    summary: ObjectSummary
     status: ObjectStatus = ObjectStatus.ACTIVE
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class ObjectAnnotation(StrictModel):
-    """Visible facts produced by the MLLM for one candidate observation."""
-
-    coarse_category: NonEmptyText
-    fine_category: NonEmptyText
-    material: list[str] = Field(default_factory=list)
-    color: list[str] = Field(default_factory=list)
-    shape: NonEmptyText
-    description: NonEmptyText
-    annotation_confidence: Confidence
-
-
 class ObjectCard(StrictModel):
-    """Compact known-object context sent to the MLLM."""
-
     object_id: Identifier
-    coarse_category: NonEmptyText
-    fine_category: NonEmptyText
-    material: list[str] = Field(default_factory=list)
-    color: list[str] = Field(default_factory=list)
-    shape: NonEmptyText
-    description: NonEmptyText
-    representative_view_paths: list[RelativeAssetPath] = Field(default_factory=list)
+    summary: ObjectSummary
 
 
-class BatchCandidateDecision(StrictModel):
-    """One candidate's ordered validity, annotation, and memory decision."""
+class VisualFingerprint(StrictModel):
+    path: RelativeAssetPath
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    model_id: NonEmptyText
+    revision: str = Field(pattern=r"^[a-f0-9]{40}$")
+    feature_layer: NonEmptyText
+    input_size: int = Field(gt=0)
+    storage_dtype: NonEmptyText
+    global_dimension: int = Field(gt=0)
+    local_count: int = Field(ge=0)
+    l2_normalized: bool
 
-    proposal_id: Identifier
-    validity: CandidateValidity
-    validity_confidence: Confidence
-    validity_reason_code: DecisionReasonCode
-    validity_short_reason: NonEmptyText
-    temporary_annotation: ObjectAnnotation | None
-    decision: DecisionType
-    matched_object_id: Identifier | None
-    confidence: Confidence
-    reason_code: DecisionReasonCode
-    short_reason: NonEmptyText
-    final_annotation: ObjectAnnotation | None
+
+class VisualObjectScore(StrictModel):
+    object_id: Identifier
+    observation_id: Identifier
+    global_similarity: CosineScore
+    local_match_ratio: Confidence
+    visual_score: CosineScore
+
+
+class VisualEvidence(StrictModel):
+    result: VisualMatchType
+    matched_object_id: Identifier | None = None
+    matched_observation_id: Identifier | None = None
+    global_similarity: CosineScore | None = None
+    local_match_ratio: Confidence | None = None
+    visual_score: CosineScore | None = None
+    second_best_score: CosineScore | None = None
+    score_margin: Annotated[float, Field(ge=0.0, le=2.0)] | None = None
+    object_scores: list[VisualObjectScore] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_batch_candidate(self) -> "BatchCandidateDecision":
-        if self.validity is CandidateValidity.IGNORED:
-            if self.validity_reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
-                raise ValueError("ignored validity requires invalid_candidate")
-            if self.decision is not DecisionType.IGNORED:
-                raise ValueError("ignored validity requires ignored decision")
-            if self.reason_code is not DecisionReasonCode.INVALID_CANDIDATE:
-                raise ValueError("ignored decision requires invalid_candidate")
-            if (
-                self.temporary_annotation is not None
-                or self.final_annotation is not None
-                or self.matched_object_id is not None
-            ):
-                raise ValueError(
-                    "ignored candidates cannot carry annotations or object IDs"
-                )
-            return self
-
-        if self.validity_reason_code is not DecisionReasonCode.VALID_CANDIDATE:
-            raise ValueError("valid candidates require valid_candidate")
-        if self.temporary_annotation is None or self.final_annotation is None:
-            raise ValueError(
-                "valid candidates require temporary and final annotations"
-            )
-        if self.decision is DecisionType.IGNORED:
-            raise ValueError("valid candidates cannot be ignored")
-        if self.decision is DecisionType.EXISTING:
-            if self.matched_object_id is None:
-                raise ValueError("existing requires matched_object_id")
-        elif self.matched_object_id is not None:
-            raise ValueError("only existing may carry matched_object_id")
-        allowed_reasons = {
-            DecisionType.NEW: {DecisionReasonCode.NEW_OBJECT},
-            DecisionType.EXISTING: {DecisionReasonCode.VISUAL_INSTANCE_MATCH},
-            DecisionType.UNCERTAIN: {
-                DecisionReasonCode.AMBIGUOUS_MATCH,
-                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
-            },
-        }
-        if self.reason_code not in allowed_reasons[self.decision]:
-            raise ValueError("reason_code does not agree with decision")
+    def validate_match(self) -> "VisualEvidence":
+        if self.result is VisualMatchType.MATCH:
+            if self.matched_object_id is None or self.matched_observation_id is None:
+                raise ValueError("visual match requires object and observation IDs")
+        elif self.matched_object_id is not None or self.matched_observation_id is not None:
+            raise ValueError("only a visual match may carry matched IDs")
         return self
 
-    def to_mllm_response(self) -> "MllmResponse":
-        return MllmResponse(
-            decision=self.decision,
-            matched_object_id=self.matched_object_id,
-            confidence=self.confidence,
-            reason_code=self.reason_code,
-            short_reason=self.short_reason,
-            annotation=self.final_annotation,
-        )
 
-
-class ImageBatchResponse(StrictModel):
-    """One Qwen response covering all retained candidates from one source image."""
-
-    candidates: list[BatchCandidateDecision] = Field(min_length=1)
-
-
-class MllmResponse(StrictModel):
-    """Validated combined identity decision and visible-object annotation."""
-
+class FinalIdentityDecision(StrictModel):
     decision: DecisionType
     matched_object_id: Identifier | None = None
     confidence: Confidence
     reason_code: DecisionReasonCode
     short_reason: NonEmptyText
-    annotation: ObjectAnnotation | None = None
+    qwen_hypothesis: IdentityHypothesis
+    qwen_matched_object_id: Identifier | None = None
+    visual_evidence: VisualEvidence
+    object_summary: ObjectSummary | None = None
 
     @model_validator(mode="after")
-    def validate_decision_payload(self) -> "MllmResponse":
-        if self.decision is DecisionType.EXISTING and self.matched_object_id is None:
-            raise ValueError("existing responses require matched_object_id")
-        if self.decision is not DecisionType.EXISTING and self.matched_object_id:
-            raise ValueError(
-                "matched_object_id is only valid for existing responses"
-            )
+    def validate_payload(self) -> "FinalIdentityDecision":
+        if self.decision is DecisionType.EXISTING:
+            if self.matched_object_id is None:
+                raise ValueError("existing decision requires matched_object_id")
+        elif self.matched_object_id is not None:
+            raise ValueError("only existing decision may carry matched_object_id")
         if self.decision in {DecisionType.NEW, DecisionType.EXISTING}:
-            if self.annotation is None:
-                raise ValueError("new and existing responses require annotation")
-        allowed_reasons = {
-            DecisionType.NEW: {DecisionReasonCode.NEW_OBJECT},
-            DecisionType.EXISTING: {DecisionReasonCode.VISUAL_INSTANCE_MATCH},
-            DecisionType.IGNORED: {DecisionReasonCode.INVALID_CANDIDATE},
-            DecisionType.UNCERTAIN: {
-                DecisionReasonCode.AMBIGUOUS_MATCH,
-                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
-            },
-        }
-        if self.reason_code not in allowed_reasons[self.decision]:
-            raise ValueError("reason_code does not agree with decision")
+            if self.object_summary is None:
+                raise ValueError("new and existing decisions require object_summary")
+        elif self.object_summary is not None:
+            raise ValueError("uncertain decisions cannot update an object summary")
+        if self.qwen_hypothesis is IdentityHypothesis.EXISTING:
+            if self.qwen_matched_object_id is None:
+                raise ValueError("existing Qwen hypothesis requires an object ID")
+        elif self.qwen_matched_object_id is not None:
+            raise ValueError("only existing Qwen hypothesis may carry an object ID")
         return self
 
 
@@ -422,10 +398,7 @@ class Observation(StrictModel):
     object_id: Identifier
     proposal_id: Identifier
     source_image_id: Identifier
-    crop_path: RelativeAssetPath
-    mask_path: RelativeAssetPath
-    overlay_path: RelativeAssetPath
-    description: NonEmptyText
+    fingerprint: VisualFingerprint
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -438,8 +411,11 @@ class Decision(StrictModel):
     reason_code: NonEmptyText
     short_reason: NonEmptyText
     prompt_version: NonEmptyText
+    qwen_hypothesis: IdentityHypothesis
+    qwen_matched_object_id: Identifier | None = None
+    visual_evidence: VisualEvidence
     raw_response_path: RelativeAssetPath | None = None
-    attempt: int = Field(default=1, ge=1)
+    attempt: int = Field(default=1, ge=1, le=1)
     created_at: datetime = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
@@ -449,3 +425,6 @@ class Decision(StrictModel):
         if self.decision is not DecisionType.EXISTING and self.matched_object_id:
             raise ValueError("matched_object_id is only valid for existing decisions")
         return self
+
+
+Proposal.model_rebuild()

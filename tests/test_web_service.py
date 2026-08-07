@@ -90,8 +90,8 @@ def add_completed_memory_run(
             """
             INSERT INTO runs (
                 id, status, started_at, completed_at, config_digest,
-                sam_model_id, qwen_model_id, error_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                sam_model_id, qwen_model_id, dinov3_model_id, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -101,11 +101,12 @@ def add_completed_memory_run(
                 "a" * 64,
                 "sam",
                 "qwen",
+                "dino",
                 None,
             ),
         )
     report: dict[str, Any] = {
-        "schema_version": 6,
+        "schema_version": 7,
         "status": "passed",
         "run": {"run_id": run_id},
         "images": [],
@@ -440,8 +441,8 @@ class MemoryLibraryTests(unittest.TestCase):
                     """
                     INSERT INTO runs (
                         id, status, started_at, completed_at, config_digest,
-                        sam_model_id, qwen_model_id, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        sam_model_id, qwen_model_id, dinov3_model_id, error_message
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -452,6 +453,7 @@ class MemoryLibraryTests(unittest.TestCase):
                             "a" * 64,
                             "sam",
                             "qwen",
+                            "dino",
                             None,
                         ),
                         (
@@ -462,6 +464,7 @@ class MemoryLibraryTests(unittest.TestCase):
                             "b" * 64,
                             "sam",
                             "qwen",
+                            "dino",
                             None,
                         ),
                     ],
@@ -557,10 +560,13 @@ class MemorySnapshotJoinTests(unittest.TestCase):
                     """
                     INSERT INTO runs (
                         id, status, started_at, completed_at, config_digest,
-                        sam_model_id, qwen_model_id, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        sam_model_id, qwen_model_id, dinov3_model_id, error_message
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    ("run_1", "completed", now, now, "a" * 64, "sam", "qwen", None),
+                    (
+                        "run_1", "completed", now, now, "a" * 64,
+                        "sam", "qwen", "dino", None,
+                    ),
                 )
                 connection.execute(
                     """
@@ -617,20 +623,30 @@ class MemorySnapshotJoinTests(unittest.TestCase):
                 connection.execute(
                     """
                     INSERT INTO objects (
-                        id, coarse_category, fine_category, material_json,
-                        color_json, shape, description, annotation_confidence,
-                        status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, summary_json, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         "obj_1",
-                        "容器",
-                        "水瓶",
-                        '["塑料"]',
-                        '["白色"]',
-                        "圆柱形",
-                        "白色水瓶",
-                        0.95,
+                        json.dumps(
+                            {
+                                "object_name_zh": "白色水瓶",
+                                "coarse_category": "容器",
+                                "fine_category": "水瓶",
+                                "stable_description": "白色水瓶",
+                                "stable_identity_features": ["细长瓶身"],
+                                "brand_or_markings": [],
+                                "part_appearance": [
+                                    {
+                                        "part": "瓶身",
+                                        "color": ["白色"],
+                                        "material": ["塑料"],
+                                    }
+                                ],
+                                "summary_confidence": 0.95,
+                            },
+                            ensure_ascii=False,
+                        ),
                         "active",
                         now,
                         now,
@@ -639,19 +655,28 @@ class MemorySnapshotJoinTests(unittest.TestCase):
                 connection.execute(
                     """
                     INSERT INTO observations (
-                        id, object_id, proposal_id, source_image_id, crop_path,
-                        mask_path, overlay_path, description, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, object_id, proposal_id, source_image_id,
+                        fingerprint_path, fingerprint_sha256,
+                        fingerprint_model_id, fingerprint_revision, feature_layer,
+                        input_size, storage_dtype, global_dimension, local_count,
+                        l2_normalized, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "obs_1",
                         "obj_1",
                         "prop_1",
                         "src_1",
-                        "objects/obj_1/observations/obs_1/crop.png",
-                        "objects/obj_1/observations/obs_1/mask.png",
-                        "objects/obj_1/observations/obs_1/overlay.jpg",
-                        "正面视角",
+                        "proposals/run_1/prop_1/fingerprint.npz",
+                        "f" * 64,
+                        "dino",
+                        "d" * 40,
+                        "last_hidden_state",
+                        512,
+                        "float16",
+                        768,
+                        20,
+                        1,
                         now,
                     ),
                 )
@@ -659,9 +684,10 @@ class MemorySnapshotJoinTests(unittest.TestCase):
                     """
                     INSERT INTO decisions (
                         id, proposal_id, decision, matched_object_id, confidence,
-                        reason_code, short_reason, prompt_version,
+                        reason_code, short_reason, prompt_version, qwen_hypothesis,
+                        qwen_matched_object_id, visual_evidence_json,
                         raw_response_path, attempt, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "dec_1",
@@ -672,6 +698,9 @@ class MemorySnapshotJoinTests(unittest.TestCase):
                         "new_object",
                         "新物体",
                         "v1",
+                        "new",
+                        None,
+                        json.dumps({"result": "no_match", "object_scores": []}),
                         "raw_responses/run_1/src_1/response.json",
                         1,
                         now,
@@ -683,7 +712,10 @@ class MemorySnapshotJoinTests(unittest.TestCase):
 
         self.assertTrue(snapshot["initialized"])
         self.assertEqual(snapshot["counts"]["objects"], 1)
-        self.assertEqual(snapshot["objects"][0]["material"], ["塑料"])
+        self.assertEqual(
+            snapshot["objects"][0]["part_appearance"][0]["material"],
+            ["塑料"],
+        )
         self.assertEqual(
             snapshot["objects"][0]["observations"][0]["source_path"],
             "sources/source.png",
@@ -709,7 +741,6 @@ class ResultSummaryTests(unittest.TestCase):
                 "decision_counts": {
                     "new": 1,
                     "existing": 1,
-                    "ignored": 0,
                     "uncertain": 0,
                 },
                 "duplicate_sources_skipped": 1,
@@ -718,7 +749,9 @@ class ResultSummaryTests(unittest.TestCase):
             },
             "images": [
                 {
-                    "scene_guidance": {"target_count": 2},
+                    "scene_guidance": {
+                        "targets": [{"target_id": "target_1"}, {"target_id": "target_2"}]
+                    },
                     "sam": {
                         "prompt_detection_counts": {
                             "water bottle": 1,

@@ -266,7 +266,7 @@ code {
 
 .demo-config {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   overflow: hidden;
   max-width: 820px;
   margin-top: 26px;
@@ -466,7 +466,8 @@ code {
 .status-pill.passed,
 .status-pill.completed,
 .status-pill.new,
-.status-pill.existing {
+.status-pill.existing,
+.status-pill.match {
   background: var(--green-soft);
   color: var(--green);
 }
@@ -1389,6 +1390,21 @@ code {
   margin-top: 3px;
 }
 
+.object-category {
+  margin: 5px 0 9px;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+}
+
+.object-field-label {
+  display: block;
+  margin-top: 9px;
+  color: var(--ink-faint);
+  font-size: 0.59rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
 .object-description {
   display: -webkit-box;
   overflow: hidden;
@@ -1410,7 +1426,7 @@ code {
 }
 
 .observation-item {
-  flex: 0 0 82px;
+  flex: 0 0 96px;
 }
 
 .observation-image {
@@ -1418,6 +1434,10 @@ code {
   aspect-ratio: 1;
   border-radius: 9px;
   background: #e8ebe8;
+}
+
+.observation-image + .observation-image {
+  margin-top: 4px;
 }
 
 .observation-item small {

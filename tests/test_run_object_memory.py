@@ -14,7 +14,7 @@ def passing_report() -> dict[str, Any]:
             "decision_counts": {
                 "new": 2,
                 "existing": 1,
-                "ignored": 0,
+                "uncertain": 0,
             },
             "proposal_counts": {
                 "filtered": 0,
@@ -31,7 +31,7 @@ class DemoCoverageTests(unittest.TestCase):
     def test_startup_failure_uses_current_report_schema(self) -> None:
         report = failure_report(ValueError("bad configuration"))
 
-        self.assertEqual(report["schema_version"], 6)
+        self.assertEqual(report["schema_version"], 7)
         self.assertEqual(report["status"], "failed")
         self.assertNotIn("run", report)
 
@@ -56,7 +56,7 @@ class DemoCoverageTests(unittest.TestCase):
         self.assertTrue(all(report["demo_coverage"].values()))
         self.assertEqual(
             report["demo_observations"],
-            {"filtered_or_ignored_candidate_observed": False},
+            {"filtered_candidate_observed": False},
         )
 
     def test_each_required_coverage_item_still_gates_validation(self) -> None:
@@ -91,23 +91,12 @@ class DemoCoverageTests(unittest.TestCase):
                 self.assertEqual(report["status"], "failed")
                 self.assertEqual(report["pipeline_status"], "passed")
 
-    def test_filter_or_ignore_is_observed_without_becoming_a_requirement(self) -> None:
-        for count_field, count_group in (
-            ("filtered", "proposal_counts"),
-            ("ignored", "decision_counts"),
-        ):
-            with self.subTest(count_field=count_field):
-                report = copy.deepcopy(passing_report())
-                report["run"][count_group][count_field] = 1
-
-                add_demo_coverage(report)
-
-                self.assertEqual(report["status"], "passed")
-                self.assertTrue(
-                    report["demo_observations"][
-                        "filtered_or_ignored_candidate_observed"
-                    ]
-                )
+    def test_filter_is_observed_without_becoming_a_requirement(self) -> None:
+        report = copy.deepcopy(passing_report())
+        report["run"]["proposal_counts"]["filtered"] = 1
+        add_demo_coverage(report)
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["demo_observations"]["filtered_candidate_observed"])
 
     def test_pipeline_failure_cannot_be_overridden_by_coverage(self) -> None:
         report = passing_report()

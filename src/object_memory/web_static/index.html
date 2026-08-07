@@ -35,8 +35,8 @@
           <h1>Collection<br />Demo</h1>
           <p class="hero-tagline">从场景图片到可持续对象记忆</p>
           <p class="hero-description">
-            上传一组场景图片后，Qwen3-VL 会提出值得观察的完整物体，SAM3 按文本目标定位和分割候选，
-            再由 Qwen3-VL 判断候选有效性与对象身份。对象档案和跨视角观测最终写入 SQLite，页面同步呈现完整过程、耗时与结果证据。
+            上传一组场景图片后，Qwen3-VL 会发现、命名并迭代对象文字档案，SAM3 按文本目标定位候选，
+            DINOv3 再用视角视觉指纹提供实例匹配证据。对象档案和跨视角观测最终写入 SQLite，页面同步呈现完整过程、耗时与结果证据。
           </p>
           <div class="demo-config" aria-label="默认 Demo 配置与服务器基线">
             <article>
@@ -48,8 +48,12 @@
               <strong>SAM3 0.1.0 · BF16 · 文本阈值 0.4</strong>
             </article>
             <article>
+              <span>默认视觉编码器</span>
+              <strong>DINOv3 ViT-B/16 · CLS + mask 内 patch</strong>
+            </article>
+            <article>
               <span>服务器与推理调度基线</span>
-              <strong>AutoDL · RTX 4090 24 GB · 单卡顺序加载</strong>
+              <strong>AutoDL · RTX 4090 24 GB · 三模型联合驻留（待实测）</strong>
             </article>
           </div>
           <a
@@ -154,8 +158,8 @@
           </li>
           <li data-flow-stage="candidate_reasoning">
             <span class="flow-number">04</span>
-            <strong>对象决策</strong>
-            <small>候选区域 → 对象决定</small>
+            <strong>视觉身份决策</strong>
+            <small>视觉指纹 → 双证据决定</small>
           </li>
           <li data-flow-stage="memory">
             <span class="flow-number">05</span>
@@ -243,7 +247,7 @@
               <span>03</span><strong>分割候选</strong><small id="tab-count-sam">等待结果</small>
             </button>
             <button role="tab" aria-selected="false" data-stage-tab="candidate_reasoning" type="button">
-              <span>04</span><strong>对象决策</strong><small id="tab-count-reasoning">等待结果</small>
+              <span>04</span><strong>视觉身份</strong><small id="tab-count-reasoning">等待结果</small>
             </button>
           </div>
           <div class="stage-panel" id="stage-panel" role="tabpanel" aria-live="polite">

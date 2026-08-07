@@ -1,822 +1,312 @@
-"""Deterministic end-to-end orchestration tests for the Demo pipeline."""
+"""Deterministic tests for the per-image Qwen/SAM3/DINOv3 loop."""
 
 from __future__ import annotations
 
 import json
 import re
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Sequence
-from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
 
-import object_memory.pipeline as pipeline_module
 from object_memory.assets import MemoryPaths
-from object_memory.config import DEFAULT_CONFIG_PATH, AppConfig, load_config
+from object_memory.config import DEFAULT_CONFIG_PATH, load_config
+from object_memory.dinov3_adapter import FingerprintData
 from object_memory.memory_store import MemoryStore
 from object_memory.mllm_adapter import MllmPrediction
-from object_memory.pipeline import ImageWork, ObjectMemoryPipeline
+from object_memory.pipeline import ObjectMemoryPipeline
 from object_memory.sam3_adapter import RawSamCandidate, Sam3Prediction
 
 
-def test_config() -> AppConfig:
-    return load_config(DEFAULT_CONFIG_PATH)
-
-
-def annotation_payload(*, existing: bool = False) -> dict[str, Any]:
+def summary_payload(description: str) -> dict[str, Any]:
     return {
-        "coarse_category": "cup",
-        "fine_category": "coffee cup",
-        "material": ["ceramic"],
-        "color": ["white"],
-        "shape": "round with handle",
-        "description": (
-            "updated cumulative white ceramic cup annotation"
-            if existing
-            else "white ceramic cup with handle"
-        ),
-        "annotation_confidence": 0.96,
+        "object_name_zh": "银灰色人体工学鼠标",
+        "coarse_category": "电子设备",
+        "fine_category": "鼠标",
+        "stable_description": description,
+        "stable_identity_features": ["整体非左右对称", "右侧轮廓隆起"],
+        "brand_or_markings": [],
+        "part_appearance": [
+            {"part": "外壳", "color": ["银灰色"], "material": ["塑料"]}
+        ],
+        "summary_confidence": 0.95,
     }
-
-
-def batch_candidate(
-    proposal_id: str,
-    *,
-    decision: str,
-    object_id: str | None = None,
-) -> dict[str, Any]:
-    if decision == "ignored":
-        return {
-            "proposal_id": proposal_id,
-            "validity": "ignored",
-            "validity_confidence": 0.95,
-            "validity_reason_code": "invalid_candidate",
-            "validity_short_reason": "not an independent physical object",
-            "temporary_annotation": None,
-            "decision": "ignored",
-            "matched_object_id": None,
-            "confidence": 0.95,
-            "reason_code": "invalid_candidate",
-            "short_reason": "shadow or fragment",
-            "final_annotation": None,
-        }
-    reasons = {
-        "new": "new_object",
-        "existing": "visual_instance_match",
-        "uncertain": "insufficient_evidence",
-    }
-    return {
-        "proposal_id": proposal_id,
-        "validity": "valid",
-        "validity_confidence": 0.95,
-        "validity_reason_code": "valid_candidate",
-        "validity_short_reason": "complete independent object",
-        "temporary_annotation": annotation_payload(),
-        "decision": decision,
-        "matched_object_id": object_id,
-        "confidence": 0.95,
-        "reason_code": reasons[decision],
-        "short_reason": "deterministic batch decision",
-        "final_annotation": annotation_payload(existing=decision == "existing"),
-    }
-
-
-class FakeSamRuntime:
-    def __init__(
-        self,
-        events: list[str],
-        *,
-        duplicate_candidate: bool = False,
-        second_candidate: bool = False,
-    ) -> None:
-        self.events = events
-        self.duplicate_candidate = duplicate_candidate
-        self.second_candidate = second_candidate
-        self.model_load_seconds = 0.1
-        self._peak_memory_mib = 100.0
-        self.received_prompts: list[tuple[str, ...]] = []
-        self.received_pixels: list[tuple[int, int, int]] = []
-
-    def load(self) -> None:
-        self.events.append("sam.load")
-
-    def predict(
-        self,
-        image: Image.Image,
-        prompts: Sequence[str],
-    ) -> Sam3Prediction:
-        self.events.append("sam.predict")
-        self.received_pixels.append(image.convert("RGB").getpixel((0, 0)))
-        normalized_prompts = tuple(prompts)
-        self.received_prompts.append(normalized_prompts)
-        prompt = normalized_prompts[0]
-        y_min = image.height // 4
-        y_max = image.height - y_min
-        first_x_min = image.width // 8
-        first_x_max = image.width // 2 - 1
-        first_mask = np.zeros((image.height, image.width), dtype=bool)
-        first_mask[y_min:y_max, first_x_min:first_x_max] = True
-        candidates = [
-            RawSamCandidate(
-                raw_candidate_id="candidate-main",
-                prompt=prompt,
-                score=0.95,
-                bbox_xyxy=(first_x_min, y_min, first_x_max, y_max),
-                mask=first_mask,
-            )
-        ]
-        if self.duplicate_candidate:
-            candidates.append(
-                RawSamCandidate(
-                    raw_candidate_id="candidate-duplicate",
-                    prompt=prompt,
-                    score=0.90,
-                    bbox_xyxy=(first_x_min, y_min, first_x_max, y_max),
-                    mask=first_mask.copy(),
-                )
-            )
-        if self.second_candidate:
-            second_x_min = image.width // 2 + 1
-            second_x_max = image.width - image.width // 8
-            second_mask = np.zeros((image.height, image.width), dtype=bool)
-            second_mask[y_min:y_max, second_x_min:second_x_max] = True
-            candidates.append(
-                RawSamCandidate(
-                    raw_candidate_id="candidate-second",
-                    prompt=prompt,
-                    score=0.94,
-                    bbox_xyxy=(second_x_min, y_min, second_x_max, y_max),
-                    mask=second_mask,
-                )
-            )
-        for prompt_index, extra_prompt in enumerate(
-            normalized_prompts[1:],
-            start=1,
-        ):
-            extra_x_min = image.width // 2 + 1
-            extra_x_max = image.width - image.width // 8
-            extra_mask = np.zeros((image.height, image.width), dtype=bool)
-            extra_mask[y_min:y_max, extra_x_min:extra_x_max] = True
-            candidates.append(
-                RawSamCandidate(
-                    raw_candidate_id=f"candidate-prompt-{prompt_index}",
-                    prompt=extra_prompt,
-                    score=0.93 - prompt_index * 0.01,
-                    bbox_xyxy=(extra_x_min, y_min, extra_x_max, y_max),
-                    mask=extra_mask,
-                )
-            )
-        prompt_counts = {
-            current_prompt: sum(
-                candidate.prompt == current_prompt for candidate in candidates
-            )
-            for current_prompt in normalized_prompts
-        }
-        return Sam3Prediction(
-            candidates=tuple(candidates),
-            prompt_counts=prompt_counts,
-            inference_seconds=0.2,
-        )
-
-    @property
-    def peak_memory_mib(self) -> float:
-        return self._peak_memory_mib
-
-    def close(self) -> None:
-        self.events.append("sam.close")
 
 
 class FakeQwenRuntime:
-    def __init__(
-        self,
-        events: list[str],
-        *,
-        scene_responses: list[str] | None = None,
-        candidate_responses: list[str] | None = None,
-        existing_decision: str = "existing",
-        no_scene_targets: bool = False,
-        scene_prompts: tuple[str, ...] = ("coffee cup",),
-        scene_failures: int = 0,
-        mutate_path_after_first_close: Path | None = None,
-    ) -> None:
+    model_load_seconds = 0.1
+    model_placement = ["cuda:0"]
+    resolved_snapshot = "fake-qwen"
+
+    def __init__(self, events: list[str], *, invalid: bool = False, two_targets: bool = False, no_targets: bool = False) -> None:
         self.events = events
-        self.scene_responses = list(scene_responses or [])
-        self.candidate_responses = list(candidate_responses or [])
-        self.existing_decision = existing_decision
-        self.no_scene_targets = no_scene_targets
-        self.scene_prompts = scene_prompts
-        self.scene_failures = scene_failures
-        self.mutate_path_after_first_close = mutate_path_after_first_close
-        self.model_load_seconds = 0.3
-        self.model_placement = ["0"]
-        self.resolved_snapshot = "fake-snapshot"
-        self._peak_memory_mib = 200.0
-        self.call_count = 0
-        self.scene_call_count = 0
-        self.candidate_call_count = 0
-        self.close_count = 0
+        self.invalid = invalid
+        self.two_targets = two_targets
+        self.no_targets = no_targets
+        self.calls = 0
 
     def load(self) -> None:
         self.events.append("qwen.load")
 
-    def predict(
-        self,
-        messages: Sequence[dict[str, Any]],
-    ) -> MllmPrediction:
+    def predict(self, messages: Sequence[dict[str, Any]]) -> MllmPrediction:
         self.events.append("qwen.predict")
-        self.call_count += 1
-        all_text = "\n".join(
+        self.calls += 1
+        text = "\n".join(
             item["text"]
             for message in messages
             for item in message["content"]
             if item["type"] == "text"
         )
-        if "SCENE_BATCH begins" in all_text:
-            self.scene_call_count += 1
-            if self.scene_failures > 0:
-                self.scene_failures -= 1
-                raise RuntimeError("synthetic scene inference failure")
-            if self.scene_responses:
-                raw_text = self.scene_responses.pop(0)
+        if self.invalid:
+            raw = "{}"
+        else:
+            source_id = re.search(r"source_id=(src_[A-Za-z0-9_-]+)", text).group(1)
+            object_ids = re.findall(r'"object_id": "(obj_[^"]+)"', text)
+            if self.no_targets:
+                targets: list[dict[str, Any]] = []
             else:
-                source_ids = re.findall(
-                    r"source_id=(src_[A-Za-z0-9_-]+)",
-                    all_text,
-                )
-                images = []
-                for source_id in source_ids:
-                    targets = [] if self.no_scene_targets else [
+                targets = []
+                count = 2 if self.two_targets else 1
+                for index in range(count):
+                    existing = bool(object_ids)
+                    x_min, x_max = ((0.125, 0.5) if index == 0 else (0.55, 0.9))
+                    targets.append(
                         {
-                            "target_id": f"target_{index:03d}",
-                            "object_name_zh": "测试物体",
-                            "sam_text_prompt": prompt,
-                            "priority": "high",
-                            "confidence": 0.95,
-                            "selection_reason_code": "manipulable",
-                            "selection_short_reason": "独立且可操作",
-                        }
-                        for index, prompt in enumerate(
-                            self.scene_prompts,
-                            start=1,
-                        )
-                    ]
-                    images.append(
-                        {
-                            "source_id": source_id,
-                            "scene_summary": "测试工作台",
-                            "targets": targets,
-                            "no_target_reason": (
-                                "没有值得观察的独立物体"
-                                if self.no_scene_targets
-                                else None
+                            "target_id": f"target_{index + 1:03d}",
+                            "object_name_zh": "银灰色人体工学鼠标",
+                            "sam_text_prompt": "computer mouse",
+                            "current_view_facts": {
+                                "category": "鼠标",
+                                "visible_identity_features": ["右侧轮廓隆起"],
+                                "brand_or_markings": [],
+                                "part_appearance": [],
+                            },
+                            "identity_hypothesis": "existing" if existing else "new",
+                            "matched_object_id": object_ids[0] if existing else None,
+                            "identity_short_reason": "轮廓证据",
+                            "proposed_object_summary": summary_payload(
+                                "银灰色非对称鼠标，右侧轮廓明显隆起。"
+                                if existing
+                                else "银灰色非对称鼠标。"
                             ),
+                            "temporary_target_anchor": {
+                                "x_min": x_min,
+                                "y_min": 0.125,
+                                "x_max": x_max,
+                                "y_max": 0.875,
+                            },
                         }
                     )
-                raw_text = json.dumps({"images": images}, ensure_ascii=False)
-        else:
-            self.candidate_call_count += 1
-            if self.candidate_responses:
-                raw_text = self.candidate_responses.pop(0)
-            else:
-                proposal_ids = re.findall(
-                    r"proposal_id=(prop_[A-Za-z0-9_-]+)",
-                    all_text,
+            raw = json.dumps(
+                {
+                    "image": {
+                        "source_id": source_id,
+                        "scene_summary": "桌面上的鼠标",
+                        "targets": targets,
+                        "no_target_reason": "没有目标" if not targets else None,
+                    }
+                },
+                ensure_ascii=False,
+            )
+        return MllmPrediction(raw, 100, 80, 0.2)
+
+    @property
+    def peak_memory_mib(self) -> float:
+        return 1000.0
+
+    def close(self) -> None:
+        self.events.append("qwen.close")
+
+
+class FakeSamRuntime:
+    model_load_seconds = 0.1
+
+    def __init__(self, events: list[str], *, two_candidates: bool = False) -> None:
+        self.events = events
+        self.two_candidates = two_candidates
+        self.received_prompts: list[tuple[str, ...]] = []
+
+    def load(self) -> None:
+        self.events.append("sam.load")
+
+    def predict(self, image: Image.Image, prompts: Sequence[str]) -> Sam3Prediction:
+        self.events.append("sam.predict")
+        self.received_prompts.append(tuple(prompts))
+        candidates = []
+        boxes = [(4, 4, 16, 28)]
+        if self.two_candidates:
+            boxes.append((18, 4, 29, 28))
+        for index, (x_min, y_min, x_max, y_max) in enumerate(boxes):
+            mask = np.zeros((image.height, image.width), dtype=bool)
+            mask[y_min:y_max, x_min:x_max] = True
+            candidates.append(
+                RawSamCandidate(
+                    raw_candidate_id=f"candidate_{index}",
+                    prompt=prompts[0],
+                    score=0.95 - index * 0.01,
+                    bbox_xyxy=(x_min, y_min, x_max, y_max),
+                    mask=mask,
                 )
-                object_ids = re.findall(
-                    r'"object_id": "(obj_[^"]+)"',
-                    all_text,
-                )
-                results: list[dict[str, Any]] = []
-                for index, proposal_id in enumerate(proposal_ids):
-                    if index > 0:
-                        results.append(
-                            batch_candidate(proposal_id, decision="ignored")
-                        )
-                    elif object_ids:
-                        results.append(
-                            batch_candidate(
-                                proposal_id,
-                                decision=self.existing_decision,
-                                object_id=(
-                                    object_ids[0]
-                                    if self.existing_decision == "existing"
-                                    else None
-                                ),
-                            )
-                        )
-                    else:
-                        results.append(
-                            batch_candidate(proposal_id, decision="new")
-                        )
-                raw_text = json.dumps({"candidates": results})
-        return MllmPrediction(
-            raw_text=raw_text,
-            input_tokens=100,
-            generated_tokens=80,
-            inference_seconds=0.4,
+            )
+        return Sam3Prediction(
+            candidates=tuple(candidates),
+            prompt_counts={prompts[0]: len(candidates)},
+            inference_seconds=0.1,
         )
 
     @property
     def peak_memory_mib(self) -> float:
-        return self._peak_memory_mib
+        return 1500.0
 
     def close(self) -> None:
-        self.events.append("qwen.close")
-        self.close_count += 1
-        if self.close_count == 1 and self.mutate_path_after_first_close:
-            Image.new("RGB", (24, 24), (0, 255, 0)).save(
-                self.mutate_path_after_first_close
-            )
+        self.events.append("sam.close")
+
+
+class FakeDinoRuntime:
+    model_load_seconds = 0.1
+    model_placement = ["cuda:0"]
+    resolved_snapshot = "a" * 40
+    feature_layer = "last_hidden_state"
+    last_inference_seconds = 0.05
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.extract_count = 0
+
+    def load(self) -> None:
+        self.events.append("dino.load")
+
+    def extract(self, **_: Any) -> FingerprintData:
+        self.events.append("dino.extract")
+        self.extract_count += 1
+        return FingerprintData(
+            global_embedding=np.asarray([1.0, 0.0], dtype=np.float32),
+            local_embeddings=np.asarray([[1.0, 0.0]], dtype=np.float32),
+            local_patch_indices=np.asarray([[0, 0]], dtype=np.int32),
+        )
+
+    @property
+    def peak_memory_mib(self) -> float:
+        return 2000.0
+
+    def close(self) -> None:
+        self.events.append("dino.close")
+
+
+def make_pipeline(
+    root: Path,
+    *,
+    qwen: FakeQwenRuntime,
+    sam: FakeSamRuntime,
+    dino: FakeDinoRuntime,
+) -> ObjectMemoryPipeline:
+    return ObjectMemoryPipeline(
+        config=load_config(DEFAULT_CONFIG_PATH),
+        paths=MemoryPaths(root / "memory"),
+        sam_runtime=sam,
+        mllm_runtime=qwen,
+        dino_runtime=dino,
+    )
 
 
 class PipelineTests(unittest.TestCase):
-    def test_batch_runs_models_sequentially_and_updates_memory_card(self) -> None:
+    def test_each_unique_image_calls_qwen_once_and_iterates_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            first = root / "first.png"
-            second = root / "second.png"
-            duplicate = root / "duplicate.png"
-            Image.new("RGB", (24, 24), (255, 0, 0)).save(first)
-            Image.new("RGB", (24, 24), (0, 0, 255)).save(second)
+            first, second, duplicate = root / "first.png", root / "second.png", root / "duplicate.png"
+            Image.new("RGB", (32, 32), (255, 0, 0)).save(first)
+            Image.new("RGB", (32, 32), (0, 0, 255)).save(second)
             shutil.copy2(first, duplicate)
             events: list[str] = []
-            paths = MemoryPaths(root / "memory")
             qwen = FakeQwenRuntime(events)
-            sam = FakeSamRuntime(events, duplicate_candidate=True)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=paths,
-                sam_runtime=sam,
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run(
-                [first, second, duplicate],
-                run_id="run_demo_batch",
-            )
+            sam = FakeSamRuntime(events)
+            dino = FakeDinoRuntime(events)
+            pipeline = make_pipeline(root, qwen=qwen, sam=sam, dino=dino)
+            report = pipeline.run([first, second, duplicate], run_id="run_demo")
 
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(report["schema_version"], 6)
-            self.assertTrue(all(report["checks"].values()))
+            self.assertEqual(qwen.calls, 2)
+            self.assertEqual(report["models"]["qwen"]["calls"], 2)
             self.assertEqual(
-                report["core_counts"],
-                {
-                    "runs": 1,
-                    "source_images": 2,
-                    "proposals": 4,
-                    "objects": 1,
-                    "observations": 2,
-                    "decisions": 2,
-                },
+                report["models"]["dinov3"]["result_counts"],
+                {"match": 1, "no_match": 1, "ambiguous": 0},
             )
-            self.assertEqual(report["run"]["duplicate_sources_skipped"], 1)
-            self.assertEqual(report["run"]["proposal_counts"]["filtered"], 2)
+            self.assertFalse(report["strategy"]["second_qwen_stage"])
             self.assertEqual(report["run"]["decision_counts"]["new"], 1)
             self.assertEqual(report["run"]["decision_counts"]["existing"], 1)
-            self.assertEqual(report["models"]["qwen"]["scene_batch_calls"], 1)
-            self.assertEqual(
-                report["models"]["qwen"]["candidate_reasoning_calls"],
-                2,
-            )
-            self.assertEqual(report["models"]["qwen"]["total_calls"], 3)
-            self.assertEqual(report["models"]["qwen"]["load_count"], 2)
-            self.assertEqual(report["models"]["sam3"]["confidence_threshold"], 0.4)
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"]["candidate_count"],
-                1,
-            )
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"][
-                    "object_card_count"
-                ],
-                0,
-            )
-            self.assertEqual(
-                report["images"][1]["candidate_reasoning"][
-                    "object_card_count"
-                ],
-                1,
-            )
-            self.assertEqual(
-                len(
-                    report["images"][1]["candidate_reasoning"][
-                        "object_card_ids"
-                    ]
-                ),
-                1,
-            )
-            self.assertEqual(
-                report["images"][0]["scene_guidance"]["target_count"],
-                1,
-            )
-            self.assertEqual(sam.received_prompts, [("coffee cup",)] * 2)
-            self.assertEqual(
-                report["images"][1]["decisions"][0]["temporary_annotation"][
-                    "fine_category"
-                ],
-                "coffee cup",
-            )
-            self.assertEqual(
-                report["images"][1]["decisions"][0]["final_annotation"][
-                    "description"
-                ],
-                "updated cumulative white ceramic cup annotation",
-            )
-            cards = MemoryStore(paths).list_object_cards(max_reference_views=2)
-            self.assertEqual(
-                cards[0].description,
-                "updated cumulative white ceramic cup annotation",
-            )
-            qwen_loads = [
-                index
-                for index, event in enumerate(events)
-                if event == "qwen.load"
-            ]
-            self.assertLess(qwen_loads[0], events.index("sam.load"))
-            self.assertLess(events.index("qwen.close"), events.index("sam.load"))
-            self.assertLess(events.index("sam.close"), qwen_loads[1])
-            self.assertEqual(qwen.call_count, 3)
-
-    def test_all_candidates_from_one_image_share_one_detailed_qwen_call(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 255, 255)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(events)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events, second_candidate=True),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run([image], run_id="run_demo_one_image_batch")
-
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.call_count, 2)
-            self.assertEqual(qwen.scene_call_count, 1)
-            self.assertEqual(qwen.candidate_call_count, 1)
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"]["candidate_count"],
-                2,
-            )
-            self.assertEqual(len(report["images"][0]["decisions"]), 2)
-            self.assertEqual(report["run"]["decision_counts"]["new"], 1)
-            self.assertEqual(report["run"]["decision_counts"]["ignored"], 1)
-
-    def test_multiple_scene_concepts_reach_sam_and_candidate_reasoning(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 255, 255)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(
-                events,
-                scene_prompts=("coffee cup", "computer mouse"),
-            )
-            sam = FakeSamRuntime(events)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=sam,
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run([image], run_id="run_demo_two_concepts")
-
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(
-                sam.received_prompts,
-                [("coffee cup", "computer mouse")],
-            )
-            self.assertEqual(
-                report["images"][0]["sam"]["prompt_detection_counts"],
-                {"coffee cup": 1, "computer mouse": 1},
-            )
-            self.assertEqual(
-                report["images"][0]["sam"]["zero_candidate_prompts"],
-                [],
-            )
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"]["candidate_count"],
-                2,
-            )
-
-    def test_image_report_lists_zero_candidate_prompts(self) -> None:
-        work = ImageWork(
-            input_path=Path("scene.jpg"),
-            candidate_source_counts={"water bottle": 1, "computer mouse": 0},
-        )
-
-        self.assertEqual(
-            work.as_dict()["sam"]["zero_candidate_prompts"],
-            ["computer mouse"],
-        )
-
-    def test_invalid_candidate_output_fails_after_single_call(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "image.png"
-            Image.new("RGB", (24, 24), (255, 255, 255)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(
-                events,
-                candidate_responses=["not json"],
-            )
-            paths = MemoryPaths(root / "memory")
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=paths,
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run([image], run_id="run_demo_candidate_failure")
-
-            self.assertEqual(report["status"], "completed_with_errors")
-            self.assertEqual(qwen.call_count, 2)
-            self.assertEqual(report["core_counts"]["decisions"], 0)
-            self.assertEqual(report["run"]["proposal_counts"]["failed"], 1)
-            self.assertEqual(
-                report["images"][0]["candidate_reasoning"]["qwen_calls"],
-                1,
-            )
+            self.assertEqual(report["run"]["active_objects_total"], 1)
+            self.assertEqual(report["run"]["observations_added"], 2)
             self.assertTrue(
-                report["images"][0]["candidate_reasoning"]["errors"]
+                all(
+                    proposal["status"] == "decided"
+                    for image_report in report["images"]
+                    for proposal in image_report["kept_proposals"]
+                )
             )
-            raw_path = report["images"][0]["candidate_reasoning"]["raw_response"]
-            self.assertEqual(Path(raw_path).name, "response.json")
-            raw_response = json.loads(
-                paths.resolve_asset(raw_path).read_text(encoding="utf-8")
-            )
-            self.assertEqual(len(raw_response["expected_proposal_ids"]), 1)
-            self.assertEqual(
-                raw_response["memory_context"]["object_card_count"],
-                0,
-            )
-            self.assertIsNotNone(raw_response["error"])
+            self.assertLess(events.index("dino.load"), events.index("qwen.predict"))
+            cards = MemoryStore(pipeline.paths).list_object_cards()
+            self.assertIn("明显隆起", cards[0].summary.stable_description)
+            with sqlite3.connect(pipeline.paths.database) as connection:
+                fingerprints = connection.execute(
+                    "SELECT fingerprint_json FROM proposals ORDER BY created_at"
+                ).fetchall()
+            self.assertTrue(all(row[0] for row in fingerprints))
 
-    def test_uncertain_is_persisted_without_immediate_second_call(self) -> None:
+    def test_duplicate_prompt_targets_share_query_and_pre_image_history(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            first = root / "first.png"
-            second = root / "second.png"
-            Image.new("RGB", (24, 24), (128, 128, 128)).save(first)
-            Image.new("RGB", (24, 24), (64, 64, 64)).save(second)
+            image = root / "two.png"
+            Image.new("RGB", (32, 32), (100, 100, 100)).save(image)
             events: list[str] = []
-            qwen = FakeQwenRuntime(events, existing_decision="uncertain")
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
+            qwen = FakeQwenRuntime(events, two_targets=True)
+            sam = FakeSamRuntime(events, two_candidates=True)
+            dino = FakeDinoRuntime(events)
+            report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
+                [image], run_id="run_two"
             )
+            self.assertEqual(qwen.calls, 1)
+            self.assertEqual(sam.received_prompts, [("computer mouse",)])
+            self.assertEqual(len(report["images"][0]["decisions"]), 2)
+            self.assertEqual(report["run"]["decision_counts"]["new"], 2)
+            self.assertEqual(report["run"]["decision_counts"]["uncertain"], 0)
+            self.assertEqual(report["run"]["active_objects_total"], 2)
 
-            report = pipeline.run(
-                [first, second],
-                run_id="run_demo_uncertain",
+    def test_invalid_qwen_output_fails_source_after_one_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            image = root / "one.png"
+            Image.new("RGB", (32, 32), (10, 20, 30)).save(image)
+            events: list[str] = []
+            qwen = FakeQwenRuntime(events, invalid=True)
+            sam = FakeSamRuntime(events)
+            dino = FakeDinoRuntime(events)
+            report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
+                [image], run_id="run_invalid"
             )
-
+            self.assertEqual(qwen.calls, 1)
+            self.assertNotIn("sam.predict", events)
             self.assertEqual(report["status"], "completed_with_errors")
-            self.assertEqual(qwen.call_count, 3)
-            self.assertEqual(report["run"]["proposal_counts"]["pending"], 1)
-            self.assertEqual(report["run"]["decision_counts"]["uncertain"], 1)
 
-    def test_empty_scene_guidance_skips_sam_and_candidate_reasoning(self) -> None:
+    def test_empty_target_response_skips_sam_and_dino(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "empty.png"
-            Image.new("RGB", (24, 24), (255, 255, 255)).save(image)
+            Image.new("RGB", (32, 32), (10, 20, 30)).save(image)
             events: list[str] = []
-            qwen = FakeQwenRuntime(events, no_scene_targets=True)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run([image], run_id="run_demo_no_targets")
-
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.call_count, 1)
-            self.assertEqual(qwen.candidate_call_count, 0)
-            self.assertNotIn("sam.predict", events)
-            self.assertEqual(report["core_counts"]["proposals"], 0)
-            self.assertEqual(
-                report["images"][0]["scene_guidance"]["target_count"],
-                0,
-            )
-
-    def test_scene_guidance_uses_configured_four_image_batches(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            images: list[Path] = []
-            for index in range(5):
-                image = root / f"scene_{index}.png"
-                Image.new("RGB", (24, 24), (index * 20, 0, 0)).save(image)
-                images.append(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(events)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run(images, run_id="run_demo_scene_batches")
-
-            self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.scene_call_count, 2)
-            self.assertEqual(qwen.candidate_call_count, 5)
-            self.assertEqual(report["models"]["qwen"]["total_calls"], 7)
-            self.assertEqual(
-                [
-                    image_report["scene_guidance"]["batch_index"]
-                    for image_report in report["images"]
-                ],
-                [1, 1, 1, 1, 2],
-            )
-
-    def test_invalid_scene_batch_fails_once_without_rescue(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            images: list[Path] = []
-            for index in range(2):
-                image = root / f"scene_{index}.png"
-                Image.new("RGB", (24, 24), (index * 40, 0, 0)).save(image)
-                images.append(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(
-                events,
-                scene_responses=["not json"],
-            )
-            paths = MemoryPaths(root / "memory")
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=paths,
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run(images, run_id="run_demo_scene_failure")
-
-            self.assertEqual(report["status"], "completed_with_errors")
-            self.assertEqual(qwen.scene_call_count, 1)
-            self.assertEqual(qwen.candidate_call_count, 0)
-            self.assertNotIn("sam.predict", events)
-            self.assertEqual(
-                report["models"]["qwen"]["phases"]["scene_guidance"][
-                    "scene_batches"
-                ],
-                1,
-            )
-            self.assertEqual(report["run"]["source_counts"]["failed"], 2)
-            raw_paths = set()
-            for image_report in report["images"]:
-                guidance = image_report["scene_guidance"]
-                self.assertEqual(guidance["qwen_calls"], 1)
-                self.assertTrue(guidance["errors"])
-                raw_paths.add(guidance["raw_response"])
-            self.assertEqual(len(raw_paths), 1)
-            raw_path = raw_paths.pop()
-            self.assertEqual(Path(raw_path).name, "response.json")
-            raw_response = json.loads(
-                paths.resolve_asset(raw_path).read_text(encoding="utf-8")
-            )
-            self.assertEqual(len(raw_response["expected_source_ids"]), 2)
-            self.assertIsNotNone(raw_response["error"])
-
-    def test_runtime_exception_fails_after_one_audited_call(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 0, 0)).save(image)
-            events: list[str] = []
-            paths = MemoryPaths(root / "memory")
-            qwen = FakeQwenRuntime(events, scene_failures=1)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=paths,
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-
-            report = pipeline.run([image], run_id="run_demo_scene_exception")
-
-            self.assertEqual(report["status"], "completed_with_errors")
-            self.assertEqual(report["models"]["qwen"]["scene_batch_calls"], 1)
-            guidance = report["images"][0]["scene_guidance"]
-            self.assertEqual(guidance["qwen_calls"], 1)
-            self.assertTrue(paths.resolve_asset(guidance["raw_response"]).is_file())
-            raw_response = json.loads(
-                paths.resolve_asset(guidance["raw_response"]).read_text(
-                    encoding="utf-8"
-                )
-            )
-            self.assertEqual(len(raw_response["expected_source_ids"]), 1)
-            self.assertEqual(raw_response["predictions"], [])
-            self.assertIsNotNone(raw_response["error"])
-
-    def test_sam_reads_the_canonical_source_after_input_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 0, 0)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(
-                events,
-                mutate_path_after_first_close=image,
-            )
+            qwen = FakeQwenRuntime(events, no_targets=True)
             sam = FakeSamRuntime(events)
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=sam,
-                mllm_runtime=qwen,
+            dino = FakeDinoRuntime(events)
+            report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
+                [image], run_id="run_empty"
             )
-
-            report = pipeline.run([image], run_id="run_demo_canonical_source")
-
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(sam.received_pixels, [(255, 0, 0)])
-
-    def test_scene_raw_write_failure_stops_after_single_model_call(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 0, 0)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(events)
-            original_write = pipeline_module.write_json_atomic
-
-            def fail_scene_raw(path: Path, payload: dict[str, Any]) -> None:
-                if "raw_responses" in path.parts:
-                    raise OSError("synthetic raw storage failure")
-                original_write(path, payload)
-
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-            with patch.object(
-                pipeline_module,
-                "write_json_atomic",
-                side_effect=fail_scene_raw,
-            ):
-                report = pipeline.run([image], run_id="run_demo_scene_raw_failure")
-
-            self.assertNotEqual(report["status"], "passed")
-            self.assertEqual(qwen.scene_call_count, 1)
-            self.assertEqual(qwen.candidate_call_count, 0)
             self.assertNotIn("sam.predict", events)
-
-    def test_candidate_raw_write_failure_never_persists_a_decision(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            image = root / "scene.png"
-            Image.new("RGB", (24, 24), (255, 0, 0)).save(image)
-            events: list[str] = []
-            qwen = FakeQwenRuntime(events)
-            original_write = pipeline_module.write_json_atomic
-
-            def fail_candidate_raw(path: Path, payload: dict[str, Any]) -> None:
-                if (
-                    "raw_responses" in path.parts
-                    and path.parent.name.startswith("src_")
-                ):
-                    raise OSError("synthetic candidate raw storage failure")
-                original_write(path, payload)
-
-            pipeline = ObjectMemoryPipeline(
-                config=test_config(),
-                paths=MemoryPaths(root / "memory"),
-                sam_runtime=FakeSamRuntime(events),
-                mllm_runtime=qwen,
-            )
-            with patch.object(
-                pipeline_module,
-                "write_json_atomic",
-                side_effect=fail_candidate_raw,
-            ):
-                report = pipeline.run(
-                    [image],
-                    run_id="run_demo_candidate_raw_failure",
-                )
-
-            self.assertNotEqual(report["status"], "passed")
-            self.assertEqual(qwen.scene_call_count, 1)
-            self.assertEqual(qwen.candidate_call_count, 1)
-            self.assertEqual(report["core_counts"]["decisions"], 0)
-            self.assertEqual(report["run"]["proposal_counts"]["failed"], 1)
+            self.assertEqual(dino.extract_count, 0)
 
 
 if __name__ == "__main__":

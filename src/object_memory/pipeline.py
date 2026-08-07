@@ -1,4 +1,4 @@
-"""Batch orchestration for SAM3, Qwen, and persistent object memory."""
+"""Per-image Qwen -> SAM3 -> DINOv3 -> memory orchestration."""
 
 from __future__ import annotations
 
@@ -15,23 +15,30 @@ from PIL import Image
 
 from .assets import MemoryPaths
 from .config import AppConfig, config_digest
-from .identity import (
-    BatchCandidateInput,
-    ImageBatchEvaluation,
-    evaluate_image_batch,
+from .dinov3_adapter import (
+    FingerprintData,
+    HistoricalFingerprint,
+    match_fingerprint,
+    read_fingerprint,
+    write_fingerprint,
+)
+from .identity_decision import (
+    associate_targets,
+    decide_identity,
+    unmatched_proposal_decision,
 )
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
 from .mllm_adapter import MllmPrediction
-from .progress import ProgressReporter, ProgressWriteError
+from .progress import ProgressReporter
 from .sam3_adapter import Sam3Prediction
 from .sam3_postprocess import process_candidates
 from .scene_guidance import (
     SceneGuidanceEvaluation,
     SceneImageInput,
-    evaluate_scene_guidance_batch,
+    evaluate_scene_guidance,
 )
-from .schemas import BatchCandidateDecision, Proposal, Run, SourceImage
+from .schemas import Proposal, Run, SceneTarget, SourceImage
 
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -42,11 +49,7 @@ class SamRuntime(Protocol):
 
     def load(self) -> None: ...
 
-    def predict(
-        self,
-        image: Image.Image,
-        prompts: Sequence[str],
-    ) -> Sam3Prediction: ...
+    def predict(self, image: Image.Image, prompts: Sequence[str]) -> Sam3Prediction: ...
 
     @property
     def peak_memory_mib(self) -> float: ...
@@ -61,10 +64,31 @@ class MllmRuntime(Protocol):
 
     def load(self) -> None: ...
 
-    def predict(
+    def predict(self, messages: Sequence[dict[str, Any]]) -> MllmPrediction: ...
+
+    @property
+    def peak_memory_mib(self) -> float: ...
+
+    def close(self) -> None: ...
+
+
+class DinoRuntime(Protocol):
+    model_load_seconds: float
+    model_placement: list[str]
+    resolved_snapshot: str | None
+    feature_layer: str
+    last_inference_seconds: float
+
+    def load(self) -> None: ...
+
+    def extract(
         self,
-        messages: Sequence[dict[str, Any]],
-    ) -> MllmPrediction: ...
+        *,
+        crop_path: Path,
+        mask_path: Path,
+        bbox: Any,
+        crop_padding_pixels: int,
+    ) -> FingerprintData: ...
 
     @property
     def peak_memory_mib(self) -> float: ...
@@ -78,17 +102,16 @@ class ImageWork:
     source: SourceImage | None = None
     duplicate: bool = False
     status: str = "discovered"
-    scene_prompts: tuple[str, ...] = ()
-    scene_guidance: dict[str, Any] | None = None
+    qwen: dict[str, Any] | None = None
     kept: tuple[Proposal, ...] = ()
     filtered: tuple[Proposal, ...] = ()
     filter_counts: dict[str, int] = field(default_factory=dict)
-    filtered_count: int = 0
     raw_candidate_count: int = 0
-    candidate_source_counts: dict[str, int] = field(default_factory=dict)
+    prompt_detection_counts: dict[str, int] = field(default_factory=dict)
     sam_inference_seconds: float = 0.0
+    fingerprint_count: int = 0
+    fingerprint_inference_seconds: float = 0.0
     decisions: list[dict[str, Any]] = field(default_factory=list)
-    candidate_reasoning: dict[str, Any] | None = None
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -99,57 +122,52 @@ class ImageWork:
             "stored_source": self.source.relative_path if self.source else None,
             "duplicate": self.duplicate,
             "status": self.status,
-            "scene_guidance": self.scene_guidance,
+            "qwen": self.qwen,
+            "scene_guidance": self.qwen.get("response") if self.qwen else None,
             "sam": {
                 "above_confidence_threshold_candidates": self.raw_candidate_count,
                 "kept": len(self.kept),
-                "filtered": self.filtered_count,
-                "prompt_detection_counts": self.candidate_source_counts,
+                "filtered": len(self.filtered),
+                "filter_counts": self.filter_counts,
+                "prompt_detection_counts": self.prompt_detection_counts,
                 "zero_candidate_prompts": [
                     prompt
-                    for prompt, count in self.candidate_source_counts.items()
+                    for prompt, count in self.prompt_detection_counts.items()
                     if count == 0
                 ],
                 "inference_seconds": round(self.sam_inference_seconds, 3),
             },
-            "candidate_reasoning": self.candidate_reasoning,
+            "kept_proposals": [
+                proposal.model_dump(mode="json") for proposal in self.kept
+            ],
+            "filtered_proposals": [
+                proposal.model_dump(mode="json") for proposal in self.filtered
+            ],
+            "dinov3": {
+                "fingerprints": self.fingerprint_count,
+                "inference_seconds": round(self.fingerprint_inference_seconds, 3),
+            },
             "decisions": self.decisions,
             "error": self.error,
         }
 
 
 class RecordingPredictor:
-    """Retain raw model text even when response parsing fails."""
+    """Retain the only raw Qwen response even when schema validation fails."""
 
     def __init__(self, runtime: MllmRuntime) -> None:
         self.runtime = runtime
         self.predictions: list[MllmPrediction] = []
         self.attempted_calls = 0
 
-    def predict(
-        self,
-        messages: Sequence[dict[str, Any]],
-    ) -> MllmPrediction:
+    def predict(self, messages: Sequence[dict[str, Any]]) -> MllmPrediction:
         self.attempted_calls += 1
         prediction = self.runtime.predict(messages)
         self.predictions.append(prediction)
         return prediction
 
 
-@dataclass(frozen=True, slots=True)
-class SceneGuidanceCallResult:
-    """One audited scene-guidance model call for one configured batch."""
-
-    scope_id: str
-    evaluation: SceneGuidanceEvaluation | None
-    qwen_calls: int
-    raw_response: str | None
-    errors: tuple[str, ...]
-
-
 def discover_images(input_directory: str | Path) -> list[Path]:
-    """Return a deterministic recursive list of supported source images."""
-
     root = Path(input_directory).expanduser().resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"Input image directory not found: {root}")
@@ -168,8 +186,8 @@ def discover_images(input_directory: str | Path) -> list[Path]:
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as file_handle:
-        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -188,7 +206,7 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 class ObjectMemoryPipeline:
-    """Run one unattended image batch with sequential GPU model residency."""
+    """Run a state-dependent per-image loop with all three models resident."""
 
     def __init__(
         self,
@@ -197,6 +215,7 @@ class ObjectMemoryPipeline:
         paths: MemoryPaths,
         sam_runtime: SamRuntime,
         mllm_runtime: MllmRuntime,
+        dino_runtime: DinoRuntime,
         progress: ProgressReporter | None = None,
     ) -> None:
         self.config = config
@@ -205,7 +224,27 @@ class ObjectMemoryPipeline:
         self.loop = MemoryLoop(self.store)
         self.sam_runtime = sam_runtime
         self.mllm_runtime = mllm_runtime
+        self.dino_runtime = dino_runtime
         self.progress = progress
+        self._qwen_metrics = {
+            "loaded": False,
+            "calls": 0,
+            "input_tokens": 0,
+            "generated_tokens": 0,
+            "inference_seconds": 0.0,
+        }
+        self._sam_metrics = {"loaded": False, "inference_seconds": 0.0}
+        self._dino_metrics = {
+            "loaded": False,
+            "fingerprints": 0,
+            "inference_seconds": 0.0,
+        }
+        self._peak_memory_mib = {
+            "qwen": 0.0,
+            "sam3": 0.0,
+            "dinov3": 0.0,
+            "joint": 0.0,
+        }
 
     def run(
         self,
@@ -213,13 +252,12 @@ class ObjectMemoryPipeline:
         *,
         run_id: str | None = None,
     ) -> dict[str, Any]:
-        normalized_images = [Path(path).expanduser().resolve() for path in image_paths]
-        if not normalized_images:
+        normalized = [Path(path).expanduser().resolve() for path in image_paths]
+        if not normalized:
             raise ValueError("At least one input image is required")
-        if any(not path.is_file() for path in normalized_images):
-            missing = next(path for path in normalized_images if not path.is_file())
+        missing = next((path for path in normalized if not path.is_file()), None)
+        if missing is not None:
             raise FileNotFoundError(f"Input image not found: {missing}")
-
         resolved_run_id = run_id or self._new_run_id()
         if self.progress is not None:
             self.progress.set_run_id(resolved_run_id)
@@ -229,8 +267,9 @@ class ObjectMemoryPipeline:
             config_digest=config_digest(self.config),
             sam_model_id=str(self.config.models.sam3_checkpoint),
             qwen_model_id=self.config.models.qwen_model_id,
+            dinov3_model_id=self.config.models.dinov3_model_id,
         )
-        works = [ImageWork(input_path=path) for path in normalized_images]
+        works = [ImageWork(input_path=path) for path in normalized]
         self.loop.begin_run(run)
         try:
             return self._run_active(run, works)
@@ -238,296 +277,526 @@ class ObjectMemoryPipeline:
             self._close_interrupted_run(run, works, exc)
             raise
 
-    def _run_active(
-        self,
-        run: Run,
-        works: list[ImageWork],
-    ) -> dict[str, Any]:
-        """Execute an already-open run under the lifecycle guard in ``run``."""
-
-        self._emit_progress(
+    def _run_active(self, run: Run, works: list[ImageWork]) -> dict[str, Any]:
+        self._emit(
             event="run_started",
             stage="run",
             status="running",
             current=0,
             total=len(works),
-            overall_percent=0.0,
             message="Object-memory run started",
-            data={
-                "input_count": len(works),
-                "memory_root": str(self.paths.root),
-            },
+            data={"memory_root": str(self.paths.root), "input_count": len(works)},
+            overall_percent=0.0,
         )
-        external_errors: list[str] = []
-        self._emit_progress(
-            event="input_registration_started",
-            stage="input_registration",
-            status="running",
-            current=0,
-            total=len(works),
-            message="Registering input images and applying the SHA-256 gate",
-            data={},
-        )
+        errors: list[str] = []
         for index, work in enumerate(works, start=1):
-            self._register_image(run, work, external_errors)
-            registration_status = (
-                "failed"
-                if work.status == "failed"
-                else "skipped"
-                if work.duplicate
-                else "completed"
-            )
-            self._emit_progress(
+            self._register_image(run, work, errors)
+            self._emit(
                 event="input_registered",
                 stage="input_registration",
-                status=registration_status,
+                status=("skipped" if work.duplicate else work.status),
                 current=index,
                 total=len(works),
-                message=(
-                    f"Input registration {registration_status}: "
-                    f"{work.input_path.name}"
-                ),
-                data=self._registration_progress_data(work),
+                message=f"Input registration finished: {work.input_path.name}",
+                data={
+                    "input_path": str(work.input_path),
+                    "filename": work.input_path.name,
+                    "source_id": work.source.id if work.source else None,
+                    "sha256": work.source.sha256 if work.source else None,
+                    "duplicate": work.duplicate,
+                    "work_status": work.status,
+                    "error": work.error,
+                },
             )
-        self._emit_progress(
-            event="input_registration_completed",
-            stage="input_registration",
-            status=("completed_with_errors" if external_errors else "completed"),
-            current=len(works),
-            total=len(works),
-            message="Input registration finished",
-            data={
-                "registered": sum(work.status == "registered" for work in works),
-                "duplicates": sum(work.duplicate for work in works),
-                "failed": sum(work.status == "failed" for work in works),
-            },
-        )
 
-        scene_metrics = self._run_scene_guidance(run, works)
-        sam_metrics = self._run_sam(run, works)
-        candidate_metrics = self._run_candidate_reasoning(run, works)
-        external_errors.extend(scene_metrics.pop("external_errors"))
-        external_errors.extend(sam_metrics.pop("external_errors"))
-        external_errors.extend(candidate_metrics.pop("external_errors"))
-        qwen_metrics = self._combine_qwen_metrics(
-            scene_metrics,
-            candidate_metrics,
-        )
+        pending = [work for work in works if work.status == "registered"]
+        if pending:
+            self._load_models(pending, errors)
+        try:
+            for index, work in enumerate(pending, start=1):
+                self._emit(
+                    event="image_loop_started",
+                    stage="per_image_loop",
+                    status="running",
+                    current=index - 1,
+                    total=len(pending),
+                    message=f"Processing {work.input_path.name}",
+                    data={"source_id": work.source.id if work.source else None},
+                    overall_percent=self._image_progress(
+                        index=index,
+                        total=len(pending),
+                        fraction=0.0,
+                    ),
+                )
+                self._process_image(
+                    run,
+                    work,
+                    errors,
+                    image_index=index,
+                    image_total=len(pending),
+                )
+                self._emit(
+                    event="image_loop_completed",
+                    stage="per_image_loop",
+                    status=work.status,
+                    current=index,
+                    total=len(pending),
+                    message=f"Finished {work.input_path.name}: {work.status}",
+                    data=work.as_dict(),
+                    overall_percent=self._image_progress(
+                        index=index,
+                        total=len(pending),
+                        fraction=1.0,
+                    ),
+                )
+        finally:
+            self._capture_peak_memory()
+            self._close_models()
 
-        summary = self.loop.complete_run(
-            run.id,
-            external_errors=len(external_errors),
-        )
+        summary = self.loop.complete_run(run.id, external_errors=len(errors))
         checks = self._build_checks(works, summary)
-        if summary.status.value == "completed" and all(checks.values()):
-            report_status = "passed"
-        elif summary.status.value == "completed":
-            report_status = "failed"
-        else:
-            report_status = summary.status.value
-        self._emit_progress(
-            event="report_started",
-            stage="report",
-            status="running",
-            current=0,
-            total=1,
-            message="Building the final run report",
-            data={"run_status": summary.status.value},
+        status = (
+            "passed"
+            if summary.status.value == "completed" and all(checks.values())
+            else summary.status.value
+            if summary.status.value != "completed"
+            else "failed"
         )
-        report = {
-            "schema_version": 6,
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "test": "object_memory_demo_batch",
-            "status": report_status,
-            "run": summary.as_dict(),
-            "checks": checks,
-            "strategy": {
-                "prompt_strategy": "qwen_scene_guidance_to_sam3_text_concepts",
-                "external_category_prompts": False,
-                "model_generated_category_prompts": True,
-                "scene_guidance_batch_size": (
-                    self.config.mllm_pipeline.scene_batch_size
-                ),
-                "max_scene_targets_per_image": (
-                    self.config.mllm_pipeline.max_scene_targets_per_image
-                ),
-                "scope": (
-                    "robot-oriented scene triage followed by open-vocabulary "
-                    "concept segmentation; first-pass recall must be audited"
-                ),
-                "model_residency": (
-                    "Qwen scene guidance then release; SAM3 text guidance then "
-                    "release; Qwen candidate reasoning then release"
-                ),
-                "qwen_call_policy": (
-                    "one scene-guidance call per configured source-image batch, "
-                    "then one detailed call per source image containing every "
-                    "retained candidate and every active memory object card"
-                ),
-                "scene_guidance_memory_context": (
-                    "none; discovery is driven only by each new scene view"
-                ),
-                "qwen_error_policy": (
-                    "one model call per logical scope; persist the raw result "
-                    "and fail the affected scope without automatic retry, "
-                    "single-source rescue, normalization, or fallback"
-                ),
-                "sam_candidate_semantics": (
-                    "SAM3 detections already above the processor text-confidence "
-                    "threshold, followed by script area, duplicate, same-prompt "
-                    "containment, and fair per-prompt capacity filtering"
-                ),
-                "candidate_context_image": (
-                    "original scene colors with a location box and no mask tint"
-                ),
-                "object_card_selection": (
-                    "all active cards with configured recent reference views; "
-                    "no script-side similarity ranking or shortlist"
-                ),
-                "uncertain_policy": "persist pending; do not immediately repeat",
-                "scene_prompt_version": (
-                    self.config.mllm_pipeline.scene_prompt_version
-                ),
-                "candidate_prompt_version": (
-                    self.config.mllm_pipeline.prompt_version
-                ),
-            },
-            "models": {
-                "sam3": sam_metrics,
-                "qwen": qwen_metrics,
-            },
-            "images": [work.as_dict() for work in works],
-            "external_errors": external_errors,
-            "core_counts": self.store.status().counts,
-        }
+        report = self._build_report(run, works, summary, checks, status, errors)
         report_path = self.paths.run_reports / f"{run.id}.json"
         report["run_report"] = self.paths.relative_asset(report_path)
         write_json_atomic(report_path, report)
-        self._emit_progress(
-            event="report_completed",
-            stage="report",
-            status="completed",
-            current=1,
-            total=1,
-            message="Final run report was written",
-            data={
-                "report_status": report_status,
-                "run_report": report["run_report"],
-                "run": report["run"],
-            },
-        )
-        self._emit_progress(
+        self._emit(
             event="run_completed",
             stage="run",
-            status=report_status,
+            status=status,
             current=1,
             total=1,
+            message=f"Object-memory run completed with status={status}",
+            data={"run_report": report["run_report"], "run": report["run"]},
             overall_percent=100.0,
-            message=f"Object-memory run completed with status={report_status}",
-            data={"run_report": report["run_report"]},
         )
         return report
 
-    def _close_interrupted_run(
-        self,
-        run: Run,
-        works: Sequence[ImageWork],
-        original_error: BaseException,
-    ) -> None:
-        """Best-effort SQLite cleanup without replacing the triggering error."""
-
-        error_message = f"{type(original_error).__name__}: {original_error}"
-        cleanup_errors: list[str] = []
-        for work in works:
-            if (
-                work.source is None
-                or work.duplicate
-                or work.status in {"completed", "failed"}
-            ):
-                continue
-            try:
-                self.loop.fail_source(work.source.id, error_message)
-                work.status = "failed"
-                work.error = error_message
-            except BaseException as cleanup_error:  # noqa: BLE001
-                cleanup_errors.append(
-                    "fail source "
-                    f"{work.source.id}: {type(cleanup_error).__name__}: "
-                    f"{cleanup_error}"
-                )
-
+    def _load_models(self, works: Sequence[ImageWork], errors: list[str]) -> None:
+        self._emit(
+            event="models_load_started",
+            stage="models",
+            status="running",
+            current=0,
+            total=3,
+            message="Loading Qwen, SAM3, and DINOv3 for joint residency",
+            data={},
+            overall_percent=10.0,
+        )
         try:
-            self.store.complete_run(run.id, error_message=error_message)
-        except BaseException as cleanup_error:  # noqa: BLE001
-            cleanup_errors.append(
-                "complete run "
-                f"{run.id}: {type(cleanup_error).__name__}: {cleanup_error}"
-            )
-
-        if cleanup_errors:
-            try:
-                original_error.add_note(
-                    "Object-memory cleanup also encountered: "
-                    + "; ".join(cleanup_errors)
-                )
-            except BaseException:  # noqa: BLE001 - preserve original at all costs
-                pass
-
-    def _emit_progress(
-        self,
-        *,
-        event: str,
-        stage: str,
-        status: str,
-        current: int,
-        total: int,
-        message: str,
-        data: dict[str, Any],
-        overall_percent: float | None = None,
-    ) -> None:
-        if self.progress is None:
+            self.mllm_runtime.load()
+            self._qwen_metrics["loaded"] = True
+            self.sam_runtime.load()
+            self._sam_metrics["loaded"] = True
+            self.dino_runtime.load()
+            self._dino_metrics["loaded"] = True
+        except Exception as exc:  # noqa: BLE001 - joint residency is an experiment result
+            message = f"{type(exc).__name__}: {exc}"
+            errors.append(f"joint model residency: {message}")
+            for work in works:
+                if work.source is not None and work.status == "registered":
+                    self._fail_source(work, message, errors)
+            self._capture_peak_memory()
+            self._close_models()
             return
-        self.progress.emit(
-            event=event,
-            stage=stage,
-            status=status,
-            current=current,
-            total=total,
-            message=message,
-            data=data,
-            overall_percent=overall_percent,
+        self._emit(
+            event="models_load_completed",
+            stage="models",
+            status="completed",
+            current=3,
+            total=3,
+            message="All three models are resident",
+            data={
+                "qwen_load_seconds": self.mllm_runtime.model_load_seconds,
+                "sam3_load_seconds": self.sam_runtime.model_load_seconds,
+                "dinov3_load_seconds": self.dino_runtime.model_load_seconds,
+                "combined_peak_memory_mib": self._combined_peak_memory(),
+            },
+            overall_percent=10.0,
         )
 
-    @staticmethod
-    def _registration_progress_data(work: ImageWork) -> dict[str, Any]:
-        return {
-            "input_path": str(work.input_path),
-            "filename": work.input_path.name,
-            "source_id": work.source.id if work.source else None,
-            "sha256": work.source.sha256 if work.source else None,
-            "stored_source": work.source.relative_path if work.source else None,
-            "duplicate": work.duplicate,
-            "work_status": work.status,
-            "error": work.error,
-        }
+    def _process_image(
+        self,
+        run: Run,
+        work: ImageWork,
+        errors: list[str],
+        *,
+        image_index: int,
+        image_total: int,
+    ) -> None:
+        if work.status != "registered" or work.source is None:
+            return
+        if not all(
+            (
+                self._qwen_metrics["loaded"],
+                self._sam_metrics["loaded"],
+                self._dino_metrics["loaded"],
+            )
+        ):
+            return
+        source_asset = self.paths.resolve_asset(work.source.relative_path)
+        self._emit(
+            event="scene_guidance_image_started",
+            stage="scene_guidance",
+            status="running",
+            current=0,
+            total=1,
+            message=f"Qwen is reading {work.input_path.name} and current text memory",
+            data={"input_path": str(work.input_path), "source_id": work.source.id},
+            overall_percent=self._image_progress(
+                index=image_index,
+                total=image_total,
+                fraction=0.0,
+            ),
+        )
+        evaluation, raw_path = self._run_qwen_once(run, work, source_asset, errors)
+        if evaluation is None or raw_path is None:
+            return
+        self._emit(
+            event="scene_guidance_image_completed",
+            stage="scene_guidance",
+            status="completed",
+            current=1,
+            total=1,
+            message=f"Qwen single-pass response completed for {work.input_path.name}",
+            data={
+                "input_path": str(work.input_path),
+                "source_id": work.source.id,
+                "work_status": work.status,
+                "qwen": work.qwen,
+                "scene_guidance": evaluation.response.model_dump(mode="json"),
+            },
+            overall_percent=self._image_progress(
+                index=image_index,
+                total=image_total,
+                fraction=0.25,
+            ),
+        )
+        targets = list(evaluation.response.targets)
+        if not targets:
+            self._complete_source(work, errors)
+            return
 
-    @staticmethod
-    def _new_run_id() -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        return f"run_{timestamp}"
+        try:
+            self._emit(
+                event="sam3_image_started",
+                stage="sam3",
+                status="running",
+                current=0,
+                total=1,
+                message=f"SAM3 is segmenting {work.input_path.name}",
+                data={"input_path": str(work.input_path), "source_id": work.source.id},
+                overall_percent=self._image_progress(
+                    index=image_index,
+                    total=image_total,
+                    fraction=0.25,
+                ),
+            )
+            prompts = list(dict.fromkeys(target.sam_text_prompt for target in targets))
+            with Image.open(source_asset) as opened:
+                image = opened.convert("RGB")
+            prediction = self.sam_runtime.predict(image, prompts)
+            self._sam_metrics["inference_seconds"] += prediction.inference_seconds
+            work.sam_inference_seconds = prediction.inference_seconds
+            work.raw_candidate_count = len(prediction.candidates)
+            work.prompt_detection_counts = prediction.prompt_counts
+            processed = process_candidates(
+                prediction.candidates,
+                image=image,
+                source_image_id=work.source.id,
+                run_id=run.id,
+                paths=self.paths,
+                settings=self.config.sam3_pipeline,
+            )
+            work.kept = processed.kept
+            work.filtered = processed.filtered
+            work.filter_counts = processed.filter_counts
+            for proposal in work.filtered:
+                self.loop.record_filtered_proposal(proposal)
+            self._emit(
+                event="sam3_image_completed",
+                stage="sam3",
+                status="completed",
+                current=1,
+                total=1,
+                message=f"SAM3 completed {work.input_path.name}",
+                data={
+                    "input_path": str(work.input_path),
+                    "source_id": work.source.id,
+                    "work_status": work.status,
+                    "sam": work.as_dict()["sam"],
+                    "kept_proposals": [
+                        proposal.model_dump(mode="json") for proposal in work.kept
+                    ],
+                    "filtered_proposals": [
+                        proposal.model_dump(mode="json") for proposal in work.filtered
+                    ],
+                },
+                overall_percent=self._image_progress(
+                    index=image_index,
+                    total=image_total,
+                    fraction=0.6,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._fail_source(work, f"{type(exc).__name__}: {exc}", errors)
+            return
+
+        assignments = associate_targets(
+            work.kept,
+            targets,
+            image_width=work.source.width,
+            image_height=work.source.height,
+            minimum_iou=self.config.mllm_pipeline.target_proposal_iou_threshold,
+        )
+        try:
+            historical = [
+                HistoricalFingerprint(
+                    object_id=record.object_id,
+                    observation_id=record.observation_id,
+                    data=read_fingerprint(
+                        self.paths.resolve_asset(record.path),
+                        expected_sha256=record.sha256,
+                    ),
+                )
+                for record in self.loop.fingerprint_records()
+            ]
+        except Exception as exc:  # noqa: BLE001 - corrupt history stops this source
+            message = f"{type(exc).__name__}: {exc}"
+            for proposal in work.kept:
+                self._record_proposal_failure(proposal, message, work, errors)
+            self._fail_source(work, message, errors, append_error=False)
+            return
+        self._emit(
+            event="visual_identity_started",
+            stage="candidate_reasoning",
+            status="running",
+            current=0,
+            total=len(work.kept),
+            message=f"DINOv3 is fingerprinting {len(work.kept)} proposals",
+            data={"input_path": str(work.input_path), "source_id": work.source.id},
+            overall_percent=self._image_progress(
+                index=image_index,
+                total=image_total,
+                fraction=0.6,
+            ),
+        )
+        for index, proposal in enumerate(work.kept):
+            try:
+                decision_report = self._process_proposal(
+                    proposal,
+                    assignments.get(proposal.id),
+                    historical=historical,
+                    raw_path=raw_path,
+                )
+                work.decisions.append(decision_report)
+                work.fingerprint_count += 1
+                work.fingerprint_inference_seconds += float(
+                    getattr(self.dino_runtime, "last_inference_seconds", 0.0)
+                )
+            except Exception as exc:  # noqa: BLE001 - stop this source, no rescue
+                message = f"{type(exc).__name__}: {exc}"
+                errors.append(f"proposal {proposal.id}: {message}")
+                self._record_proposal_failure(proposal, message, work, errors)
+                for remaining in work.kept[index + 1 :]:
+                    self._record_proposal_failure(
+                        remaining,
+                        f"source stopped after proposal failure: {proposal.id}",
+                        work,
+                        errors,
+                    )
+                self._fail_source(work, message, errors, append_error=False)
+                return
+        self._emit(
+            event="visual_identity_completed",
+            stage="candidate_reasoning",
+            status="completed",
+            current=len(work.kept),
+            total=len(work.kept),
+            message=f"Visual identity decisions completed for {work.input_path.name}",
+            data={
+                "input_path": str(work.input_path),
+                "source_id": work.source.id,
+                "work_status": work.status,
+                "dinov3": work.as_dict()["dinov3"],
+                "decisions": work.decisions,
+            },
+            overall_percent=self._image_progress(
+                index=image_index,
+                total=image_total,
+                fraction=1.0,
+            ),
+        )
+        self._complete_source(work, errors)
+
+    def _run_qwen_once(
+        self,
+        run: Run,
+        work: ImageWork,
+        source_asset: Path,
+        errors: list[str],
+    ) -> tuple[SceneGuidanceEvaluation | None, str | None]:
+        assert work.source is not None
+        recorder = RecordingPredictor(self.mllm_runtime)
+        evaluation: SceneGuidanceEvaluation | None = None
+        call_error: str | None = None
+        cards = self.loop.object_cards()
+        try:
+            evaluation = evaluate_scene_guidance(
+                recorder,
+                image=SceneImageInput(work.source.id, source_asset),
+                cards=cards,
+                settings=self.config.mllm_pipeline,
+            )
+        except Exception as exc:  # noqa: BLE001 - one call, failure is evidence
+            call_error = f"{type(exc).__name__}: {exc}"
+        self._qwen_metrics["calls"] += recorder.attempted_calls
+        self._qwen_metrics["input_tokens"] += sum(
+            prediction.input_tokens for prediction in recorder.predictions
+        )
+        self._qwen_metrics["generated_tokens"] += sum(
+            prediction.generated_tokens for prediction in recorder.predictions
+        )
+        self._qwen_metrics["inference_seconds"] += sum(
+            prediction.inference_seconds for prediction in recorder.predictions
+        )
+        raw_path: str | None = None
+        try:
+            path = self.paths.raw_response_dir(run.id, work.source.id) / "response.json"
+            payload = {
+                "stage": "single_qwen_object_memory",
+                "prompt_version": self.config.mllm_pipeline.prompt_version,
+                "source_id": work.source.id,
+                "memory_context": {
+                    "object_card_count": len(cards),
+                    "object_card_ids": [card.object_id for card in cards],
+                    "selection": "all_active_text_summaries",
+                    "historical_images_supplied": False,
+                },
+                "error": call_error,
+                "response": (
+                    evaluation.response.model_dump(mode="json")
+                    if evaluation is not None
+                    else None
+                ),
+                "predictions": [
+                    {
+                        "raw_text": prediction.raw_text,
+                        "input_tokens": prediction.input_tokens,
+                        "generated_tokens": prediction.generated_tokens,
+                        "inference_seconds": prediction.inference_seconds,
+                    }
+                    for prediction in recorder.predictions
+                ],
+            }
+            write_json_atomic(path, payload)
+            raw_path = self.paths.relative_asset(path)
+        except Exception as exc:  # noqa: BLE001 - raw evidence is mandatory
+            call_error = f"raw response persistence failed: {type(exc).__name__}: {exc}"
+            evaluation = None
+        work.qwen = {
+            "calls": recorder.attempted_calls,
+            "object_card_count": len(cards),
+            "object_card_ids": [card.object_id for card in cards],
+            "raw_response": raw_path,
+            "response": (
+                evaluation.response.model_dump(mode="json")
+                if evaluation is not None
+                else None
+            ),
+            "error": call_error,
+        }
+        if evaluation is None:
+            message = call_error or "Qwen produced no usable single-pass response"
+            self._fail_source(work, message, errors)
+        return evaluation, raw_path
+
+    def _process_proposal(
+        self,
+        proposal: Proposal,
+        target: SceneTarget | None,
+        *,
+        historical: Sequence[HistoricalFingerprint],
+        raw_path: str,
+    ) -> dict[str, Any]:
+        if not proposal.crop_path or not proposal.mask_path:
+            raise ValueError("Kept proposal has no crop or mask asset")
+        fingerprint_data = self.dino_runtime.extract(
+            crop_path=self.paths.resolve_asset(proposal.crop_path),
+            mask_path=self.paths.resolve_asset(proposal.mask_path),
+            bbox=proposal.bbox,
+            crop_padding_pixels=self.config.sam3_pipeline.crop_padding_pixels,
+        )
+        fingerprint_path = self.paths.resolve_asset(proposal.crop_path).parent / "fingerprint.npz"
+        fingerprint = write_fingerprint(
+            fingerprint_path,
+            fingerprint_data,
+            relative_path=self.paths.relative_asset(fingerprint_path),
+            model_id=self.config.models.dinov3_model_id,
+            revision=self.config.models.dinov3_revision,
+            feature_layer=self.dino_runtime.feature_layer,
+            input_size=self.config.visual_fingerprint.input_size,
+            storage_dtype=self.config.visual_fingerprint.storage_dtype,
+        )
+        proposal.fingerprint = fingerprint
+        visual = match_fingerprint(
+            fingerprint_data,
+            historical,
+            self.config.visual_fingerprint,
+        )
+        result = (
+            decide_identity(target, visual)
+            if target is not None
+            else unmatched_proposal_decision(visual)
+        )
+        write_result = self.loop.apply_decision(
+            proposal=proposal,
+            result=result,
+            fingerprint=fingerprint,
+            prompt_version=self.config.mllm_pipeline.prompt_version,
+            raw_response_path=raw_path,
+        )
+        self._dino_metrics["fingerprints"] += 1
+        self._dino_metrics["inference_seconds"] += float(
+            getattr(self.dino_runtime, "last_inference_seconds", 0.0)
+        )
+        return {
+            "proposal_id": proposal.id,
+            "target_id": target.target_id if target else None,
+            "target_object_name_zh": target.object_name_zh if target else None,
+            "sam_text_prompt": proposal.prompt,
+            "status": write_result.proposal_status.value,
+            "decision": write_result.decision.value,
+            "object_id": write_result.object_id,
+            "qwen_identity_hypothesis": result.qwen_hypothesis.value,
+            "qwen_matched_object_id": result.qwen_matched_object_id,
+            "visual_evidence": result.visual_evidence.model_dump(mode="json"),
+            "confidence": result.confidence,
+            "reason_code": result.reason_code.value,
+            "short_reason": result.short_reason,
+            "fingerprint": fingerprint.model_dump(mode="json"),
+            "candidate": self._candidate_report(proposal),
+            "raw_response": raw_path,
+            "errors": [],
+        }
 
     def _register_image(
         self,
         run: Run,
         work: ImageWork,
-        external_errors: list[str],
+        errors: list[str],
     ) -> None:
         try:
             digest = sha256_file(work.input_path)
             with Image.open(work.input_path) as opened:
                 width, height = opened.size
-            suffix = work.input_path.suffix.lower()
-            source_asset = self.paths.sources / f"{digest}{suffix}"
+            source_asset = self.paths.sources / f"{digest}{work.input_path.suffix.lower()}"
             source = SourceImage(
                 id=f"src_{digest[:32]}",
                 run_id=run.id,
@@ -545,1153 +814,199 @@ class ObjectMemoryPipeline:
                 return
             self._copy_source_asset(work.input_path, source_asset)
             work.status = "registered"
-        except Exception as exc:  # noqa: BLE001 - continue remaining images
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
             work.status = "failed"
-            work.error = f"{type(exc).__name__}: {exc}"
-            external_errors.append(f"{work.input_path}: {work.error}")
-            if work.source is not None:
-                try:
-                    self.loop.fail_source(work.source.id, work.error)
-                except Exception as fail_exc:  # noqa: BLE001
-                    external_errors.append(
-                        f"failed to mark source {work.source.id}: {fail_exc}"
-                    )
+            work.error = message
+            errors.append(f"register {work.input_path}: {message}")
 
     @staticmethod
     def _copy_source_asset(source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.is_file():
             return
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_name(
-            f".{destination.name}.{uuid4().hex}.tmp"
-        )
+        temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
         try:
             shutil.copy2(source, temporary)
             temporary.replace(destination)
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _run_scene_guidance(
+    def _record_proposal_failure(
         self,
-        run: Run,
-        works: list[ImageWork],
-    ) -> dict[str, Any]:
-        """Use Qwen after the hash gate to plan text-guided SAM3 targets."""
-
-        pending = [work for work in works if work.status == "registered"]
-        metrics: dict[str, Any] = {
-            "loaded": False,
-            "model_load_seconds": 0.0,
-            "inference_seconds": 0.0,
-            "input_tokens": 0,
-            "generated_tokens": 0,
-            "scene_batch_calls": 0,
-            "scene_batches": 0,
-            "images_analyzed": 0,
-            "peak_memory_mib": 0.0,
-            "placement": [],
-            "snapshot": None,
-            "external_errors": [],
-        }
-        batch_size = self.config.mllm_pipeline.scene_batch_size
-        total_batches = (
-            (len(pending) + batch_size - 1) // batch_size if pending else 0
-        )
-        self._emit_progress(
-            event="scene_guidance_started",
-            stage="scene_guidance",
-            status="running",
-            current=0,
-            total=total_batches,
-            message="First-pass Qwen scene guidance started",
-            data={
-                "image_count": len(pending),
-                "batch_size": batch_size,
-            },
-        )
-        if not pending:
-            self._emit_progress(
-                event="scene_guidance_completed",
-                stage="scene_guidance",
-                status="skipped",
-                current=0,
-                total=0,
-                message="First-pass Qwen scene guidance had no new images",
-                data={"reason": "no_registered_images"},
-            )
-            return metrics
-        self._emit_progress(
-            event="model_loading",
-            stage="scene_guidance",
-            status="running",
-            current=0,
-            total=total_batches,
-            message="Loading Qwen for first-pass scene guidance",
-            data={"model_id": self.config.models.qwen_model_id},
-        )
-        try:
-            self.mllm_runtime.load()
-            metrics["loaded"] = True
-            metrics["model_load_seconds"] = round(
-                self.mllm_runtime.model_load_seconds,
-                3,
-            )
-            metrics["placement"] = self.mllm_runtime.model_placement
-            metrics["snapshot"] = self.mllm_runtime.resolved_snapshot
-        except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(
-                f"Qwen scene-guidance load: {message}"
-            )
-            for work in pending:
-                work.scene_guidance = {
-                    "prompt_version": (
-                        self.config.mllm_pipeline.scene_prompt_version
-                    ),
-                    "batch_index": None,
-                    "scope_id": None,
-                    "target_count": None,
-                    "targets": None,
-                    "qwen_calls": 0,
-                    "raw_response": None,
-                    "errors": [message],
-                }
-                self._fail_source_work(work, message, metrics)
-            try:
-                self.mllm_runtime.close()
-            except Exception as close_exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    "Qwen scene-guidance close: "
-                    f"{type(close_exc).__name__}: {close_exc}"
-                )
-            self._emit_progress(
-                event="scene_guidance_completed",
-                stage="scene_guidance",
-                status="failed",
-                current=total_batches,
-                total=total_batches,
-                message="Qwen scene-guidance model could not be loaded",
-                data={"error": message},
-            )
-            return metrics
-
-        self._emit_progress(
-            event="model_loaded",
-            stage="scene_guidance",
-            status="completed",
-            current=0,
-            total=total_batches,
-            message="Qwen was loaded for first-pass scene guidance",
-            data={
-                "model_load_seconds": metrics["model_load_seconds"],
-                "placement": metrics["placement"],
-                "snapshot": metrics["snapshot"],
-            },
-        )
-        failed_batches = 0
-        try:
-            for batch_offset in range(0, len(pending), batch_size):
-                batch = pending[batch_offset : batch_offset + batch_size]
-                batch_index = batch_offset // batch_size + 1
-                self._emit_progress(
-                    event="scene_guidance_batch_started",
-                    stage="scene_guidance",
-                    status="running",
-                    current=batch_index - 1,
-                    total=total_batches,
-                    message=(
-                        f"Analyzing scene-guidance batch {batch_index}/"
-                        f"{total_batches}"
-                    ),
-                    data={
-                        "batch_index": batch_index,
-                        "source_ids": [
-                            work.source.id for work in batch if work.source is not None
-                        ],
-                    },
-                )
-                result = self._process_scene_guidance_batch(
-                    run,
-                    batch,
-                    batch_index=batch_index,
-                    metrics=metrics,
-                )
-                batch_status = (
-                    "completed" if result.evaluation is not None else "failed"
-                )
-                if batch_status == "failed":
-                    failed_batches += 1
-                self._emit_progress(
-                    event="scene_guidance_batch_completed",
-                    stage="scene_guidance",
-                    status=batch_status,
-                    current=batch_index,
-                    total=total_batches,
-                    message=(
-                        f"Scene-guidance batch {batch_index}/{total_batches} "
-                        f"finished with status={batch_status}"
-                    ),
-                    data=self._scene_batch_progress_data(
-                        batch,
-                        result,
-                        batch_index=batch_index,
-                    ),
-                )
-            metrics["peak_memory_mib"] = round(
-                self.mllm_runtime.peak_memory_mib,
-                2,
-            )
-        finally:
-            try:
-                self.mllm_runtime.close()
-            except Exception as exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    "Qwen scene-guidance close: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-        metrics["inference_seconds"] = round(metrics["inference_seconds"], 3)
-        stage_status = (
-            "completed_with_errors"
-            if failed_batches or metrics["external_errors"]
-            else "completed"
-        )
-        self._emit_progress(
-            event="scene_guidance_completed",
-            stage="scene_guidance",
-            status=stage_status,
-            current=total_batches,
-            total=total_batches,
-            message=(
-                "First-pass Qwen scene guidance finished with "
-                f"status={stage_status}"
-            ),
-            data={
-                "failed_batches": failed_batches,
-                "metrics": {
-                    key: value
-                    for key, value in metrics.items()
-                    if key != "external_errors"
-                },
-                "errors": list(metrics["external_errors"]),
-            },
-        )
-        return metrics
-
-    def _process_scene_guidance_batch(
-        self,
-        run: Run,
-        works: Sequence[ImageWork],
-        *,
-        batch_index: int,
-        metrics: dict[str, Any],
-    ) -> SceneGuidanceCallResult:
-        batch = list(works)
-        if not batch:
-            raise ValueError("Scene-guidance batch must not be empty")
-        if any(work.source is None for work in batch):
-            raise ValueError("Scene-guidance work requires registered sources")
-        scope_id = f"scene_batch_{batch_index:04d}"
-        metrics["scene_batches"] += 1
-        result = self._call_scene_guidance_scope(
-            run,
-            batch,
-            scope_id=scope_id,
-            batch_index=batch_index,
-            metrics=metrics,
-        )
-        if result.evaluation is not None:
-            self._apply_scene_guidance(
-                batch,
-                result,
-                batch_index=batch_index,
-                metrics=metrics,
-            )
-            return result
-        for work in batch:
-            self._record_scene_guidance_failure(
-                work,
-                result,
-                batch_index=batch_index,
-                metrics=metrics,
-            )
-        return result
-
-    @staticmethod
-    def _scene_batch_progress_data(
-        works: Sequence[ImageWork],
-        result: SceneGuidanceCallResult,
-        *,
-        batch_index: int,
-    ) -> dict[str, Any]:
-        return {
-            "batch_index": batch_index,
-            "scope_id": result.scope_id,
-            "qwen_calls": result.qwen_calls,
-            "raw_response": result.raw_response,
-            "errors": list(result.errors),
-            "images": [
-                {
-                    "input_path": str(work.input_path),
-                    "source_id": work.source.id if work.source else None,
-                    "work_status": work.status,
-                    "scene_guidance": work.scene_guidance,
-                    "error": work.error,
-                }
-                for work in works
-            ],
-        }
-
-    def _call_scene_guidance_scope(
-        self,
-        run: Run,
-        works: Sequence[ImageWork],
-        *,
-        scope_id: str,
-        batch_index: int,
-        metrics: dict[str, Any],
-    ) -> SceneGuidanceCallResult:
-        scene_inputs = [
-            SceneImageInput(
-                source_id=work.source.id,
-                image_path=self.paths.resolve_asset(work.source.relative_path),
-            )
-            for work in works
-            if work.source is not None
-        ]
-        errors: list[str] = []
-        recorder = RecordingPredictor(self.mllm_runtime)
-        evaluation: SceneGuidanceEvaluation | None = None
-        call_error: str | None = None
-        try:
-            evaluation = evaluate_scene_guidance_batch(
-                recorder,
-                images=scene_inputs,
-                settings=self.config.mllm_pipeline,
-            )
-        except Exception as exc:  # noqa: BLE001 - expose the model/protocol failure
-            call_error = f"{type(exc).__name__}: {exc}"
-            errors.append(call_error)
-
-        self._add_prediction_metrics(
-            recorder.predictions,
-            metrics,
-            call_field="scene_batch_calls",
-            attempted_calls=recorder.attempted_calls,
-        )
-        raw_response: str | None = None
-        try:
-            raw_response = self._write_scene_guidance_raw_response(
-                run.id,
-                scope_id,
-                batch_index,
-                scene_inputs,
-                recorder.predictions,
-                evaluation=evaluation,
-                error=call_error,
-            )
-        except Exception as exc:  # noqa: BLE001 - audit data is mandatory
-            storage_error = (
-                "raw response persistence failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            metrics["external_errors"].append(
-                f"Qwen scene-guidance {scope_id}: {storage_error}"
-            )
-            errors.append(storage_error)
-            evaluation = None
-
-        return SceneGuidanceCallResult(
-            scope_id=scope_id,
-            evaluation=evaluation,
-            qwen_calls=recorder.attempted_calls,
-            raw_response=raw_response,
-            errors=tuple(errors),
-        )
-
-    def _apply_scene_guidance(
-        self,
-        works: Sequence[ImageWork],
-        result: SceneGuidanceCallResult,
-        *,
-        batch_index: int,
-        metrics: dict[str, Any],
-    ) -> None:
-        assert result.evaluation is not None
-        guidance_by_source = {
-            guidance.source_id: guidance
-            for guidance in result.evaluation.response.images
-        }
-        metrics["images_analyzed"] += len(works)
-        for work in works:
-            assert work.source is not None
-            guidance = guidance_by_source[work.source.id]
-            work.scene_prompts = tuple(
-                target.sam_text_prompt for target in guidance.targets
-            )
-            work.scene_guidance = {
-                "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
-                "batch_index": batch_index,
-                "scope_id": result.scope_id,
-                "scene_summary": guidance.scene_summary,
-                "target_count": len(guidance.targets),
-                "targets": [
-                    target.model_dump(mode="json")
-                    for target in guidance.targets
-                ],
-                "no_target_reason": guidance.no_target_reason,
-                "qwen_calls": result.qwen_calls,
-                "raw_response": result.raw_response,
-                "errors": list(result.errors),
-            }
-            if work.scene_prompts:
-                work.status = "awaiting_sam"
-                continue
-            try:
-                self.loop.complete_source(work.source.id)
-                work.status = "completed"
-            except Exception as exc:  # noqa: BLE001
-                message = f"{type(exc).__name__}: {exc}"
-                metrics["external_errors"].append(
-                    f"complete no-target source {work.source.id}: {message}"
-                )
-                self._fail_source_work(work, message, metrics)
-
-    def _record_scene_guidance_failure(
-        self,
-        work: ImageWork,
-        result: SceneGuidanceCallResult,
-        *,
-        batch_index: int,
-        metrics: dict[str, Any],
-    ) -> None:
-        all_errors = list(result.errors)
-        error_message = (
-            all_errors[-1]
-            if all_errors
-            else "Qwen produced no usable scene guidance"
-        )
-        work.scene_guidance = {
-            "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
-            "batch_index": batch_index,
-            "scope_id": result.scope_id,
-            "target_count": None,
-            "targets": None,
-            "qwen_calls": result.qwen_calls,
-            "raw_response": result.raw_response,
-            "errors": all_errors,
-        }
-        self._fail_source_work(work, error_message, metrics)
-
-    def _run_sam(
-        self,
-        run: Run,
-        works: list[ImageWork],
-    ) -> dict[str, Any]:
-        pending = [work for work in works if work.status == "awaiting_sam"]
-        metrics: dict[str, Any] = {
-            "loaded": False,
-            "confidence_threshold": self.config.sam3_pipeline.confidence_threshold,
-            "model_load_seconds": 0.0,
-            "inference_seconds": 0.0,
-            "peak_memory_mib": 0.0,
-            "external_errors": [],
-        }
-        total_images = len(pending)
-        self._emit_progress(
-            event="sam3_started",
-            stage="sam3",
-            status="running",
-            current=0,
-            total=total_images,
-            message="SAM3 text-guided segmentation started",
-            data={
-                "image_count": total_images,
-                "confidence_threshold": (
-                    self.config.sam3_pipeline.confidence_threshold
-                ),
-            },
-        )
-        if not pending:
-            self._emit_progress(
-                event="sam3_completed",
-                stage="sam3",
-                status="skipped",
-                current=0,
-                total=0,
-                message="SAM3 had no scene-guidance targets to process",
-                data={"reason": "no_images_awaiting_sam"},
-            )
-            return metrics
-        self._emit_progress(
-            event="model_loading",
-            stage="sam3",
-            status="running",
-            current=0,
-            total=total_images,
-            message="Loading SAM3",
-            data={"checkpoint": str(self.config.models.sam3_checkpoint)},
-        )
-        attempted_images = 0
-        try:
-            self.sam_runtime.load()
-            metrics["loaded"] = True
-            metrics["model_load_seconds"] = round(
-                self.sam_runtime.model_load_seconds,
-                3,
-            )
-            self._emit_progress(
-                event="model_loaded",
-                stage="sam3",
-                status="completed",
-                current=0,
-                total=total_images,
-                message="SAM3 was loaded",
-                data={"model_load_seconds": metrics["model_load_seconds"]},
-            )
-            for index, work in enumerate(pending, start=1):
-                self._emit_progress(
-                    event="sam3_image_started",
-                    stage="sam3",
-                    status="running",
-                    current=index - 1,
-                    total=total_images,
-                    message=(
-                        f"Running SAM3 for image {index}/{total_images}: "
-                        f"{work.input_path.name}"
-                    ),
-                    data={
-                        "input_path": str(work.input_path),
-                        "source_id": work.source.id if work.source else None,
-                        "prompts": list(work.scene_prompts),
-                    },
-                )
-                self._process_image_with_sam(run, work)
-                attempted_images = index
-                image_status = "failed" if work.status == "failed" else "completed"
-                self._emit_progress(
-                    event="sam3_image_completed",
-                    stage="sam3",
-                    status=image_status,
-                    current=index,
-                    total=total_images,
-                    message=(
-                        f"SAM3 image {index}/{total_images} finished with "
-                        f"status={image_status}"
-                    ),
-                    data=self._sam_progress_data(work),
-                )
-            metrics["inference_seconds"] = round(
-                sum(work.sam_inference_seconds for work in pending),
-                3,
-            )
-            metrics["peak_memory_mib"] = round(
-                self.sam_runtime.peak_memory_mib,
-                2,
-            )
-        except ProgressWriteError:
-            raise
-        except Exception as exc:  # model-load or unexpected stage failure
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(f"SAM3 stage: {message}")
-            for work in pending:
-                if work.status == "awaiting_sam":
-                    self._fail_source_work(work, message, metrics)
-        finally:
-            try:
-                self.sam_runtime.close()
-            except Exception as exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    f"SAM3 close: {type(exc).__name__}: {exc}"
-                )
-        stage_status = (
-            "completed_with_errors"
-            if metrics["external_errors"]
-            or any(work.status == "failed" for work in pending)
-            else "completed"
-        )
-        self._emit_progress(
-            event="sam3_completed",
-            stage="sam3",
-            status=stage_status,
-            current=(
-                total_images if metrics["external_errors"] else attempted_images
-            ),
-            total=total_images,
-            message=f"SAM3 stage finished with status={stage_status}",
-            data={
-                "kept": sum(len(work.kept) for work in pending),
-                "filtered": sum(work.filtered_count for work in pending),
-                "attempted_images": attempted_images,
-                "errors": list(metrics["external_errors"]),
-                "metrics": {
-                    key: value
-                    for key, value in metrics.items()
-                    if key != "external_errors"
-                },
-            },
-        )
-        return metrics
-
-    def _process_image_with_sam(
-        self,
-        run: Run,
-        work: ImageWork,
-    ) -> None:
-        assert work.source is not None
-        try:
-            canonical_source = self.paths.resolve_asset(work.source.relative_path)
-            with Image.open(canonical_source) as opened:
-                image = opened.convert("RGB")
-            prediction = self.sam_runtime.predict(image, work.scene_prompts)
-            result = process_candidates(
-                prediction.candidates,
-                image=image,
-                source_image_id=work.source.id,
-                run_id=run.id,
-                paths=self.paths,
-                settings=self.config.sam3_pipeline,
-            )
-            for proposal in result.filtered:
-                self.loop.record_filtered_proposal(proposal)
-            work.raw_candidate_count = len(prediction.candidates)
-            work.candidate_source_counts = prediction.prompt_counts
-            work.sam_inference_seconds = prediction.inference_seconds
-            work.filtered_count = len(result.filtered)
-            work.kept = result.kept
-            work.filtered = result.filtered
-            work.filter_counts = result.filter_counts
-            if work.kept:
-                work.status = "awaiting_candidate_reasoning"
-            else:
-                self.loop.complete_source(work.source.id)
-                work.status = "completed"
-        except Exception as exc:  # noqa: BLE001 - one image must not stop the batch
-            message = f"{type(exc).__name__}: {exc}"
-            work.error = message
-            self.loop.fail_source(work.source.id, message)
-            work.status = "failed"
-
-    def _sam_progress_data(self, work: ImageWork) -> dict[str, Any]:
-        return {
-            "input_path": str(work.input_path),
-            "source_id": work.source.id if work.source else None,
-            "work_status": work.status,
-            "prompts": list(work.scene_prompts),
-            "above_confidence_threshold_candidates": work.raw_candidate_count,
-            "prompt_detection_counts": work.candidate_source_counts,
-            "zero_candidate_prompts": [
-                prompt
-                for prompt, count in work.candidate_source_counts.items()
-                if count == 0
-            ],
-            "inference_seconds": round(work.sam_inference_seconds, 3),
-            "kept": [self._proposal_progress_data(item) for item in work.kept],
-            "filtered": [
-                self._proposal_progress_data(item) for item in work.filtered
-            ],
-            "filter_counts": work.filter_counts,
-            "error": work.error,
-        }
-
-    @staticmethod
-    def _proposal_progress_data(proposal: Proposal) -> dict[str, Any]:
-        return {
-            "proposal_id": proposal.id,
-            "raw_candidate_id": proposal.raw_candidate_id,
-            "sam_text_prompt": proposal.prompt,
-            "score": proposal.score,
-            "bbox": proposal.bbox.model_dump(mode="json"),
-            "mask_area_pixels": proposal.mask_area_pixels,
-            "mask_area_ratio": proposal.mask_area_ratio,
-            "status": proposal.status.value,
-            "filter_reason": proposal.filter_reason,
-            "error": proposal.error_message,
-            "crop": proposal.crop_path,
-            "mask": proposal.mask_path,
-            "overlay": proposal.overlay_path,
-        }
-
-    def _fail_source_work(
-        self,
-        work: ImageWork,
+        proposal: Proposal,
         message: str,
-        metrics: dict[str, Any],
-    ) -> None:
-        assert work.source is not None
-        work.error = message
-        try:
-            self.loop.fail_source(work.source.id, message)
-            work.status = "failed"
-        except Exception as exc:  # noqa: BLE001
-            metrics["external_errors"].append(
-                f"failed to mark source {work.source.id}: {exc}"
-            )
-
-    def _run_candidate_reasoning(
-        self,
-        run: Run,
-        works: list[ImageWork],
-    ) -> dict[str, Any]:
-        pending = [
-            work
-            for work in works
-            if work.status == "awaiting_candidate_reasoning"
-        ]
-        metrics: dict[str, Any] = {
-            "loaded": False,
-            "model_load_seconds": 0.0,
-            "inference_seconds": 0.0,
-            "input_tokens": 0,
-            "generated_tokens": 0,
-            "candidate_reasoning_calls": 0,
-            "peak_memory_mib": 0.0,
-            "placement": [],
-            "snapshot": None,
-            "external_errors": [],
-        }
-        total_images = len(pending)
-        self._emit_progress(
-            event="candidate_reasoning_started",
-            stage="candidate_reasoning",
-            status="running",
-            current=0,
-            total=total_images,
-            message="Second-pass Qwen candidate reasoning started",
-            data={"image_count": total_images},
-        )
-        if not pending:
-            self._emit_progress(
-                event="candidate_reasoning_completed",
-                stage="candidate_reasoning",
-                status="skipped",
-                current=0,
-                total=0,
-                message="Second-pass Qwen had no retained candidates to process",
-                data={"reason": "no_images_awaiting_candidate_reasoning"},
-            )
-            return metrics
-        self._emit_progress(
-            event="model_loading",
-            stage="candidate_reasoning",
-            status="running",
-            current=0,
-            total=total_images,
-            message="Loading Qwen for candidate and memory reasoning",
-            data={"model_id": self.config.models.qwen_model_id},
-        )
-        try:
-            self.mllm_runtime.load()
-            metrics["loaded"] = True
-            metrics["model_load_seconds"] = round(
-                self.mllm_runtime.model_load_seconds,
-                3,
-            )
-            metrics["placement"] = self.mllm_runtime.model_placement
-            metrics["snapshot"] = self.mllm_runtime.resolved_snapshot
-        except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(
-                f"Qwen candidate-reasoning load: {message}"
-            )
-            for work in pending:
-                self._fail_qwen_work(work, message, metrics)
-            try:
-                self.mllm_runtime.close()
-            except Exception as close_exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    "Qwen candidate-reasoning close: "
-                    f"{type(close_exc).__name__}: {close_exc}"
-                )
-            self._emit_progress(
-                event="candidate_reasoning_completed",
-                stage="candidate_reasoning",
-                status="failed",
-                current=total_images,
-                total=total_images,
-                message="Qwen candidate-reasoning model could not be loaded",
-                data={"error": message},
-            )
-            return metrics
-
-        self._emit_progress(
-            event="model_loaded",
-            stage="candidate_reasoning",
-            status="completed",
-            current=0,
-            total=total_images,
-            message="Qwen was loaded for candidate and memory reasoning",
-            data={
-                "model_load_seconds": metrics["model_load_seconds"],
-                "placement": metrics["placement"],
-                "snapshot": metrics["snapshot"],
-            },
-        )
-        try:
-            for index, work in enumerate(pending, start=1):
-                self._emit_progress(
-                    event="candidate_reasoning_image_started",
-                    stage="candidate_reasoning",
-                    status="running",
-                    current=index - 1,
-                    total=total_images,
-                    message=(
-                        f"Reasoning over image {index}/{total_images}: "
-                        f"{work.input_path.name}"
-                    ),
-                    data={
-                        "input_path": str(work.input_path),
-                        "source_id": work.source.id if work.source else None,
-                        "proposal_ids": [item.id for item in work.kept],
-                    },
-                )
-                self._process_image_candidate_reasoning(run, work, metrics)
-                image_has_errors = bool(
-                    work.error
-                    or (work.candidate_reasoning or {}).get("errors")
-                    or any(
-                        decision.get("status") in {"pending", "failed"}
-                        for decision in work.decisions
-                    )
-                )
-                image_status = (
-                    "failed"
-                    if work.status == "failed"
-                    else "completed_with_errors"
-                    if image_has_errors
-                    else "completed"
-                )
-                self._emit_progress(
-                    event="candidate_reasoning_image_completed",
-                    stage="candidate_reasoning",
-                    status=image_status,
-                    current=index,
-                    total=total_images,
-                    message=(
-                        f"Candidate reasoning image {index}/{total_images} "
-                        f"finished with status={image_status}"
-                    ),
-                    data=self._candidate_reasoning_progress_data(work),
-                )
-            metrics["peak_memory_mib"] = round(
-                self.mllm_runtime.peak_memory_mib,
-                2,
-            )
-        finally:
-            try:
-                self.mllm_runtime.close()
-            except Exception as exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    "Qwen candidate-reasoning close: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-        metrics["inference_seconds"] = round(metrics["inference_seconds"], 3)
-        stage_has_errors = bool(
-            metrics["external_errors"]
-            or any(
-                work.error
-                or (work.candidate_reasoning or {}).get("errors")
-                or any(
-                    decision.get("status") in {"pending", "failed"}
-                    for decision in work.decisions
-                )
-                for work in pending
-            )
-        )
-        stage_status = (
-            "completed_with_errors" if stage_has_errors else "completed"
-        )
-        self._emit_progress(
-            event="candidate_reasoning_completed",
-            stage="candidate_reasoning",
-            status=stage_status,
-            current=total_images,
-            total=total_images,
-            message=(
-                "Second-pass Qwen candidate reasoning finished with "
-                f"status={stage_status}"
-            ),
-            data={
-                "decision_counts": {
-                    decision: sum(
-                        item.get("decision") == decision
-                        for work in pending
-                        for item in work.decisions
-                    )
-                    for decision in ("new", "existing", "ignored", "uncertain")
-                },
-                "errors": list(metrics["external_errors"]),
-                "metrics": {
-                    key: value
-                    for key, value in metrics.items()
-                    if key != "external_errors"
-                },
-            },
-        )
-        return metrics
-
-    @staticmethod
-    def _candidate_reasoning_progress_data(work: ImageWork) -> dict[str, Any]:
-        return {
-            "input_path": str(work.input_path),
-            "source_id": work.source.id if work.source else None,
-            "work_status": work.status,
-            "candidate_reasoning": work.candidate_reasoning,
-            "decisions": work.decisions,
-            "error": work.error,
-        }
-
-    def _process_image_candidate_reasoning(
-        self,
-        run: Run,
         work: ImageWork,
-        metrics: dict[str, Any],
+        errors: list[str],
     ) -> None:
-        assert work.source is not None
-        errors: list[str] = []
-        evaluation: ImageBatchEvaluation | None = None
-        raw_path: str | None = None
         try:
-            cards = self.loop.object_cards(
-                max_reference_views=(
-                    self.config.mllm_pipeline.max_reference_views_per_object
-                )
-            )
+            self.loop.record_proposal_failure(proposal, message)
         except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(
-                f"load object cards for {work.source.id}: {message}"
-            )
-            self._fail_qwen_work(work, message, metrics)
-            return
-        try:
-            candidates = [
-                BatchCandidateInput(
-                    proposal_id=proposal.id,
-                    crop_path=self.paths.resolve_asset(proposal.crop_path or ""),
-                    overlay_path=self.paths.resolve_asset(
-                        proposal.overlay_path or ""
-                    ),
-                    sam_prompt=proposal.prompt,
-                )
-                for proposal in work.kept
-            ]
-        except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(
-                f"resolve candidate assets for {work.source.id}: {message}"
-            )
-            self._fail_qwen_work(work, message, metrics)
-            return
-        recorder = RecordingPredictor(self.mllm_runtime)
-        call_error: str | None = None
-        try:
-            evaluation = evaluate_image_batch(
-                recorder,
-                candidates=candidates,
-                cards=cards,
-                card_assets=self.paths,
-                settings=self.config.mllm_pipeline,
-            )
-        except Exception as exc:  # noqa: BLE001 - expose the model/protocol failure
-            call_error = f"{type(exc).__name__}: {exc}"
-            errors.append(call_error)
-
-        self._add_prediction_metrics(
-            recorder.predictions,
-            metrics,
-            call_field="candidate_reasoning_calls",
-            attempted_calls=recorder.attempted_calls,
+            errors.append(f"record proposal failure {proposal.id}: {exc}")
+        work.decisions.append(
+            {
+                "proposal_id": proposal.id,
+                "target_id": proposal.target_id,
+                "status": "failed",
+                "decision": None,
+                "candidate": self._candidate_report(proposal),
+                "errors": [message],
+            }
         )
-        qwen_calls = recorder.attempted_calls
-        try:
-            raw_path = self._write_batch_raw_response(
-                run.id,
-                work.source.id,
-                recorder.predictions,
-                expected_proposal_ids=[
-                    candidate.proposal_id for candidate in candidates
-                ],
-                object_card_ids=[card.object_id for card in cards],
-                reference_image_count=sum(
-                    len(card.representative_view_paths) for card in cards
-                ),
-                evaluation=evaluation,
-                error=call_error,
-            )
-        except Exception as exc:  # noqa: BLE001 - audit data is mandatory
-            storage_error = (
-                "raw response persistence failed: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            metrics["external_errors"].append(
-                f"Qwen candidate-reasoning {work.source.id}: {storage_error}"
-            )
-            errors.append(storage_error)
-            evaluation = None
 
-        if evaluation is None:
-            error_message = (
-                errors[-1] if errors else "Qwen produced no usable batch response"
-            )
-            work.candidate_reasoning = {
-                "candidate_count": len(work.kept),
-                "object_card_count": len(cards),
-                "object_card_ids": [card.object_id for card in cards],
-                "reference_image_count": sum(
-                    len(card.representative_view_paths) for card in cards
-                ),
-                "qwen_calls": qwen_calls,
-                "raw_response": raw_path,
-                "errors": errors,
-            }
-            for proposal in work.kept:
-                work.decisions.append(
-                    self._record_failed_proposal(
-                        proposal,
-                        error_message,
-                        errors=errors,
-                        raw_path=raw_path,
-                        metrics=metrics,
-                    )
-                )
-        else:
-            results_by_id = {
-                item.proposal_id: item for item in evaluation.response.candidates
-            }
-            work.candidate_reasoning = {
-                "candidate_count": len(work.kept),
-                "object_card_count": evaluation.object_card_count,
-                "object_card_ids": list(evaluation.object_card_ids),
-                "reference_image_count": evaluation.reference_image_count,
-                "qwen_calls": qwen_calls,
-                "raw_response": raw_path,
-                "errors": errors,
-            }
-            for proposal in work.kept:
-                result = results_by_id[proposal.id]
-                work.decisions.append(
-                    self._persist_batch_candidate(
-                        proposal,
-                        result,
-                        raw_path=raw_path,
-                        errors=errors,
-                        metrics=metrics,
-                    )
-                )
-
+    def _complete_source(self, work: ImageWork, errors: list[str]) -> None:
+        assert work.source is not None
         try:
             self.loop.complete_source(work.source.id)
             work.status = "completed"
         except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            work.error = message
-            metrics["external_errors"].append(
-                f"complete source {work.source.id}: {message}"
+            self._fail_source(work, f"{type(exc).__name__}: {exc}", errors)
+
+    def _fail_source(
+        self,
+        work: ImageWork,
+        message: str,
+        errors: list[str],
+        *,
+        append_error: bool = True,
+    ) -> None:
+        if append_error:
+            errors.append(
+                f"source {work.source.id if work.source else work.input_path}: {message}"
             )
+        work.error = message
+        if work.source is not None and work.status not in {"failed", "duplicate"}:
             try:
                 self.loop.fail_source(work.source.id, message)
-                work.status = "failed"
-            except Exception as fail_exc:  # noqa: BLE001
-                metrics["external_errors"].append(
-                    f"fail source {work.source.id}: {fail_exc}"
-                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"fail source {work.source.id}: {exc}")
+        work.status = "failed"
 
-    def _persist_batch_candidate(
+    def _close_models(self) -> None:
+        for runtime in (self.dino_runtime, self.sam_runtime, self.mllm_runtime):
+            try:
+                runtime.close()
+            except Exception:
+                pass
+
+    def _capture_peak_memory(self) -> None:
+        qwen_peak = self.mllm_runtime.peak_memory_mib
+        sam_peak = self.sam_runtime.peak_memory_mib
+        dino_peak = self.dino_runtime.peak_memory_mib
+        self._peak_memory_mib = {
+            "qwen": max(self._peak_memory_mib["qwen"], qwen_peak),
+            "sam3": max(self._peak_memory_mib["sam3"], sam_peak),
+            "dinov3": max(self._peak_memory_mib["dinov3"], dino_peak),
+            "joint": max(
+                self._peak_memory_mib["joint"], qwen_peak, sam_peak, dino_peak
+            ),
+        }
+
+    def _combined_peak_memory(self) -> float:
+        return max(
+            self._peak_memory_mib["joint"],
+            self.mllm_runtime.peak_memory_mib,
+            self.sam_runtime.peak_memory_mib,
+            self.dino_runtime.peak_memory_mib,
+        )
+
+    @staticmethod
+    def _image_progress(*, index: int, total: int, fraction: float) -> float:
+        if total <= 0 or index < 1 or index > total:
+            raise ValueError("Image progress requires one valid 1-based index")
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("Image progress fraction must be between 0 and 1")
+        span = 85.0 / total
+        return 10.0 + span * ((index - 1) + fraction)
+
+    def _build_report(
         self,
-        proposal: Proposal,
-        result: BatchCandidateDecision,
-        *,
-        raw_path: str | None,
+        run: Run,
+        works: Sequence[ImageWork],
+        summary: RunSummary,
+        checks: dict[str, bool],
+        status: str,
         errors: list[str],
-        metrics: dict[str, Any],
     ) -> dict[str, Any]:
-        try:
-            response = result.to_mllm_response()
-            write_result = self.loop.apply_response(
-                proposal=proposal,
-                response=response,
-                prompt_version=self.config.mllm_pipeline.prompt_version,
-                raw_response_path=raw_path,
-                attempt=1,
-                observation_description=(
-                    result.temporary_annotation.description
-                    if result.temporary_annotation is not None
-                    else None
-                ),
-            )
-            return {
-                "proposal_id": proposal.id,
-                "candidate": self._candidate_report(proposal),
-                "status": write_result.proposal_status.value,
-                "decision": write_result.decision.value,
-                "object_id": write_result.object_id,
-                "confidence": response.confidence,
-                "reason_code": response.reason_code.value,
-                "short_reason": response.short_reason,
-                "validity": result.validity.value,
-                "validity_confidence": result.validity_confidence,
-                "validity_reason_code": result.validity_reason_code.value,
-                "validity_short_reason": result.validity_short_reason,
-                "temporary_annotation": (
-                    result.temporary_annotation.model_dump(mode="json")
-                    if result.temporary_annotation is not None
-                    else None
-                ),
-                "final_annotation": (
-                    result.final_annotation.model_dump(mode="json")
-                    if result.final_annotation is not None
-                    else None
-                ),
-                "matched_object_id": result.matched_object_id,
-                "raw_response": raw_path,
-                "errors": errors,
-            }
-        except Exception as exc:  # noqa: BLE001
-            message = f"{type(exc).__name__}: {exc}"
-            metrics["external_errors"].append(
-                f"persist batch candidate {proposal.id}: {message}"
-            )
-            return self._record_failed_proposal(
-                proposal,
-                message,
-                errors=[*errors, message],
-                raw_path=raw_path,
-                metrics=metrics,
-            )
-
-    def _record_failed_proposal(
-        self,
-        proposal: Proposal,
-        error_message: str,
-        *,
-        errors: Sequence[str],
-        raw_path: str | None = None,
-        metrics: dict[str, Any],
-    ) -> dict[str, Any]:
-        try:
-            self.loop.record_proposal_failure(proposal, error_message)
-        except Exception as exc:  # noqa: BLE001
-            metrics["external_errors"].append(
-                f"record proposal failure {proposal.id}: {exc}"
-            )
+        visual_scores = [
+            decision["visual_evidence"].get("visual_score")
+            for work in works
+            for decision in work.decisions
+            if isinstance(decision.get("visual_evidence"), dict)
+            and decision["visual_evidence"].get("visual_score") is not None
+        ]
+        visual_result_counts = {result: 0 for result in ("match", "no_match", "ambiguous")}
+        for work in works:
+            for decision in work.decisions:
+                evidence = decision.get("visual_evidence")
+                if not isinstance(evidence, dict):
+                    continue
+                result = evidence.get("result")
+                if result in visual_result_counts:
+                    visual_result_counts[result] += 1
         return {
-            "proposal_id": proposal.id,
-            "candidate": self._candidate_report(proposal),
-            "status": "failed",
-            "decision": None,
-            "object_id": None,
-            "confidence": None,
-            "reason_code": None,
-            "short_reason": None,
-            "validity": None,
-            "validity_confidence": None,
-            "validity_reason_code": None,
-            "validity_short_reason": None,
-            "temporary_annotation": None,
-            "final_annotation": None,
-            "matched_object_id": None,
-            "raw_response": raw_path,
-            "errors": list(errors),
+            "schema_version": 7,
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "test": "object_memory_demo_single_pass_dinov3",
+            "status": status,
+            "run": summary.as_dict(),
+            "checks": checks,
+            "strategy": {
+                "workflow": "per_image_qwen_sam3_dinov3_commit",
+                "qwen_call_policy": "exactly one call per unique new source image",
+                "qwen_memory_context": "all active object text summaries only",
+                "second_qwen_stage": False,
+                "sam_prompt_deduplication": True,
+                "target_proposal_association": "same prompt plus normalized bbox IoU",
+                "automatic_identity_assets": "DINOv3 fingerprints only",
+                "uncertain_policy": "terminal; no retry or second Qwen call",
+                "object_text_policy": "one iterated structured summary per object",
+                "prompt_version": self.config.mllm_pipeline.prompt_version,
+            },
+            "models": {
+                "qwen": {
+                    **self._qwen_metrics,
+                    "model_id": self.config.models.qwen_model_id,
+                    "model_load_seconds": round(self.mllm_runtime.model_load_seconds, 3),
+                    "peak_memory_mib": round(self._peak_memory_mib["qwen"], 2),
+                    "placement": self.mllm_runtime.model_placement,
+                    "snapshot": self.mllm_runtime.resolved_snapshot,
+                },
+                "sam3": {
+                    **self._sam_metrics,
+                    "checkpoint": str(self.config.models.sam3_checkpoint),
+                    "confidence_threshold": self.config.sam3_pipeline.confidence_threshold,
+                    "model_load_seconds": round(self.sam_runtime.model_load_seconds, 3),
+                    "peak_memory_mib": round(self._peak_memory_mib["sam3"], 2),
+                },
+                "dinov3": {
+                    **self._dino_metrics,
+                    "model_id": self.config.models.dinov3_model_id,
+                    "revision": self.config.models.dinov3_revision,
+                    "model_path": str(self.config.models.dinov3_model_path),
+                    "feature_layer": self.dino_runtime.feature_layer,
+                    "input_size": self.config.visual_fingerprint.input_size,
+                    "model_load_seconds": round(self.dino_runtime.model_load_seconds, 3),
+                    "peak_memory_mib": round(self._peak_memory_mib["dinov3"], 2),
+                    "placement": self.dino_runtime.model_placement,
+                    "visual_score_count": len(visual_scores),
+                    "visual_score_min": min(visual_scores) if visual_scores else None,
+                    "visual_score_max": max(visual_scores) if visual_scores else None,
+                    "visual_score_mean": (
+                        sum(visual_scores) / len(visual_scores)
+                        if visual_scores
+                        else None
+                    ),
+                    "result_counts": visual_result_counts,
+                },
+                "joint_peak_memory_mib": round(self._combined_peak_memory(), 2),
+            },
+            "visual_fingerprint_config": self.config.visual_fingerprint.model_dump(
+                mode="json"
+            ),
+            "images": [work.as_dict() for work in works],
+            "external_errors": errors,
+            "core_counts": self.store.status().counts,
         }
 
     @staticmethod
@@ -1707,217 +1022,104 @@ class ObjectMemoryPipeline:
             "overlay": proposal.overlay_path,
         }
 
-    @staticmethod
-    def _add_prediction_metrics(
-        predictions: Sequence[MllmPrediction],
-        metrics: dict[str, Any],
-        *,
-        call_field: str,
-        attempted_calls: int,
-    ) -> None:
-        metrics["inference_seconds"] += sum(
-            prediction.inference_seconds for prediction in predictions
-        )
-        metrics["input_tokens"] += sum(
-            prediction.input_tokens for prediction in predictions
-        )
-        metrics["generated_tokens"] += sum(
-            prediction.generated_tokens for prediction in predictions
-        )
-        metrics[call_field] += attempted_calls
-
-    def _write_scene_guidance_raw_response(
-        self,
-        run_id: str,
-        scope_id: str,
-        batch_index: int,
-        scene_inputs: Sequence[SceneImageInput],
-        predictions: Sequence[MllmPrediction],
-        *,
-        evaluation: SceneGuidanceEvaluation | None,
-        error: str | None,
-    ) -> str:
-        path = self.paths.raw_response_dir(run_id, scope_id) / "response.json"
-        payload = {
-            "stage": "scene_guidance",
-            "prompt_version": self.config.mllm_pipeline.scene_prompt_version,
-            "scope_id": scope_id,
-            "batch_index": batch_index,
-            "expected_source_ids": [item.source_id for item in scene_inputs],
-            "error": error,
-            "scene_guidance_response": (
-                evaluation.response.model_dump(mode="json")
-                if evaluation is not None
-                else None
-            ),
-            "predictions": [
-                {
-                    "raw_text": prediction.raw_text,
-                    "input_tokens": prediction.input_tokens,
-                    "generated_tokens": prediction.generated_tokens,
-                    "inference_seconds": prediction.inference_seconds,
-                }
-                for prediction in predictions
-            ],
-        }
-        write_json_atomic(path, payload)
-        return self.paths.relative_asset(path)
-
-    def _write_batch_raw_response(
-        self,
-        run_id: str,
-        source_id: str,
-        predictions: Sequence[MllmPrediction],
-        *,
-        expected_proposal_ids: Sequence[str],
-        object_card_ids: Sequence[str],
-        reference_image_count: int,
-        evaluation: ImageBatchEvaluation | None,
-        error: str | None,
-    ) -> str:
-        path = self.paths.raw_response_dir(run_id, source_id) / "response.json"
-        payload = {
-            "stage": "candidate_reasoning",
-            "prompt_version": self.config.mllm_pipeline.prompt_version,
-            "expected_proposal_ids": list(expected_proposal_ids),
-            "error": error,
-            "candidate_reasoning_response": (
-                evaluation.response.model_dump(mode="json")
-                if evaluation is not None
-                else None
-            ),
-            "memory_context": {
-                "object_card_count": len(object_card_ids),
-                "object_card_ids": list(object_card_ids),
-                "reference_image_count": reference_image_count,
-                "selection": "all_active_objects",
-            },
-            "predictions": [
-                {
-                    "raw_text": prediction.raw_text,
-                    "input_tokens": prediction.input_tokens,
-                    "generated_tokens": prediction.generated_tokens,
-                    "inference_seconds": prediction.inference_seconds,
-                }
-                for prediction in predictions
-            ],
-        }
-        write_json_atomic(path, payload)
-        return self.paths.relative_asset(path)
-
-    def _fail_qwen_work(
-        self,
-        work: ImageWork,
-        message: str,
-        metrics: dict[str, Any],
-    ) -> None:
-        assert work.source is not None
-        work.candidate_reasoning = {
-            "candidate_count": len(work.kept),
-            "object_card_count": None,
-            "object_card_ids": None,
-            "reference_image_count": None,
-            "qwen_calls": 0,
-            "raw_response": None,
-            "errors": [message],
-        }
-        for proposal in work.kept:
-            work.decisions.append(
-                self._record_failed_proposal(
-                    proposal,
-                    message,
-                    errors=[message],
-                    metrics=metrics,
-                )
-            )
-        try:
-            self.loop.complete_source(work.source.id)
-            work.status = "completed"
-        except Exception as exc:  # noqa: BLE001
-            metrics["external_errors"].append(
-                f"complete source {work.source.id}: {exc}"
-            )
-            work.status = "failed"
-            work.error = message
-
-    @staticmethod
-    def _combine_qwen_metrics(
-        scene_metrics: dict[str, Any],
-        candidate_metrics: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Combine two separately resident Qwen phases without hiding either."""
-
-        placement = (
-            candidate_metrics["placement"]
-            if candidate_metrics["placement"]
-            else scene_metrics["placement"]
-        )
-        snapshot = candidate_metrics["snapshot"] or scene_metrics["snapshot"]
-        scene_calls = scene_metrics["scene_batch_calls"]
-        candidate_calls = candidate_metrics["candidate_reasoning_calls"]
-        return {
-            "loaded": scene_metrics["loaded"] or candidate_metrics["loaded"],
-            "load_count": int(scene_metrics["loaded"])
-            + int(candidate_metrics["loaded"]),
-            "model_load_seconds": round(
-                scene_metrics["model_load_seconds"]
-                + candidate_metrics["model_load_seconds"],
-                3,
-            ),
-            "inference_seconds": round(
-                scene_metrics["inference_seconds"]
-                + candidate_metrics["inference_seconds"],
-                3,
-            ),
-            "input_tokens": (
-                scene_metrics["input_tokens"] + candidate_metrics["input_tokens"]
-            ),
-            "generated_tokens": (
-                scene_metrics["generated_tokens"]
-                + candidate_metrics["generated_tokens"]
-            ),
-            "scene_batch_calls": scene_calls,
-            "candidate_reasoning_calls": candidate_calls,
-            "total_calls": scene_calls + candidate_calls,
-            "peak_memory_mib": max(
-                scene_metrics["peak_memory_mib"],
-                candidate_metrics["peak_memory_mib"],
-            ),
-            "placement": placement,
-            "snapshot": snapshot,
-            "phases": {
-                "scene_guidance": scene_metrics,
-                "candidate_reasoning": candidate_metrics,
-            },
-        }
-
-    @staticmethod
     def _build_checks(
-        works: Sequence[ImageWork],
-        summary: RunSummary,
+        self,
+        works: Sequence[ImageWork], summary: RunSummary
     ) -> dict[str, bool]:
-        nonduplicates = [work for work in works if not work.duplicate]
-        accounted_statuses = {"completed", "failed"}
+        processed = [work for work in works if not work.duplicate and work.source]
+        successful = [work for work in processed if work.status == "completed"]
+        decided = [
+            decision
+            for work in works
+            for decision in work.decisions
+            if decision.get("status") == "decided"
+        ]
+
+        def fingerprint_asset_is_valid(decision: dict[str, Any]) -> bool:
+            fingerprint = decision.get("fingerprint")
+            if not isinstance(fingerprint, dict):
+                return False
+            path = fingerprint.get("path")
+            expected_hash = fingerprint.get("sha256")
+            if not isinstance(path, str) or not isinstance(expected_hash, str):
+                return False
+            asset = self.paths.resolve_asset(path)
+            return asset.is_file() and sha256_file(asset) == expected_hash
+
         return {
             "input_images_nonempty": bool(works),
             "every_input_accounted_for": all(
-                work.status == "duplicate" or work.status in accounted_statuses
+                work.duplicate or work.status in {"completed", "failed"}
                 for work in works
             ),
-            "qwen_then_sam_then_qwen_sequential_boundary": True,
-            "every_processed_source_has_scene_guidance": all(
-                work.duplicate
-                or work.scene_guidance is not None
-                or work.status == "failed"
-                for work in works
+            "single_qwen_call_per_completed_source": all(
+                work.qwen is not None and work.qwen.get("calls") == 1
+                for work in successful
+            ),
+            "second_qwen_stage_absent": True,
+            "every_decided_proposal_has_fingerprint": all(
+                bool(decision.get("fingerprint")) for decision in decided
+            ),
+            "fingerprint_assets_exist_and_match_hashes": all(
+                fingerprint_asset_is_valid(decision) for decision in decided
             ),
             "no_source_left_processing": summary.source_counts["processing"] == 0,
-            "registered_sources_match_nonduplicates": (
-                sum(summary.source_counts.values()) == len(nonduplicates)
-            ),
-            "all_qwen_candidates_have_persisted_status": all(
-                decision.get("status") in {"decided", "pending", "failed"}
-                for work in works
-                for decision in work.decisions
-            ),
+            "no_pending_proposals": summary.proposal_counts["pending"] == 0,
         }
+
+    def _close_interrupted_run(
+        self,
+        run: Run,
+        works: Sequence[ImageWork],
+        original_error: BaseException,
+    ) -> None:
+        self._capture_peak_memory()
+        self._close_models()
+        message = f"{type(original_error).__name__}: {original_error}"
+        cleanup_errors: list[str] = []
+        for work in works:
+            if work.source is None or work.duplicate or work.status in {"completed", "failed"}:
+                continue
+            try:
+                self.loop.fail_source(work.source.id, message)
+                work.status = "failed"
+            except BaseException as exc:  # noqa: BLE001
+                cleanup_errors.append(f"fail source {work.source.id}: {exc}")
+        try:
+            self.store.complete_run(run.id, error_message=message)
+        except BaseException as exc:  # noqa: BLE001
+            cleanup_errors.append(f"complete run {run.id}: {exc}")
+        if cleanup_errors:
+            try:
+                original_error.add_note("Cleanup also failed: " + "; ".join(cleanup_errors))
+            except BaseException:
+                pass
+
+    def _emit(
+        self,
+        *,
+        event: str,
+        stage: str,
+        status: str,
+        current: int,
+        total: int,
+        message: str,
+        data: dict[str, Any],
+        overall_percent: float | None = None,
+    ) -> None:
+        if self.progress is not None:
+            self.progress.emit(
+                event=event,
+                stage=stage,
+                status=status,
+                current=current,
+                total=total,
+                message=message,
+                data=data,
+                overall_percent=overall_percent,
+            )
+
+    @staticmethod
+    def _new_run_id() -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        return f"run_{timestamp}"

@@ -44,6 +44,17 @@ class ModelConfig(BaseModel):
         default="Qwen/Qwen3-VL-8B-Instruct-FP8",
         min_length=1,
     )
+    dinov3_model_id: str = Field(
+        default="facebook/dinov3-vitb16-pretrain-lvd1689m",
+        min_length=1,
+    )
+    dinov3_model_path: Path = Path(
+        "weights/dinov3/dinov3-vitb16-pretrain-lvd1689m"
+    )
+    dinov3_revision: str = Field(
+        default="5931719e67bbdb9737e363e781fb0c67687896bc",
+        pattern=r"^[a-f0-9]{40}$",
+    )
 
 
 class Sam3PipelineConfig(BaseModel):
@@ -85,22 +96,49 @@ class Sam3PipelineConfig(BaseModel):
 
 
 class MllmPipelineConfig(BaseModel):
-    """Settings for scene guidance and constrained object-memory reasoning."""
+    """Settings for the one-call-per-image Qwen object-memory survey."""
 
     model_config = ConfigDict(extra="forbid")
 
-    scene_prompt_version: Literal[
-        "robot-scene-guidance-v5"
-    ] = "robot-scene-guidance-v5"
     prompt_version: Literal[
-        "guided-image-batch-memory-reasoning-v3"
-    ] = "guided-image-batch-memory-reasoning-v3"
-    scene_batch_size: int = Field(default=4, ge=1, le=8)
+        "object-memory-single-pass-v1"
+    ] = "object-memory-single-pass-v1"
+    scene_batch_size: Literal[1] = 1
     max_scene_targets_per_image: int = Field(default=12, ge=1, le=24)
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=4096, gt=0)
-    max_reference_views_per_object: int = Field(default=2, gt=0)
-    existing_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+    target_proposal_iou_threshold: float = Field(default=0.1, gt=0.0, le=1.0)
+
+
+class VisualFingerprintConfig(BaseModel):
+    """Fixed DINOv3 extraction and interpretable matching settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_size: int = Field(default=512, ge=224)
+    storage_dtype: Literal["float16"] = "float16"
+    similarity_metric: Literal["cosine"] = "cosine"
+    global_feature: Literal["cls_token"] = "cls_token"
+    local_feature: Literal["patch_tokens"] = "patch_tokens"
+    min_patch_mask_coverage: float = Field(default=0.5, gt=0.0, le=1.0)
+    local_patch_similarity_threshold: float = Field(
+        default=0.7,
+        ge=-1.0,
+        le=1.0,
+    )
+    global_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    local_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    match_threshold: float = Field(default=0.75, ge=-1.0, le=1.0)
+    ambiguity_margin: float = Field(default=0.05, ge=0.0, le=2.0)
+    local_top_k: int = Field(default=3, ge=1, le=64)
+
+    @model_validator(mode="after")
+    def validate_matching_weights(self) -> "VisualFingerprintConfig":
+        if abs((self.global_weight + self.local_weight) - 1.0) > 1e-9:
+            raise ValueError("global_weight and local_weight must sum to 1.0")
+        if self.input_size % 16:
+            raise ValueError("input_size must be divisible by the ViT-B/16 patch size")
+        return self
 
 
 class AppConfig(BaseModel):
@@ -108,11 +146,14 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)
     mllm_pipeline: MllmPipelineConfig = Field(default_factory=MllmPipelineConfig)
+    visual_fingerprint: VisualFingerprintConfig = Field(
+        default_factory=VisualFingerprintConfig
+    )
 
     @model_validator(mode="after")
     def validate_scene_target_capacity(self) -> "AppConfig":

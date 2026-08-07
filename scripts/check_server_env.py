@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCRIPT_VERSION = "0.3.0"
+SCRIPT_VERSION = "0.4.0"
 MIN_PYTHON = (3, 12)
 MIN_TORCH = (2, 7)
 MIN_CUDA = (12, 6)
@@ -459,6 +459,10 @@ def parse_args() -> argparse.Namespace:
         "--sam3-checkpoint",
         help="Optional existing SAM3 checkpoint file to inspect.",
     )
+    parser.add_argument(
+        "--dinov3-model-dir",
+        help="Optional local DINOv3 snapshot directory to inspect.",
+    )
     return parser.parse_args()
 
 
@@ -486,8 +490,10 @@ def main() -> int:
             },
             "mllm": {
                 "primary": "Qwen/Qwen3-VL-8B-Instruct-FP8",
-                "fallback": "Qwen/Qwen3-VL-4B-Instruct",
-                "alternative": "OpenGVLab/InternVL3.5-8B-HF",
+            },
+            "visual_encoder": {
+                "primary": "facebook/dinov3-vitb16-pretrain-lvd1689m",
+                "revision": "5931719e67bbdb9737e363e781fb0c67687896bc",
             },
         },
         "git": collect_git(repo_root),
@@ -502,6 +508,7 @@ def main() -> int:
             "model_directory": inspect_target_path(args.model_dir),
             "data_directory": inspect_target_path(args.data_dir),
             "sam3_checkpoint": inspect_target_path(args.sam3_checkpoint),
+            "dinov3_model_directory": inspect_target_path(args.dinov3_model_dir),
         },
         "credentials": {
             "hf_token_environment_configured": bool(
@@ -549,6 +556,29 @@ def main() -> int:
             "sam3_checkpoint_invalid",
             "指定的 SAM3 checkpoint 不存在或不是文件。",
         )
+    dinov3_directory = report["paths"]["dinov3_model_directory"]
+    if not dinov3_directory["configured"]:
+        add_issue(
+            issues,
+            "warning",
+            "dinov3_model_directory_not_configured",
+            "未配置 DINOv3 本地快照目录；请通过 --dinov3-model-dir 指定。",
+        )
+    else:
+        configured_dino_path = Path(args.dinov3_model_dir).expanduser()
+        if not configured_dino_path.is_absolute():
+            configured_dino_path = repo_root / configured_dino_path
+        if (
+            not dinov3_directory["exists"]
+            or not dinov3_directory["is_directory"]
+            or not (configured_dino_path / "config.json").is_file()
+        ):
+            add_issue(
+                issues,
+                "blocked",
+                "dinov3_model_directory_invalid",
+                "DINOv3 本地快照目录不存在、不是目录或缺少 config.json。",
+            )
     if report["system"]["os"] != "Linux":
         add_issue(
             issues,

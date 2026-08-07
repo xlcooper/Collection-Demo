@@ -26,16 +26,19 @@ data/
 |---|---|
 | `memory.sqlite` | run、源图、候选、对象、观测和决策的结构化索引 |
 | `sources/` | 按 SHA-256 保存的处理用原图 |
-| `proposals/` | 候选的 `crop.png`、`mask.png` 和保留原色的 `overlay.jpg` |
-| `objects/` | 长期对象的跨视角观测图片 |
-| `raw_responses/` | 两轮 Qwen 的原始 JSON 回答、token 与耗时 |
+| `proposals/` | 候选的 `crop.png`、`mask.png`、`overlay.jpg` 和 `fingerprint.npz` |
+| `objects/` | 保留的目录边界；新 schema 不再复制候选图片到对象目录 |
+| `raw_responses/` | 每张唯一新图唯一一次 Qwen 回答、token 与耗时 |
 | `run_reports/` | 该记忆库内每次运行的报告 |
 
 SQLite 保存相对路径，因此数据库与上述资产目录必须作为一个整体移动、提交或清理。`environment/run_report.json` 是最近一次 Web/CLI 运行的外部报告副本，不替代记忆库内的报告。
 
+对象表只保存一份当前结构化文字摘要。每条 observation 引用原 proposal 的 crop、mask 和视觉指纹，不重复保存图片或逐视角文字描述；页面通过这些引用展示跨视角时间线，历史自动匹配只读取 `fingerprint.npz`。
+
 ## 状态与管理规则
 
 - 默认 `data/memory/` 不存在时，CLI 会自动创建；Web 新建库使用服务器生成的安全内部编号，页面名称不会成为服务器路径。
+- 当前 DINOv3 工作流使用 SQLite schema v3。旧 schema v2 记忆库保留原样并在 Web 中只读展示，不自动迁移；新实验应从页面新建空白库。
 - 只有相关 run、source 和候选都已成功完成的记忆库才允许继续加入新图片；失败、不完整或不可读的库在 Web 中只供复核和整库删除。
 - 空白库的首次 Web 运行可以执行全新 Demo 覆盖检查；已有库的增量运行不重复套用只适用于首次实验的覆盖门槛。
 - Web 删除以整库为单位，先隔离目标库并提交选择状态，再清理文件；写盘失败时恢复原库。不能只删除数据库或某一类图片。

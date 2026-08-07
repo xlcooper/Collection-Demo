@@ -306,7 +306,7 @@ def _memory_library_item(
                     )
                 }
                 missing = set(CORE_TABLES) - tables
-                if schema_version not in {1, SCHEMA_VERSION}:
+                if schema_version not in {2, SCHEMA_VERSION}:
                     raise MemoryReadError(
                         f"Unsupported schema version {schema_version}"
                     )
@@ -375,6 +375,15 @@ def _memory_library_item(
                         issue = (
                             "This library is missing required asset directories: "
                             f"{invalid_directories}"
+                        )
+                    elif schema_version < SCHEMA_VERSION:
+                        status = "review_only"
+                        continuable = False
+                        issue_code = "legacy_read_only"
+                        issue = (
+                            "This library records the legacy two-Qwen workflow and "
+                            "is preserved for read-only review; create a blank library "
+                            "for the DINOv3 workflow"
                         )
         except (MemoryReadError, sqlite3.Error, OSError) as exc:
             status = "unreadable"
@@ -1836,50 +1845,74 @@ def _json_list(value: object) -> list[Any]:
     return decoded if isinstance(decoded, list) else []
 
 
+def _json_object(value: object) -> dict[str, Any]:
+    try:
+        decoded = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
 def _object_observations(
     connection: sqlite3.Connection,
     object_id: str,
+    schema_version: int,
 ) -> list[dict[str, Any]]:
-    rows = connection.execute(
+    if schema_version >= 3:
+        statement = """
+            SELECT
+                o.*, p.crop_path, p.mask_path, p.overlay_path,
+                s.relative_path AS source_path,
+                p.prompt AS sam_text_prompt, p.score AS sam_score,
+                d.decision, d.matched_object_id,
+                d.confidence AS decision_confidence,
+                d.reason_code, d.short_reason, d.raw_response_path,
+                d.qwen_hypothesis, d.qwen_matched_object_id,
+                d.visual_evidence_json
+            FROM observations AS o
+            JOIN source_images AS s ON s.id = o.source_image_id
+            JOIN proposals AS p ON p.id = o.proposal_id
+            LEFT JOIN decisions AS d ON d.proposal_id = p.id
+            WHERE o.object_id = ?
+            ORDER BY o.created_at, o.id
         """
-        SELECT
-            o.id,
-            o.object_id,
-            o.proposal_id,
-            o.source_image_id,
-            o.crop_path,
-            o.mask_path,
-            o.overlay_path,
-            o.description,
-            o.created_at,
-            s.relative_path AS source_path,
-            p.prompt AS sam_text_prompt,
-            p.score AS sam_score,
-            d.decision,
-            d.matched_object_id,
-            d.confidence AS decision_confidence,
-            d.reason_code,
-            d.short_reason,
-            d.raw_response_path
-        FROM observations AS o
-        JOIN source_images AS s ON s.id = o.source_image_id
-        JOIN proposals AS p ON p.id = o.proposal_id
-        LEFT JOIN decisions AS d
-          ON d.proposal_id = p.id
-         AND d.attempt = (
-             SELECT MAX(d2.attempt)
-             FROM decisions AS d2
-             WHERE d2.proposal_id = p.id
-         )
-        WHERE o.object_id = ?
-        ORDER BY o.created_at, o.id
-        """,
-        (object_id,),
-    ).fetchall()
+    else:
+        statement = """
+            SELECT
+                o.*, s.relative_path AS source_path,
+                p.prompt AS sam_text_prompt, p.score AS sam_score,
+                d.decision, d.matched_object_id,
+                d.confidence AS decision_confidence,
+                d.reason_code, d.short_reason, d.raw_response_path
+            FROM observations AS o
+            JOIN source_images AS s ON s.id = o.source_image_id
+            JOIN proposals AS p ON p.id = o.proposal_id
+            LEFT JOIN decisions AS d
+              ON d.proposal_id = p.id
+             AND d.attempt = (
+                 SELECT MAX(d2.attempt) FROM decisions AS d2
+                 WHERE d2.proposal_id = p.id
+             )
+            WHERE o.object_id = ?
+            ORDER BY o.created_at, o.id
+        """
+    rows = connection.execute(statement, (object_id,)).fetchall()
+    if schema_version >= 3:
+        observations = []
+        for row in rows:
+            item = dict(row)
+            item["visual_evidence"] = _json_object(
+                item.pop("visual_evidence_json", "{}")
+            )
+            observations.append(item)
+        return observations
     return [dict(row) for row in rows]
 
 
-def _read_objects(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+def _read_objects(
+    connection: sqlite3.Connection,
+    schema_version: int,
+) -> list[dict[str, Any]]:
     rows = connection.execute(
         """
         SELECT
@@ -1895,42 +1928,75 @@ def _read_objects(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     objects: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
-        item["material"] = _json_list(item.pop("material_json", "[]"))
-        item["color"] = _json_list(item.pop("color_json", "[]"))
-        item["observations"] = _object_observations(connection, str(item["id"]))
+        if schema_version >= 3:
+            summary = _json_object(item.pop("summary_json", "{}"))
+            item.update(summary)
+            item["description"] = summary.get("stable_description")
+            item["annotation_confidence"] = summary.get("summary_confidence")
+            item["material"] = []
+            item["color"] = []
+        else:
+            materials = _json_list(item.pop("material_json", "[]"))
+            colors = _json_list(item.pop("color_json", "[]"))
+            item["material"] = materials
+            item["color"] = colors
+            item["stable_description"] = item.get("description")
+            item["stable_identity_features"] = []
+            item["brand_or_markings"] = []
+            item["part_appearance"] = (
+                [{"part": "整体（旧版）", "color": colors, "material": materials}]
+                if colors or materials
+                else []
+            )
+            item["summary_confidence"] = item.get("annotation_confidence")
+        item["observations"] = _object_observations(
+            connection,
+            str(item["id"]),
+            schema_version,
+        )
         objects.append(item)
     return objects
 
 
-def _read_candidates(connection: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = connection.execute(
+def _read_candidates(
+    connection: sqlite3.Connection,
+    schema_version: int,
+) -> list[dict[str, Any]]:
+    if schema_version >= 3:
+        statement = """
+            SELECT
+                p.*, s.run_id, s.relative_path AS source_path,
+                s.status AS source_status, d.decision, d.matched_object_id,
+                d.confidence AS decision_confidence, d.reason_code,
+                d.short_reason, d.raw_response_path, d.qwen_hypothesis,
+                d.qwen_matched_object_id, d.visual_evidence_json,
+                o.id AS observation_id, o.object_id AS observation_object_id
+            FROM proposals AS p
+            JOIN source_images AS s ON s.id = p.source_image_id
+            LEFT JOIN decisions AS d ON d.proposal_id = p.id
+            LEFT JOIN observations AS o ON o.proposal_id = p.id
+            ORDER BY p.created_at, p.id
         """
-        SELECT
-            p.*,
-            s.run_id,
-            s.relative_path AS source_path,
-            s.status AS source_status,
-            d.decision,
-            d.matched_object_id,
-            d.confidence AS decision_confidence,
-            d.reason_code,
-            d.short_reason,
-            d.raw_response_path,
-            o.id AS observation_id,
-            o.object_id AS observation_object_id
-        FROM proposals AS p
-        JOIN source_images AS s ON s.id = p.source_image_id
-        LEFT JOIN decisions AS d
-          ON d.proposal_id = p.id
-         AND d.attempt = (
-             SELECT MAX(d2.attempt)
-             FROM decisions AS d2
-             WHERE d2.proposal_id = p.id
-         )
-        LEFT JOIN observations AS o ON o.proposal_id = p.id
-        ORDER BY p.created_at, p.id
+    else:
+        statement = """
+            SELECT
+                p.*, s.run_id, s.relative_path AS source_path,
+                s.status AS source_status, d.decision, d.matched_object_id,
+                d.confidence AS decision_confidence, d.reason_code,
+                d.short_reason, d.raw_response_path,
+                o.id AS observation_id, o.object_id AS observation_object_id
+            FROM proposals AS p
+            JOIN source_images AS s ON s.id = p.source_image_id
+            LEFT JOIN decisions AS d
+              ON d.proposal_id = p.id
+             AND d.attempt = (
+                 SELECT MAX(d2.attempt) FROM decisions AS d2
+                 WHERE d2.proposal_id = p.id
+             )
+            LEFT JOIN observations AS o ON o.proposal_id = p.id
+            ORDER BY p.created_at, p.id
         """
-    ).fetchall()
+    rows = connection.execute(statement).fetchall()
     candidates: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
@@ -1943,6 +2009,16 @@ def _read_candidates(connection: sqlite3.Connection) -> list[dict[str, Any]]:
         item["object_id"] = (
             item.get("observation_object_id") or item.get("matched_object_id")
         )
+        if schema_version >= 3:
+            item["target_anchor"] = _json_object(
+                item.pop("target_anchor_json", "{}")
+            )
+            item["fingerprint"] = _json_object(
+                item.pop("fingerprint_json", "{}")
+            )
+            item["visual_evidence"] = _json_object(
+                item.pop("visual_evidence_json", "{}")
+            )
         candidates.append(item)
     return candidates
 
@@ -2013,6 +2089,13 @@ def read_memory_snapshot(
         }
     try:
         with closing(_open_read_only_database(database)) as connection:
+            schema_version = int(
+                connection.execute("PRAGMA user_version").fetchone()[0]
+            )
+            if schema_version not in {2, SCHEMA_VERSION}:
+                raise MemoryReadError(
+                    f"Unsupported schema version {schema_version}"
+                )
             tables = {
                 str(row[0])
                 for row in connection.execute(
@@ -2037,12 +2120,11 @@ def read_memory_snapshot(
             )
             return {
                 "initialized": True,
-                "schema_version": int(
-                    connection.execute("PRAGMA user_version").fetchone()[0]
-                ),
+                "schema_version": schema_version,
+                "read_only": schema_version < SCHEMA_VERSION,
                 "counts": counts,
-                "objects": _read_objects(connection),
-                "candidates": _read_candidates(connection),
+                "objects": _read_objects(connection, schema_version),
+                "candidates": _read_candidates(connection, schema_version),
                 "runs": _read_runs(connection),
                 "sources": _read_sources(connection),
             }
@@ -2086,9 +2168,13 @@ def deterministic_result_summary(
             continue
         guidance = image.get("scene_guidance")
         if isinstance(guidance, dict):
-            target_count = guidance.get("target_count")
-            if isinstance(target_count, int):
-                scene_targets += target_count
+            targets = guidance.get("targets")
+            if isinstance(targets, list):
+                scene_targets += len(targets)
+            else:
+                target_count = guidance.get("target_count")
+                if isinstance(target_count, int):
+                    scene_targets += target_count
         sam = image.get("sam")
         if isinstance(sam, dict):
             prompt_counts = sam.get("prompt_detection_counts")

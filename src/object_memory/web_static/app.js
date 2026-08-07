@@ -12,9 +12,11 @@
     cli: "实验入口收尾",
     input_registration: "输入登记与 SHA-256 去重",
     input: "输入登记与 SHA-256 去重",
+    models: "联合加载 Qwen3-VL、SAM3 与 DINOv3",
+    per_image_loop: "逐图对象记忆闭环",
     scene_guidance: "Qwen3-VL 目标规划",
     sam3: "SAM3 分割与候选过滤",
-    candidate_reasoning: "Qwen3-VL 对象决策",
+    candidate_reasoning: "DINOv3 视觉身份决策",
     memory: "写入 SQLite 对象记忆",
     report: "生成结果摘要",
     completed: "实验已完成",
@@ -37,6 +39,9 @@
     pending: "待确认",
     new: "新对象",
     existing: "已有对象",
+    match: "视觉匹配",
+    no_match: "未达视觉阈值",
+    ambiguous: "视觉歧义",
     ignored: "已忽略",
     uncertain: "不确定",
   };
@@ -45,11 +50,11 @@
     input:
       "作用：登记输入文件并按 SHA-256 识别内容副本。页面区分输入文件、本次在所选记忆库中新登记的源图，以及因内容相同而跳过的文件。",
     scene_guidance:
-      "作用：Qwen3-VL 为每张新登记源图提出完整物体概念。中文名称用于阅读与审计；唯一可能用于 SAM3 查询的是英文 sam_text_prompt，执行时不会改写。目标置信度表示该区域值得观察，不代表类别名称一定正确。",
+      "作用：Qwen3-VL 每张新图只调用一次，同时提出完整物体、当前可见类内特征、文字身份假设与拟议对象摘要。唯一送入 SAM3 的是英文 sam_text_prompt，执行时不会改写。",
     sam3:
       "作用：SAM3 按英文提示词定位并分割图像区域，脚本再过滤过小、重复或被包含的区域。报告只把已完成并记录检测数的查询计入统计；保留结果仍是候选区域，不是最终对象。",
     candidate_reasoning:
-      "作用：Qwen3-VL 先判断候选是否为完整、可独立建档的物体，再决定它是新对象、已有对象、忽略或不确定。",
+      "作用：区分 Qwen3-VL 的文字身份假设、DINOv3 的视角视觉匹配证据和最终决定；两类证据冲突时保持不确定。",
   };
 
   const state = {
@@ -254,9 +259,9 @@
 
   function statusClass(status) {
     const value = String(status || "neutral").toLowerCase();
-    if (["passed", "completed", "new", "existing"].includes(value)) return value;
+    if (["passed", "completed", "new", "existing", "match"].includes(value)) return value;
     if (["failed", "error", "interrupted"].includes(value)) return "failed";
-    if (["completed_with_errors", "uncertain", "pending"].includes(value)) return "warning";
+    if (["completed_with_errors", "uncertain", "pending", "ambiguous"].includes(value)) return "warning";
     if (["ignored", "filtered", "duplicate"].includes(value)) return value;
     if (isRunningStatus(value)) return "running";
     return "neutral";
@@ -658,18 +663,17 @@
       input_registration_started: "正在读取图片并计算 SHA-256",
       input_registered: `已登记 ${filename || `第 ${current} 张图片`}（${current}/${total}）`,
       input_registration_completed: "输入登记与内容去重完成",
+      models_load_started: "正在联合加载 Qwen3-VL、SAM3 与 DINOv3",
+      models_load_completed: "三个模型已完成联合驻留",
+      image_loop_started: `正在逐图处理第 ${current + 1}/${total} 张图`,
+      image_loop_completed: `已完成第 ${current}/${total} 张图的闭环处理`,
       scene_guidance_started: "准备进行场景目标规划",
-      scene_guidance_batch_started: `Qwen 正在分析第 ${current + 1}/${total} 个场景批次`,
-      scene_guidance_batch_completed: `第 ${current}/${total} 个场景批次已完成`,
-      scene_guidance_completed: "场景目标规划完成",
-      sam3_started: "准备进行 SAM3 文本定向分割",
+      scene_guidance_image_started: "Qwen 正在查看当前图与已有对象文字档案",
+      scene_guidance_image_completed: "Qwen 单次调用已完成",
       sam3_image_started: `SAM3 正在处理第 ${current + 1}/${total} 张图`,
       sam3_image_completed: `SAM3 已完成第 ${current}/${total} 张图`,
-      sam3_completed: "SAM3 分割与候选过滤完成",
-      candidate_reasoning_started: "准备进行候选复核与对象身份判断",
-      candidate_reasoning_image_started: `Qwen 正在判断第 ${current + 1}/${total} 张图的候选`,
-      candidate_reasoning_image_completed: `Qwen3-VL 已完成第 ${current}/${total} 张图的对象决策`,
-      candidate_reasoning_completed: "候选复核与对象记忆写入完成",
+      visual_identity_started: "DINOv3 正在生成视觉指纹并比较历史视角",
+      visual_identity_completed: "视觉身份证据与最终决定已写入",
       report_started: "正在汇总实验报告",
       report_completed: "运行报告已写入",
       run_completed: "端到端流程已结束",
@@ -840,39 +844,7 @@
     for (const event of visibleEvents) {
       const data = event.data || {};
       const direct = data.input_path || data.source_id
-        ? [
-            event.event === "sam3_image_completed"
-              ? {
-                  input_path: data.input_path,
-                  source_id: data.source_id,
-                  status: data.work_status,
-                  sam: {
-                    above_confidence_threshold_candidates: data.above_confidence_threshold_candidates,
-                    prompt_detection_counts: data.prompt_detection_counts,
-                    zero_candidate_prompts: data.zero_candidate_prompts,
-                    inference_seconds: data.inference_seconds,
-                    kept: array(data.kept).length,
-                    filtered: array(data.filtered).length,
-                    filter_counts: data.filter_counts,
-                  },
-                  kept_proposals: data.kept,
-                  filtered_proposals: data.filtered,
-                  error: data.error,
-                }
-              : event.event === "candidate_reasoning_image_completed"
-                ? {
-                    input_path: data.input_path,
-                    source_id: data.source_id,
-                    status: data.work_status,
-                    candidate_reasoning: data.candidate_reasoning,
-                    decisions: data.decisions,
-                    error: data.error,
-                  }
-                : {
-                    ...data,
-                    status: data.work_status || data.status,
-                  },
-          ]
+        ? [{ ...data, status: data.work_status || data.status }]
         : [];
       const images = array(data.images).concat(data.image ? [data.image] : [], direct);
       for (const image of images) mergeImage(image);
@@ -921,7 +893,7 @@
         number(sam.filtered) ||
         number(sam.above_confidence_threshold_candidates) ||
         Object.keys(sam.prompt_detection_counts || {}).length ||
-        (image.error && number(image.scene_guidance?.target_count) > 0)
+        (image.error && array(image.scene_guidance?.targets).length > 0)
     );
   }
 
@@ -957,7 +929,10 @@
     const decidedImages = images.filter(
       (image) => array(image.decisions).length || image.candidate_reasoning
     );
-    const sceneCount = images.reduce((sum, image) => sum + number(image.scene_guidance?.target_count, 0), 0);
+    const sceneCount = images.reduce(
+      (sum, image) => sum + array(image.scene_guidance?.targets).length,
+      0
+    );
     const keptCount = images.reduce((sum, image) => sum + number(image.sam?.kept, 0), 0);
     const decisionCount = images.reduce((sum, image) => sum + array(image.decisions).length, 0);
     document.querySelector("#tab-count-input").textContent = images.length
@@ -1056,7 +1031,10 @@
       );
       return;
     }
-    const targetCount = guided.reduce((sum, image) => sum + number(image.scene_guidance?.target_count, 0), 0);
+    const targetCount = guided.reduce(
+      (sum, image) => sum + array(image.scene_guidance?.targets).length,
+      0
+    );
     const actualQueryCount = guided.reduce(
       (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
       0
@@ -1085,11 +1063,11 @@
                   <div class="card-title-row">
                     <div>
                       <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">目标规划批次 ${escapeHtml(guidance.batch_index ?? "—")}</span>
+                      <span class="mono-line">逐图单次 Qwen 调用</span>
                     </div>
                     <div class="chip-list" style="margin-top:0">
                       ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `本图 ${targets.length} 个 Qwen 目标条目`)}
-                      ${guidance.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(guidance.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
+                      ${image.qwen?.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(image.qwen.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
                     </div>
                   </div>
                   <p>${escapeHtml(guidance.scene_summary || guidance.no_target_reason || guidance.errors?.join("；") || "尚无可用场景摘要")}</p>
@@ -1115,7 +1093,9 @@
                                   <dl>
                                     <div><dt>中文物体名称</dt><dd>${escapeHtml(target.object_name_zh || target.target_id)}</dd></div>
                                     <div class="sam-query-row"><dt>${sent ? "已完成查询的 SAM3 英文原文" : "计划用于 SAM3 的英文原文"}</dt><dd><code>${escapeHtml(prompt)}</code></dd></div>
-                                    <div><dt>目标置信度</dt><dd>${Math.round(number(target.confidence) * 100)}% · ${escapeHtml(target.selection_short_reason || "未提供选择原因")}</dd></div>
+                                    <div><dt>当前可见类内特征</dt><dd>${escapeHtml(array(target.current_view_facts?.visible_identity_features).join("；") || "未记录")}</dd></div>
+                                    <div><dt>文字身份假设</dt><dd>${escapeHtml(target.identity_hypothesis || "—")} · ${escapeHtml(target.identity_short_reason || "未提供判断原因")}</dd></div>
+                                    <div><dt>拟议摘要置信度</dt><dd>${Math.round(number(target.proposed_object_summary?.summary_confidence) * 100)}%</dd></div>
                                   </dl>
                                 </article>
                               `;
@@ -1289,19 +1269,19 @@
       updateHtml(
         elements.stagePanel,
         `${stagePanelHeader(
-          "STEP 04 · OBJECT DECISION",
-          "Qwen3-VL 对象决策",
+          "STEP 04 · VISUAL IDENTITY",
+          "DINOv3 视觉身份决策",
           stagePurposes.candidate_reasoning,
           []
-        )}${emptyState("等待对象决策结果", "Qwen3-VL 完成候选复核后，这里会显示有效性与对象身份决定。", "04")}`
+        )}${emptyState("等待视觉身份结果", "DINOv3 生成视觉指纹后，这里会并列显示文字假设、视觉证据和最终决定。", "04")}`
       );
       return;
     }
     const decisions = relevant.flatMap((image) => array(image.decisions).map((decision) => ({ image, decision })));
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
-        "STEP 04 · OBJECT DECISION",
-        "Qwen3-VL 对象决策",
+        "STEP 04 · VISUAL IDENTITY",
+        "Qwen3-VL 假设 × DINOv3 证据",
         stagePurposes.candidate_reasoning,
         [
           ["候选判断记录", decisions.length],
@@ -1311,20 +1291,9 @@
         ${decisions
           .map(({ image, decision }) => {
             const candidate = decision.candidate || {};
-            const annotation = decision.temporary_annotation;
-            const finalAnnotation = decision.final_annotation;
             const errors = array(decision.errors).map(errorValueText).filter(Boolean);
-            const validity = decision.validity;
-            const validityLabel =
-              validity === "valid"
-                ? "有效候选"
-                : validity === "ignored"
-                  ? "无效 / 忽略"
-                  : decision.status === "failed"
-                    ? "有效性判断失败"
-                    : "未返回有效性";
-            const validityStatus = validity === "valid" ? "passed" : validity === "ignored" ? "ignored" : decision.status || "pending";
-            const validityReason = decision.validity_short_reason || errors.join("；") || "未提供有效性理由";
+            const visual = decision.visual_evidence || {};
+            const qwenHypothesis = decision.qwen_identity_hypothesis || decision.qwen_hypothesis;
             const objectReason = decision.short_reason || (decision.decision ? "未提供对象决定理由" : "未形成对象身份决定");
             return `
               <article class="candidate-card">
@@ -1343,16 +1312,24 @@
                   <div class="reasoning-steps">
                     <section class="reasoning-step">
                       <div class="reasoning-step-heading">
-                        <span>1 · 候选有效性</span>
-                        ${statusPill(validityStatus, validityLabel)}
+                        <span>1 · Qwen 文字身份假设</span>
+                        ${qwenHypothesis ? statusPill(qwenHypothesis) : statusPill("pending", "无目标对应")}
                       </div>
-                      <p>${escapeHtml(validityReason)}</p>
-                      <span class="mono-line">validity_confidence ${decision.validity_confidence == null ? "—" : `${Math.round(number(decision.validity_confidence) * 100)}%`} · ${escapeHtml(decision.validity_reason_code || "无 reason code")}</span>
+                      <p>${escapeHtml(decision.target_object_name_zh || "当前候选未与一个Qwen临时目标框唯一对应")}</p>
+                      <span class="mono-line">target ${escapeHtml(shortId(decision.target_id, 16))} · object ${escapeHtml(shortId(decision.qwen_matched_object_id, 16))}</span>
                       ${errors.length ? `<ul class="reasoning-errors">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : ""}
                     </section>
                     <section class="reasoning-step">
                       <div class="reasoning-step-heading">
-                        <span>2 · 对象身份决定</span>
+                        <span>2 · DINOv3 视觉证据</span>
+                        ${visual.result ? statusPill(visual.result) : statusPill(decision.status || "pending")}
+                      </div>
+                      <p>global ${visual.global_similarity == null ? "—" : number(visual.global_similarity).toFixed(3)} · local ${visual.local_match_ratio == null ? "—" : number(visual.local_match_ratio).toFixed(3)} · combined ${visual.visual_score == null ? "—" : number(visual.visual_score).toFixed(3)}</p>
+                      <span class="mono-line">best object ${escapeHtml(shortId(visual.matched_object_id, 16))} · margin ${visual.score_margin == null ? "—" : number(visual.score_margin).toFixed(3)}</span>
+                    </section>
+                    <section class="reasoning-step">
+                      <div class="reasoning-step-heading">
+                        <span>3 · 最终决定</span>
                         ${decision.decision ? statusPill(decision.decision) : statusPill(decision.status || "pending", "未形成决定")}
                       </div>
                       <p>${escapeHtml(objectReason)}</p>
@@ -1360,14 +1337,6 @@
                       ${decision.object_id || decision.matched_object_id ? `<span class="chip">object <b class="mono">${escapeHtml(decision.object_id || decision.matched_object_id)}</b></span>` : ""}
                     </section>
                   </div>
-                  ${
-                    annotation || finalAnnotation
-                      ? `<div class="annotation-compare">
-                          ${annotationBox("本次观测", annotation)}
-                          ${annotationBox("稳定对象卡", finalAnnotation)}
-                        </div>`
-                      : ""
-                  }
                 </div>
               </article>
             `;
@@ -1375,12 +1344,6 @@
           .join("")}
       </div>
     `);
-  }
-
-  function annotationBox(label, annotation) {
-    if (!annotation) return `<div class="annotation-box"><span>${label}</span><p>无</p></div>`;
-    const title = annotation.fine_category || annotation.coarse_category || "未命名对象";
-    return `<div class="annotation-box"><span>${label}</span><p><b>${escapeHtml(title)}</b><br>${escapeHtml(annotation.description || "—")}</p></div>`;
   }
 
   function stagePanelHeader(step, title, description, metrics) {
@@ -1450,7 +1413,7 @@
 
   function renderObjects(objects) {
     if (!objects.length) {
-      updateHtml(elements.memoryContent, emptyState("数据库已建立，但还没有对象卡", "请核对候选是否被忽略、不确定或运行失败。", "□"));
+      updateHtml(elements.memoryContent, emptyState("数据库已建立，但还没有对象卡", "请核对候选是否被过滤、判为不确定或运行失败。", "□"));
       return;
     }
     updateHtml(elements.memoryContent, `<div class="object-grid">${objects.map(objectCard).join("")}</div>`);
@@ -1459,25 +1422,31 @@
   function objectCard(object) {
     const observations = array(object.observations);
     const cover = object.representative_view || object.cover_path || observations[observations.length - 1]?.crop_path;
-    const colors = array(object.color || object.colors);
-    const materials = array(object.material || object.materials);
+    const identityFeatures = array(object.stable_identity_features);
+    const markings = array(object.brand_or_markings);
+    const parts = array(object.part_appearance);
     return `
       <article class="object-card">
         <div class="object-card-top">
           <div class="object-cover">${previewImage(imageUrl(cover), `对象 ${object.id}`)}</div>
           <div class="object-card-info">
             <div class="card-title-row">
-              <h3>${escapeHtml(object.fine_category || object.coarse_category || "未命名对象")}</h3>
+              <h3>${escapeHtml(object.object_name_zh || object.fine_category || object.coarse_category || "未命名对象")}</h3>
               ${statusPill(object.status || "completed", object.status === "archived" ? "已归档" : `${observations.length} 观测`)}
             </div>
             <span class="mono-line" title="${escapeHtml(object.id || "")}">${escapeHtml(object.id || "—")}</span>
+            <p class="object-category">${escapeHtml([object.coarse_category, object.fine_category].filter(Boolean).join(" / ") || "类别未记录")}</p>
+            <small class="object-field-label">部件级外观</small>
             <div class="chip-list">
-              ${colors.map((value) => `<span class="chip">颜色 · <b>${escapeHtml(value)}</b></span>`).join("")}
-              ${materials.map((value) => `<span class="chip">材质 · <b>${escapeHtml(value)}</b></span>`).join("")}
-              ${object.shape ? `<span class="chip">形状 · <b>${escapeHtml(object.shape)}</b></span>` : ""}
-              ${object.annotation_confidence == null ? "" : `<span class="chip">标注置信 · <b>${Math.round(number(object.annotation_confidence) * 100)}%</b></span>`}
+              ${parts.map((part) => `<span class="chip">${escapeHtml(part.part || "部件")} · <b>${escapeHtml([...array(part.color), ...array(part.material)].join(" / ") || "未记录外观")}</b></span>`).join("")}
+              ${object.summary_confidence == null && object.annotation_confidence == null ? "" : `<span class="chip">摘要置信 · <b>${Math.round(number(object.summary_confidence ?? object.annotation_confidence) * 100)}%</b></span>`}
             </div>
-            <p class="object-description">${escapeHtml(object.description || "暂无稳定对象描述")}</p>
+            <small class="object-field-label">品牌 / 标记</small>
+            <div class="chip-list">${markings.length ? markings.map((value) => `<span class="chip"><b>${escapeHtml(value)}</b></span>`).join("") : '<span class="meta-line">未记录</span>'}</div>
+            <small class="object-field-label">稳定汇总描述</small>
+            <p class="object-description">${escapeHtml(object.stable_description || object.description || "暂无稳定对象描述")}</p>
+            <small class="object-field-label">类内区别特征</small>
+            ${identityFeatures.length ? `<ul class="reasoning-errors">${identityFeatures.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>` : '<span class="meta-line">未记录</span>'}
           </div>
         </div>
         <div class="observation-timeline" aria-label="${escapeHtml(object.id || "对象")} 的观测时间线">
@@ -1486,8 +1455,9 @@
               ? observations
                   .map(
                     (observation, index) => `
-                      <div class="observation-item" title="${escapeHtml(observation.description || observation.id || "")}">
-                        <div class="observation-image">${previewImage(imageUrl(observation.crop_path || observation.crop), `观测 ${observation.id || index + 1}`)}</div>
+                      <div class="observation-item" title="${escapeHtml(observation.id || "")}">
+                        <div class="observation-image">${previewImage(imageUrl(observation.crop_path || observation.crop), `观测 ${observation.id || index + 1} crop`)}</div>
+                        ${observation.mask_path ? `<div class="observation-image">${previewImage(imageUrl(observation.mask_path), `观测 ${observation.id || index + 1} mask`)}</div>` : ""}
                         <small>${String(index + 1).padStart(2, "0")} · ${escapeHtml(shortId(observation.source_image_id, 8))}</small>
                       </div>
                     `
@@ -1508,7 +1478,7 @@
     updateHtml(elements.memoryContent, `
       <div class="table-wrap">
         <table class="lineage-table">
-          <thead><tr><th>候选</th><th>source</th><th>SAM3 英文提示词</th><th>分数</th><th>候选状态</th><th>Qwen 决策</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
+          <thead><tr><th>候选</th><th>source</th><th>Qwen目标 / SAM3提示</th><th>SAM分数</th><th>候选状态</th><th>Qwen假设</th><th>DINOv3证据</th><th>最终决定</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
           <tbody>
             ${candidates
               .map((candidate) => {
@@ -1517,9 +1487,11 @@
                   <tr>
                     <td class="mono" title="${escapeHtml(candidate.id || candidate.proposal_id || "")}">${escapeHtml(shortId(candidate.id || candidate.proposal_id, 17))}</td>
                     <td class="mono" title="${escapeHtml(candidate.source_image_id || "")}">${escapeHtml(shortId(candidate.source_image_id, 14))}</td>
-                    <td>${escapeHtml(candidate.prompt || candidate.sam_text_prompt || "—")}</td>
+                    <td>${escapeHtml(candidate.target_object_name_zh || "未对应目标")}<br><code>${escapeHtml(candidate.prompt || candidate.sam_text_prompt || "—")}</code></td>
                     <td>${candidate.score == null ? "—" : number(candidate.score).toFixed(3)}</td>
                     <td>${statusPill(candidate.status || "pending")}</td>
+                    <td>${candidate.qwen_hypothesis ? statusPill(candidate.qwen_hypothesis) : "—"}</td>
+                    <td>${candidate.visual_evidence?.result ? `${statusPill(candidate.visual_evidence.result)}<br><span class="mono-line">${candidate.visual_evidence.visual_score == null ? "—" : number(candidate.visual_evidence.visual_score).toFixed(3)}</span>` : "—"}</td>
                     <td>${candidate.decision ? statusPill(candidate.decision) : "—"}</td>
                     <td class="mono">${escapeHtml(shortId(candidate.object_id || candidate.observation_object_id || candidate.matched_object_id, 15))}</td>
                     <td>${asset ? `<img class="table-thumb" loading="lazy" src="${escapeHtml(imageUrl(asset))}" alt="候选资产" />` : "—"}</td>
@@ -1540,7 +1512,10 @@
     const sourceCounts = run.source_counts || {};
     const proposalCounts = run.proposal_counts || {};
     const decisions = run.decision_counts || {};
-    const sceneTargets = images.reduce((sum, image) => sum + number(image.scene_guidance?.target_count), 0);
+    const sceneTargets = images.reduce(
+      (sum, image) => sum + array(image.scene_guidance?.targets).length,
+      0
+    );
     const samPrompts = images.reduce(
       (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
       0
@@ -1654,6 +1629,7 @@
 
     const qwen = report.models?.qwen || {};
     const sam = report.models?.sam3 || {};
+    const dino = report.models?.dinov3 || {};
     const errors = reportErrorMessages(report);
     const checks = Object.entries(report.checks || {});
     const demoCoverage = Object.entries(report.demo_coverage || {});
@@ -1709,10 +1685,10 @@
         ${summaryStageCard("04", "对象决策", [
           ["新对象", metrics.newCount],
           ["归入已有对象", metrics.existingCount],
-          ["忽略候选", metrics.ignoredCount],
+          ...(metrics.ignoredCount ? [["旧版忽略候选", metrics.ignoredCount]] : []),
           ["不确定待复核", metrics.uncertainCount],
           ["处理失败", metrics.failedProposals],
-        ], decisionGap ? `${decisionGap} 个保留候选没有形成决定，请查看对象决策阶段。` : "四类决定与失败记录分开统计。")}
+        ], decisionGap ? `${decisionGap} 个保留候选没有形成决定，请查看对象决策阶段。` : "当前决定为新对象、已有对象或不确定；失败单独记录。")}
         ${summaryStageCard("05", "记忆写入", [
           ["本次新增观测", metrics.observations],
           ["库内活跃对象", metrics.objects],
@@ -1738,9 +1714,10 @@
       <article class="detail-panel timing-panel">
         <h3>模型与耗时</h3>
         <div class="timing-grid">
-          ${timingMetric("Qwen 加载", qwen.model_load_seconds, `${number(qwen.load_count)} 次驻留`)}
-          ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.total_calls)} 次调用`)}
+          ${timingMetric("Qwen 加载", qwen.model_load_seconds, qwen.loaded ? "联合驻留" : `${number(qwen.load_count)} 次驻留`)}
+          ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.calls ?? qwen.total_calls)} 次调用`)}
           ${timingMetric("SAM3 推理", sam.inference_seconds, `峰值 ${number(sam.peak_memory_mib).toFixed(0)} MiB`)}
+          ${timingMetric("DINOv3 推理", dino.inference_seconds, `${number(dino.fingerprints)} 个视觉指纹`)}
         </div>
       </article>
       <details class="technical-details">
@@ -1935,7 +1912,7 @@
       ? "这是空白库，本次会创建一份独立对象记忆，并执行首次 Demo 结构覆盖检查。"
       : `本次结果会并入现有 ${formatInteger(counts.active_objects)} 个对象和 ${formatInteger(counts.observations)} 条观测，不会生成独立副本，也不会重复套用空白库的首次覆盖条件。`;
     const confirmed = window.confirm(
-      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n目标记忆库：${library.label}（${memoryStatusText(library.status)}）\n${memoryContext}\n\n运行期间会锁定输入和记忆库管理，并顺序加载 Qwen3-VL、SAM3、Qwen3-VL。是否继续？`
+      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n目标记忆库：${library.label}（${memoryStatusText(library.status)}）\n${memoryContext}\n\n运行期间会锁定输入和记忆库管理，并联合加载 Qwen3-VL、SAM3 与 DINOv3，随后逐图闭环处理。是否继续？`
     );
     if (!confirmed) return;
     state.viewEpoch += 1;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the batch object-memory Demo workflow."""
+"""Run the per-image Qwen, SAM3, and DINOv3 object-memory workflow."""
 
 from __future__ import annotations
 
@@ -23,7 +23,9 @@ from object_memory.config import (  # noqa: E402
     load_config,
     resolve_memory_root,
 )
+from object_memory.dinov3_adapter import DinoV3Adapter  # noqa: E402
 from object_memory.mllm_adapter import QwenMllmAdapter  # noqa: E402
+from object_memory.memory_store import MemoryStore, MemoryStoreError  # noqa: E402
 from object_memory.pipeline import (  # noqa: E402
     ObjectMemoryPipeline,
     discover_images,
@@ -45,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-root")
     parser.add_argument("--checkpoint")
     parser.add_argument("--qwen-model")
+    parser.add_argument("--dinov3-model-path")
     parser.add_argument("--revision")
     parser.add_argument("--allow-network", action="store_true")
     parser.add_argument(
@@ -75,6 +78,8 @@ def runtime_config(base: AppConfig, args: argparse.Namespace) -> AppConfig:
         payload["models"]["sam3_checkpoint"] = args.checkpoint
     if args.qwen_model:
         payload["models"]["qwen_model_id"] = args.qwen_model
+    if args.dinov3_model_path:
+        payload["models"]["dinov3_model_path"] = args.dinov3_model_path
     return AppConfig.model_validate(payload)
 
 
@@ -83,6 +88,13 @@ def resolve_checkpoint(config: AppConfig) -> Path:
     if not checkpoint.is_absolute():
         checkpoint = PROJECT_ROOT / checkpoint
     return checkpoint.resolve()
+
+
+def resolve_dinov3_model_path(config: AppConfig) -> Path:
+    model_path = config.models.dinov3_model_path.expanduser()
+    if not model_path.is_absolute():
+        model_path = PROJECT_ROOT / model_path
+    return model_path.resolve()
 
 
 def validate_directory_separation(input_root: Path, memory_root: Path) -> None:
@@ -100,9 +112,9 @@ def failure_report(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
-        "schema_version": 6,
+        "schema_version": 7,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "test": "object_memory_demo_batch",
+        "test": "object_memory_demo_single_pass_dinov3",
         "status": "failed",
         "error": {
             "type": type(exc).__name__,
@@ -133,9 +145,7 @@ def add_demo_coverage(report: dict[str, Any]) -> None:
     }
     report["demo_coverage"] = coverage
     report["demo_observations"] = {
-        "filtered_or_ignored_candidate_observed": (
-            proposals["filtered"] + decisions["ignored"] >= 1
-        )
+        "filtered_candidate_observed": proposals["filtered"] >= 1
     }
     if report["status"] != "passed" or not all(coverage.values()):
         report["pipeline_status"] = report["status"]
@@ -172,11 +182,18 @@ def main() -> int:
             max_pixels=config.mllm_pipeline.max_pixels,
             max_new_tokens=config.mllm_pipeline.max_new_tokens,
         )
+        dino_runtime = DinoV3Adapter(
+            resolve_dinov3_model_path(config),
+            model_id=config.models.dinov3_model_id,
+            revision=config.models.dinov3_revision,
+            settings=config.visual_fingerprint,
+        )
         pipeline = ObjectMemoryPipeline(
             config=config,
             paths=paths,
             sam_runtime=sam_runtime,
             mllm_runtime=mllm_runtime,
+            dino_runtime=dino_runtime,
             progress=progress,
         )
         report = pipeline.run(image_paths)
@@ -233,7 +250,14 @@ def main() -> int:
                     "type": type(progress_exc).__name__,
                     "message": str(progress_exc),
                 }
-        if paths is not None and run_id:
+        writable_memory = False
+        if paths is not None:
+            try:
+                MemoryStore(paths).status()
+                writable_memory = True
+            except (FileNotFoundError, MemoryStoreError):
+                pass
+        if writable_memory and paths is not None and run_id:
             try:
                 write_json_atomic(paths.run_reports / f"{run_id}.json", report)
             except Exception as internal_report_exc:  # noqa: BLE001

@@ -1,4 +1,4 @@
-"""SQLite initialization, transactions, and object-memory persistence."""
+"""SQLite v3 initialization, transactions, and object-memory persistence."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from .schemas import (
     Decision,
     DecisionType,
     MemoryObject,
-    ObjectAnnotation,
     ObjectCard,
+    ObjectSummary,
     Observation,
     Proposal,
     ProposalStatus,
@@ -26,7 +26,7 @@ from .schemas import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CORE_TABLES = (
     "runs",
     "source_images",
@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS runs (
     config_digest TEXT NOT NULL,
     sam_model_id TEXT NOT NULL,
     qwen_model_id TEXT NOT NULL,
+    dinov3_model_id TEXT NOT NULL,
     error_message TEXT
 );
 
@@ -71,6 +72,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     source_image_id TEXT NOT NULL REFERENCES source_images(id),
     raw_candidate_id TEXT NOT NULL,
     prompt TEXT NOT NULL,
+    target_id TEXT,
+    target_object_name_zh TEXT,
+    target_anchor_json TEXT,
     score REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
     bbox_x_min REAL NOT NULL CHECK (bbox_x_min >= 0.0),
     bbox_y_min REAL NOT NULL CHECK (bbox_y_min >= 0.0),
@@ -83,6 +87,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     mask_path TEXT,
     crop_path TEXT,
     overlay_path TEXT,
+    fingerprint_json TEXT,
     status TEXT NOT NULL CHECK (
         status IN ('pending', 'filtered', 'decided', 'failed')
     ),
@@ -95,15 +100,7 @@ CREATE TABLE IF NOT EXISTS proposals (
 
 CREATE TABLE IF NOT EXISTS objects (
     id TEXT PRIMARY KEY,
-    coarse_category TEXT NOT NULL,
-    fine_category TEXT NOT NULL,
-    material_json TEXT NOT NULL,
-    color_json TEXT NOT NULL,
-    shape TEXT NOT NULL,
-    description TEXT NOT NULL,
-    annotation_confidence REAL NOT NULL CHECK (
-        annotation_confidence >= 0.0 AND annotation_confidence <= 1.0
-    ),
+    summary_json TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -114,61 +111,50 @@ CREATE TABLE IF NOT EXISTS observations (
     object_id TEXT NOT NULL REFERENCES objects(id),
     proposal_id TEXT NOT NULL UNIQUE REFERENCES proposals(id),
     source_image_id TEXT NOT NULL REFERENCES source_images(id),
-    crop_path TEXT NOT NULL,
-    mask_path TEXT NOT NULL,
-    overlay_path TEXT NOT NULL,
-    description TEXT NOT NULL,
+    fingerprint_path TEXT NOT NULL,
+    fingerprint_sha256 TEXT NOT NULL CHECK (length(fingerprint_sha256) = 64),
+    fingerprint_model_id TEXT NOT NULL,
+    fingerprint_revision TEXT NOT NULL,
+    feature_layer TEXT NOT NULL,
+    input_size INTEGER NOT NULL CHECK (input_size > 0),
+    storage_dtype TEXT NOT NULL,
+    global_dimension INTEGER NOT NULL CHECK (global_dimension > 0),
+    local_count INTEGER NOT NULL CHECK (local_count >= 0),
+    l2_normalized INTEGER NOT NULL CHECK (l2_normalized IN (0, 1)),
     created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
     id TEXT PRIMARY KEY,
-    proposal_id TEXT NOT NULL REFERENCES proposals(id),
+    proposal_id TEXT NOT NULL UNIQUE REFERENCES proposals(id),
     decision TEXT NOT NULL CHECK (
-        decision IN ('new', 'existing', 'ignored', 'uncertain')
+        decision IN ('new', 'existing', 'uncertain')
     ),
     matched_object_id TEXT REFERENCES objects(id),
     confidence REAL NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0),
     reason_code TEXT NOT NULL,
     short_reason TEXT NOT NULL,
     prompt_version TEXT NOT NULL,
+    qwen_hypothesis TEXT NOT NULL CHECK (
+        qwen_hypothesis IN ('new', 'existing', 'uncertain')
+    ),
+    qwen_matched_object_id TEXT,
+    visual_evidence_json TEXT NOT NULL,
     raw_response_path TEXT,
-    attempt INTEGER NOT NULL CHECK (attempt >= 1),
+    attempt INTEGER NOT NULL CHECK (attempt = 1),
     created_at TEXT NOT NULL,
     CHECK (
         (decision = 'existing' AND matched_object_id IS NOT NULL)
         OR (decision <> 'existing' AND matched_object_id IS NULL)
-    ),
-    UNIQUE (proposal_id, attempt)
+    )
 );
 
-CREATE INDEX IF NOT EXISTS idx_source_images_status
-    ON source_images(status);
-CREATE INDEX IF NOT EXISTS idx_proposals_source
-    ON proposals(source_image_id);
-CREATE INDEX IF NOT EXISTS idx_proposals_status
-    ON proposals(status);
-CREATE INDEX IF NOT EXISTS idx_objects_status
-    ON objects(status);
-CREATE INDEX IF NOT EXISTS idx_observations_object
-    ON observations(object_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_decisions_proposal
-    ON decisions(proposal_id, attempt);
-"""
-
-
-MIGRATION_V1_TO_V2_SQL = """
-BEGIN;
-ALTER TABLE proposals
-    ADD COLUMN prompt TEXT NOT NULL DEFAULT 'unknown';
-ALTER TABLE proposals
-    ADD COLUMN mask_area_pixels INTEGER NOT NULL DEFAULT 0
-    CHECK (mask_area_pixels >= 0);
-ALTER TABLE proposals
-    ADD COLUMN mask_area_ratio REAL NOT NULL DEFAULT 0.0
-    CHECK (mask_area_ratio >= 0.0 AND mask_area_ratio <= 1.0);
-PRAGMA user_version = 2;
-COMMIT;
+CREATE INDEX IF NOT EXISTS idx_source_images_status ON source_images(status);
+CREATE INDEX IF NOT EXISTS idx_proposals_source ON proposals(source_image_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
+CREATE INDEX IF NOT EXISTS idx_objects_status ON objects(status);
+CREATE INDEX IF NOT EXISTS idx_observations_object ON observations(object_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_proposal ON decisions(proposal_id);
 """
 
 
@@ -192,8 +178,6 @@ class StoreStatus:
 
 @dataclass(frozen=True, slots=True)
 class SourceRegistration:
-    """Result of the SHA-256 idempotency gate for one source image."""
-
     source_id: str
     status: SourceImageStatus
     duplicate: bool
@@ -202,8 +186,6 @@ class SourceRegistration:
 
 @dataclass(frozen=True, slots=True)
 class DecisionWriteResult:
-    """Identifiers created by one committed proposal decision."""
-
     proposal_id: str
     decision_id: str
     decision: DecisionType
@@ -213,9 +195,15 @@ class DecisionWriteResult:
 
 
 @dataclass(frozen=True, slots=True)
-class RunSummary:
-    """Compact database-backed summary for one completed or running run."""
+class FingerprintRecord:
+    object_id: str
+    observation_id: str
+    path: str
+    sha256: str
 
+
+@dataclass(frozen=True, slots=True)
+class RunSummary:
     run_id: str
     status: RunStatus
     source_counts: dict[str, int]
@@ -241,7 +229,7 @@ class RunSummary:
 
 
 class MemoryStore:
-    """Own the SQLite connection boundary for the application."""
+    """Own the writable SQLite v3 boundary for the application."""
 
     def __init__(self, paths: MemoryPaths) -> None:
         self.paths = paths
@@ -254,35 +242,63 @@ class MemoryStore:
         return connection
 
     def initialize(self) -> StoreStatus:
-        """Create or safely reopen the schema and fixed asset directories."""
+        """Create a v3 store or reopen v3; legacy stores are explicitly read-only."""
 
+        if self.paths.database.is_file():
+            with closing(self._connect()) as connection:
+                existing_version = int(
+                    connection.execute("PRAGMA user_version").fetchone()[0]
+                )
+                existing_tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+            clean_unversioned = (
+                existing_version == 0
+                and not set(CORE_TABLES).intersection(existing_tables)
+            )
+            if existing_version != SCHEMA_VERSION and not clean_unversioned:
+                raise MemoryStoreError(
+                    "Memory schema version "
+                    f"{existing_version} is legacy and read-only; create a new blank "
+                    "memory library for the DINOv3 workflow."
+                )
         self.paths.ensure_layout()
         with closing(self._connect()) as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version < 0 or version > SCHEMA_VERSION:
-                raise MemoryStoreError(
-                    f"Unsupported schema version {version}; expected {SCHEMA_VERSION}."
+            table_names = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
                 )
-            if version == 1:
-                connection.executescript(MIGRATION_V1_TO_V2_SQL)
-            connection.executescript(SCHEMA_SQL)
-            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            connection.commit()
+            }
+            if version == 0 and not set(CORE_TABLES).intersection(table_names):
+                connection.executescript(SCHEMA_SQL)
+                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                connection.commit()
+            elif version == SCHEMA_VERSION:
+                connection.executescript(SCHEMA_SQL)
+                connection.commit()
+            else:
+                raise MemoryStoreError(
+                    "Memory schema version "
+                    f"{version} is legacy and read-only; create a new blank "
+                    "memory library for the DINOv3 workflow."
+                )
         return self.status()
 
     def status(self) -> StoreStatus:
-        """Return schema version and row counts for the six core tables."""
-
         if not self.paths.database.is_file():
             raise MemoryStoreError(
                 f"Memory database is not initialized: {self.paths.database}"
             )
-
         with closing(self._connect()) as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version != SCHEMA_VERSION:
                 raise MemoryStoreError(
-                    f"Unsupported schema version {version}; expected {SCHEMA_VERSION}."
+                    f"Unsupported writable schema version {version}; expected {SCHEMA_VERSION}."
                 )
             existing_tables = {
                 str(row[0])
@@ -301,16 +317,9 @@ class MemoryStore:
                 )
                 for table in CORE_TABLES
             }
-
-        return StoreStatus(
-            database_path=str(self.paths.database),
-            schema_version=version,
-            counts=counts,
-        )
+        return StoreStatus(str(self.paths.database), version, counts)
 
     def begin_run(self, run: Run) -> None:
-        """Insert one running batch before source images are registered."""
-
         if run.status is not RunStatus.RUNNING:
             raise MemoryStoreError("A new run must start with status='running'.")
         with self.transaction() as connection:
@@ -318,8 +327,8 @@ class MemoryStore:
                 """
                 INSERT INTO runs (
                     id, status, started_at, completed_at, config_digest,
-                    sam_model_id, qwen_model_id, error_message
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    sam_model_id, qwen_model_id, dinov3_model_id, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run.id,
@@ -329,51 +338,35 @@ class MemoryStore:
                     run.config_digest,
                     run.sam_model_id,
                     run.qwen_model_id,
+                    run.dinov3_model_id,
                     run.error_message,
                 ),
             )
 
     def register_source(self, source: SourceImage) -> SourceRegistration:
-        """Apply the source-hash gate and return the canonical source id.
-
-        A completed hash is a true duplicate and is skipped. A failed or
-        interrupted row can only be resumed inside its original run.
-        """
-
         now = utc_now().isoformat()
         with self.transaction() as connection:
             existing = connection.execute(
-                """
-                SELECT id, run_id, status
-                FROM source_images
-                WHERE sha256 = ?
-                """,
+                "SELECT id, run_id, status FROM source_images WHERE sha256 = ?",
                 (source.sha256,),
             ).fetchone()
             if existing is not None:
-                existing_status = SourceImageStatus(str(existing["status"]))
-                if existing_status is SourceImageStatus.COMPLETED or (
+                status = SourceImageStatus(str(existing["status"]))
+                if status is SourceImageStatus.COMPLETED or (
                     str(existing["run_id"]) == source.run_id
-                    and existing_status
-                    in {SourceImageStatus.PENDING, SourceImageStatus.PROCESSING}
+                    and status in {SourceImageStatus.PENDING, SourceImageStatus.PROCESSING}
                 ):
-                    return SourceRegistration(
-                        source_id=str(existing["id"]),
-                        status=existing_status,
-                        duplicate=True,
-                        resumed=False,
-                    )
+                    return SourceRegistration(str(existing["id"]), status, True, False)
                 if str(existing["run_id"]) != source.run_id:
                     raise MemoryStoreError(
-                        "An unfinished source hash already belongs to run "
-                        f"{existing['run_id']}; resume that run before starting "
-                        "another one."
+                        "An unfinished source hash belongs to another run: "
+                        f"{existing['run_id']}"
                     )
                 connection.execute(
                     """
                     UPDATE source_images
-                    SET relative_path = ?, width = ?, height = ?,
-                        status = ?, error_message = NULL, updated_at = ?
+                    SET relative_path = ?, width = ?, height = ?, status = ?,
+                        error_message = NULL, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -386,12 +379,8 @@ class MemoryStore:
                     ),
                 )
                 return SourceRegistration(
-                    source_id=str(existing["id"]),
-                    status=SourceImageStatus.PROCESSING,
-                    duplicate=False,
-                    resumed=True,
+                    str(existing["id"]), SourceImageStatus.PROCESSING, False, True
                 )
-
             connection.execute(
                 """
                 INSERT INTO source_images (
@@ -413,19 +402,14 @@ class MemoryStore:
                 ),
             )
             return SourceRegistration(
-                source_id=source.id,
-                status=SourceImageStatus.PROCESSING,
-                duplicate=False,
-                resumed=False,
+                source.id, SourceImageStatus.PROCESSING, False, False
             )
 
     def record_filtered_proposal(self, proposal: Proposal) -> None:
-        """Persist a filtered candidate without sending it to Qwen."""
-
-        if proposal.status is not ProposalStatus.FILTERED:
-            raise MemoryStoreError("Filtered proposals require status='filtered'.")
-        if not proposal.filter_reason:
-            raise MemoryStoreError("Filtered proposals require filter_reason.")
+        if proposal.status is not ProposalStatus.FILTERED or not proposal.filter_reason:
+            raise MemoryStoreError(
+                "Filtered proposals require status='filtered' and filter_reason."
+            )
         with self.transaction() as connection:
             self._require_processing_source(connection, proposal.source_image_id)
             self._insert_proposal(connection, proposal, ProposalStatus.FILTERED)
@@ -436,124 +420,92 @@ class MemoryStore:
         proposal: Proposal,
         decision: Decision,
         memory_object: MemoryObject | None = None,
-        object_annotation: ObjectAnnotation | None = None,
+        object_summary: ObjectSummary | None = None,
         observation: Observation | None = None,
     ) -> DecisionWriteResult:
-        """Atomically write one validated Qwen decision and its side effects."""
-
         self._validate_decision_records(
             proposal=proposal,
             decision=decision,
             memory_object=memory_object,
-            object_annotation=object_annotation,
+            object_summary=object_summary,
             observation=observation,
         )
-        proposal_status = (
-            ProposalStatus.PENDING
-            if decision.decision is DecisionType.UNCERTAIN
-            else ProposalStatus.DECIDED
-        )
         with self.transaction() as connection:
-            self._prepare_proposal_for_decision(
-                connection,
-                proposal,
-                decision,
-            )
-
+            self._prepare_proposal_for_decision(connection, proposal)
             if memory_object is not None:
                 connection.execute(
                     """
-                    INSERT INTO objects (
-                        id, coarse_category, fine_category, material_json,
-                        color_json, shape, description, annotation_confidence,
-                        status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO objects (id, summary_json, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         memory_object.id,
-                        memory_object.coarse_category,
-                        memory_object.fine_category,
-                        json.dumps(memory_object.material, ensure_ascii=False),
-                        json.dumps(memory_object.color, ensure_ascii=False),
-                        memory_object.shape,
-                        memory_object.description,
-                        memory_object.annotation_confidence,
+                        memory_object.summary.model_dump_json(),
                         memory_object.status.value,
                         memory_object.created_at.isoformat(),
                         memory_object.updated_at.isoformat(),
                     ),
                 )
             elif decision.decision is DecisionType.EXISTING:
-                existing_object = connection.execute(
-                    """
-                    SELECT id
-                    FROM objects
-                    WHERE id = ? AND status = 'active'
-                    """,
+                exists = connection.execute(
+                    "SELECT id FROM objects WHERE id = ? AND status = 'active'",
                     (decision.matched_object_id,),
                 ).fetchone()
-                if existing_object is None:
+                if exists is None:
                     raise MemoryStoreError(
                         "existing decision references a missing or archived object: "
                         f"{decision.matched_object_id}"
                     )
-                assert object_annotation is not None
+                assert object_summary is not None
                 connection.execute(
                     """
-                    UPDATE objects
-                    SET coarse_category = ?, fine_category = ?,
-                        material_json = ?, color_json = ?, shape = ?,
-                        description = ?, annotation_confidence = ?,
-                        updated_at = ?
+                    UPDATE objects SET summary_json = ?, updated_at = ?
                     WHERE id = ? AND status = 'active'
                     """,
                     (
-                        object_annotation.coarse_category,
-                        object_annotation.fine_category,
-                        json.dumps(
-                            object_annotation.material,
-                            ensure_ascii=False,
-                        ),
-                        json.dumps(
-                            object_annotation.color,
-                            ensure_ascii=False,
-                        ),
-                        object_annotation.shape,
-                        object_annotation.description,
-                        object_annotation.annotation_confidence,
+                        object_summary.model_dump_json(),
                         utc_now().isoformat(),
                         decision.matched_object_id,
                     ),
                 )
-
             if observation is not None:
+                fingerprint = observation.fingerprint
                 connection.execute(
                     """
                     INSERT INTO observations (
-                        id, object_id, proposal_id, source_image_id, crop_path,
-                        mask_path, overlay_path, description, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        id, object_id, proposal_id, source_image_id,
+                        fingerprint_path, fingerprint_sha256,
+                        fingerprint_model_id, fingerprint_revision, feature_layer,
+                        input_size, storage_dtype, global_dimension, local_count,
+                        l2_normalized, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         observation.id,
                         observation.object_id,
                         observation.proposal_id,
                         observation.source_image_id,
-                        observation.crop_path,
-                        observation.mask_path,
-                        observation.overlay_path,
-                        observation.description,
+                        fingerprint.path,
+                        fingerprint.sha256,
+                        fingerprint.model_id,
+                        fingerprint.revision,
+                        fingerprint.feature_layer,
+                        fingerprint.input_size,
+                        fingerprint.storage_dtype,
+                        fingerprint.global_dimension,
+                        fingerprint.local_count,
+                        int(fingerprint.l2_normalized),
                         observation.created_at.isoformat(),
                     ),
                 )
-
             connection.execute(
                 """
                 INSERT INTO decisions (
                     id, proposal_id, decision, matched_object_id, confidence,
-                    reason_code, short_reason, prompt_version,
+                    reason_code, short_reason, prompt_version, qwen_hypothesis,
+                    qwen_matched_object_id, visual_evidence_json,
                     raw_response_path, attempt, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     decision.id,
@@ -564,33 +516,28 @@ class MemoryStore:
                     decision.reason_code,
                     decision.short_reason,
                     decision.prompt_version,
+                    decision.qwen_hypothesis.value,
+                    decision.qwen_matched_object_id,
+                    decision.visual_evidence.model_dump_json(),
                     decision.raw_response_path,
                     decision.attempt,
                     decision.created_at.isoformat(),
                 ),
             )
             connection.execute(
-                """
-                UPDATE proposals
-                SET status = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (proposal_status.value, utc_now().isoformat(), proposal.id),
+                "UPDATE proposals SET status = ?, updated_at = ? WHERE id = ?",
+                (ProposalStatus.DECIDED.value, utc_now().isoformat(), proposal.id),
             )
-
-        object_id = observation.object_id if observation is not None else None
         return DecisionWriteResult(
             proposal_id=proposal.id,
             decision_id=decision.id,
             decision=decision.decision,
-            proposal_status=proposal_status,
-            object_id=object_id,
+            proposal_status=ProposalStatus.DECIDED,
+            object_id=observation.object_id if observation is not None else None,
             observation_id=observation.id if observation is not None else None,
         )
 
     def record_proposal_failure(self, proposal: Proposal, error_message: str) -> None:
-        """Record a candidate whose processing or validation failed."""
-
         if proposal.status is not ProposalStatus.PENDING:
             raise MemoryStoreError("Only pending input proposals can fail.")
         message = error_message.strip()
@@ -605,32 +552,20 @@ class MemoryStore:
         )
         with self.transaction() as connection:
             existing = connection.execute(
-                """
-                SELECT source_image_id, raw_candidate_id, status
-                FROM proposals
-                WHERE id = ?
-                """,
+                "SELECT source_image_id, raw_candidate_id, status FROM proposals WHERE id = ?",
                 (proposal.id,),
             ).fetchone()
             if existing is None:
                 self._require_processing_source(connection, proposal.source_image_id)
                 self._insert_proposal(connection, failed, ProposalStatus.FAILED)
             else:
-                if (
-                    str(existing["source_image_id"]) != proposal.source_image_id
-                    or str(existing["raw_candidate_id"]) != proposal.raw_candidate_id
-                ):
-                    raise MemoryStoreError(
-                        "Stored proposal identity does not match failure record."
-                    )
                 if str(existing["status"]) != ProposalStatus.PENDING.value:
                     raise MemoryStoreError(
                         f"Only pending proposals can become failed: {proposal.id}"
                     )
                 connection.execute(
                     """
-                    UPDATE proposals
-                    SET status = ?, error_message = ?, updated_at = ?
+                    UPDATE proposals SET status = ?, error_message = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -642,13 +577,10 @@ class MemoryStore:
                 )
 
     def complete_source(self, source_id: str) -> None:
-        """Mark one image complete after all of its proposals are accounted for."""
-
         with self.transaction() as connection:
             cursor = connection.execute(
                 """
-                UPDATE source_images
-                SET status = ?, error_message = NULL, updated_at = ?
+                UPDATE source_images SET status = ?, error_message = NULL, updated_at = ?
                 WHERE id = ? AND status = ?
                 """,
                 (
@@ -664,16 +596,13 @@ class MemoryStore:
                 )
 
     def fail_source(self, source_id: str, error_message: str) -> None:
-        """Mark an image failed when processing cannot reach candidate writes."""
-
         message = error_message.strip()
         if not message:
             raise ValueError("error_message must not be empty")
         with self.transaction() as connection:
             cursor = connection.execute(
                 """
-                UPDATE source_images
-                SET status = ?, error_message = ?, updated_at = ?
+                UPDATE source_images SET status = ?, error_message = ?, updated_at = ?
                 WHERE id = ? AND status IN ('pending', 'processing')
                 """,
                 (
@@ -686,37 +615,24 @@ class MemoryStore:
             if cursor.rowcount != 1:
                 raise MemoryStoreError(f"Source image cannot be failed: {source_id}")
 
-    def complete_run(
-        self,
-        run_id: str,
-        *,
-        error_message: str | None = None,
-    ) -> RunSummary:
-        """Close a run, treating pending or failed work as completed-with-errors."""
-
+    def complete_run(self, run_id: str, *, error_message: str | None = None) -> RunSummary:
         with self.transaction() as connection:
             exists = connection.execute(
-                "SELECT id FROM runs WHERE id = ? AND status = 'running'",
-                (run_id,),
+                "SELECT id FROM runs WHERE id = ? AND status = 'running'", (run_id,)
             ).fetchone()
             if exists is None:
                 raise MemoryStoreError(f"Run is not active: {run_id}")
             incomplete_sources = int(
                 connection.execute(
-                    """
-                    SELECT COUNT(*)
-                    FROM source_images
-                    WHERE run_id = ? AND status <> 'completed'
-                    """,
+                    "SELECT COUNT(*) FROM source_images WHERE run_id = ? AND status <> 'completed'",
                     (run_id,),
                 ).fetchone()[0]
             )
-            pending_or_failed_proposals = int(
+            incomplete_proposals = int(
                 connection.execute(
                     """
-                    SELECT COUNT(*)
-                    FROM proposals AS p
-                    JOIN source_images AS s ON s.id = p.source_image_id
+                    SELECT COUNT(*) FROM proposals p
+                    JOIN source_images s ON s.id = p.source_image_id
                     WHERE s.run_id = ? AND p.status IN ('pending', 'failed')
                     """,
                     (run_id,),
@@ -724,119 +640,91 @@ class MemoryStore:
             )
             final_status = (
                 RunStatus.COMPLETED_WITH_ERRORS
-                if incomplete_sources or pending_or_failed_proposals or error_message
+                if incomplete_sources or incomplete_proposals or error_message
                 else RunStatus.COMPLETED
             )
             connection.execute(
                 """
-                UPDATE runs
-                SET status = ?, completed_at = ?, error_message = ?
-                WHERE id = ?
+                UPDATE runs SET status = ?, completed_at = ?, error_message = ? WHERE id = ?
                 """,
-                (
-                    final_status.value,
-                    utc_now().isoformat(),
-                    error_message,
-                    run_id,
-                ),
+                (final_status.value, utc_now().isoformat(), error_message, run_id),
             )
         return self.run_summary(run_id)
 
-    def list_object_cards(self, *, max_reference_views: int = 2) -> list[ObjectCard]:
-        """Read every active object card with its recent reference views."""
-
-        if max_reference_views <= 0:
-            raise ValueError("max_reference_views must be positive")
+    def list_object_cards(self) -> list[ObjectCard]:
         with closing(self._connect()) as connection:
-            object_rows = connection.execute(
+            rows = connection.execute(
+                "SELECT id, summary_json FROM objects WHERE status = 'active' ORDER BY created_at, id"
+            ).fetchall()
+        return [
+            ObjectCard(
+                object_id=str(row["id"]),
+                summary=ObjectSummary.model_validate_json(str(row["summary_json"])),
+            )
+            for row in rows
+        ]
+
+    def list_fingerprint_records(self) -> list[FingerprintRecord]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
                 """
-                SELECT *
-                FROM objects
-                WHERE status = 'active'
-                ORDER BY created_at, id
+                SELECT obs.object_id, obs.id AS observation_id,
+                       obs.fingerprint_path, obs.fingerprint_sha256
+                FROM observations AS obs
+                JOIN objects AS obj ON obj.id = obs.object_id
+                WHERE obj.status = 'active'
+                ORDER BY obs.created_at, obs.id
                 """
             ).fetchall()
-            cards: list[ObjectCard] = []
-            for row in object_rows:
-                view_rows = connection.execute(
-                    """
-                    SELECT crop_path
-                    FROM observations
-                    WHERE object_id = ?
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (str(row["id"]), max_reference_views),
-                ).fetchall()
-                cards.append(
-                    ObjectCard(
-                        object_id=str(row["id"]),
-                        coarse_category=str(row["coarse_category"]),
-                        fine_category=str(row["fine_category"]),
-                        material=json.loads(str(row["material_json"])),
-                        color=json.loads(str(row["color_json"])),
-                        shape=str(row["shape"]),
-                        description=str(row["description"]),
-                        representative_view_paths=[
-                            str(view["crop_path"]) for view in view_rows
-                        ],
-                    )
-                )
-        return cards
+        return [
+            FingerprintRecord(
+                object_id=str(row["object_id"]),
+                observation_id=str(row["observation_id"]),
+                path=str(row["fingerprint_path"]),
+                sha256=str(row["fingerprint_sha256"]),
+            )
+            for row in rows
+        ]
 
     def run_summary(self, run_id: str) -> RunSummary:
-        """Return counts for one run without exposing SQL to the pipeline."""
-
         with closing(self._connect()) as connection:
             run_row = connection.execute(
-                "SELECT status FROM runs WHERE id = ?",
-                (run_id,),
+                "SELECT status FROM runs WHERE id = ?", (run_id,)
             ).fetchone()
             if run_row is None:
                 raise MemoryStoreError(f"Run not found: {run_id}")
             source_counts = self._group_counts(
                 connection,
-                """
-                SELECT status, COUNT(*) AS count
-                FROM source_images
-                WHERE run_id = ?
-                GROUP BY status
-                """,
+                "SELECT status, COUNT(*) count FROM source_images WHERE run_id = ? GROUP BY status",
                 run_id,
-                tuple(status.value for status in SourceImageStatus),
+                tuple(item.value for item in SourceImageStatus),
             )
             proposal_counts = self._group_counts(
                 connection,
                 """
-                SELECT p.status, COUNT(*) AS count
-                FROM proposals AS p
-                JOIN source_images AS s ON s.id = p.source_image_id
-                WHERE s.run_id = ?
-                GROUP BY p.status
+                SELECT p.status, COUNT(*) count FROM proposals p
+                JOIN source_images s ON s.id = p.source_image_id
+                WHERE s.run_id = ? GROUP BY p.status
                 """,
                 run_id,
-                tuple(status.value for status in ProposalStatus),
+                tuple(item.value for item in ProposalStatus),
             )
             decision_counts = self._group_counts(
                 connection,
                 """
-                SELECT d.decision AS status, COUNT(*) AS count
-                FROM decisions AS d
-                JOIN proposals AS p ON p.id = d.proposal_id
-                JOIN source_images AS s ON s.id = p.source_image_id
-                WHERE s.run_id = ?
-                GROUP BY d.decision
+                SELECT d.decision status, COUNT(*) count FROM decisions d
+                JOIN proposals p ON p.id = d.proposal_id
+                JOIN source_images s ON s.id = p.source_image_id
+                WHERE s.run_id = ? GROUP BY d.decision
                 """,
                 run_id,
-                tuple(decision.value for decision in DecisionType),
+                tuple(item.value for item in DecisionType),
             )
             observations_added = int(
                 connection.execute(
                     """
-                    SELECT COUNT(*)
-                    FROM observations AS o
-                    JOIN source_images AS s ON s.id = o.source_image_id
-                    WHERE s.run_id = ?
+                    SELECT COUNT(*) FROM observations o
+                    JOIN source_images s ON s.id = o.source_image_id WHERE s.run_id = ?
                     """,
                     (run_id,),
                 ).fetchone()[0]
@@ -870,12 +758,10 @@ class MemoryStore:
 
     @staticmethod
     def _require_processing_source(
-        connection: sqlite3.Connection,
-        source_image_id: str,
+        connection: sqlite3.Connection, source_image_id: str
     ) -> None:
         source = connection.execute(
-            "SELECT status FROM source_images WHERE id = ?",
-            (source_image_id,),
+            "SELECT status FROM source_images WHERE id = ?", (source_image_id,)
         ).fetchone()
         if source is None or str(source["status"]) != SourceImageStatus.PROCESSING.value:
             raise MemoryStoreError(
@@ -884,67 +770,17 @@ class MemoryStore:
 
     @staticmethod
     def _prepare_proposal_for_decision(
-        connection: sqlite3.Connection,
-        proposal: Proposal,
-        decision: Decision,
+        connection: sqlite3.Connection, proposal: Proposal
     ) -> None:
-        """Insert the first or an explicit later decision for a pending proposal."""
-
         if proposal.status is not ProposalStatus.PENDING:
-            raise MemoryStoreError("Qwen decisions require a pending proposal.")
-
-        source = connection.execute(
-            "SELECT status FROM source_images WHERE id = ?",
-            (proposal.source_image_id,),
-        ).fetchone()
-        if source is None or str(source["status"]) not in {
-            SourceImageStatus.PROCESSING.value,
-            SourceImageStatus.COMPLETED.value,
-        }:
-            raise MemoryStoreError(
-                f"Source image cannot accept decisions: {proposal.source_image_id}"
-            )
+            raise MemoryStoreError("Identity decisions require a pending proposal.")
+        MemoryStore._require_processing_source(connection, proposal.source_image_id)
         existing = connection.execute(
-            """
-            SELECT p.source_image_id, p.raw_candidate_id, p.status,
-                   COALESCE(MAX(d.attempt), 0) AS last_attempt
-            FROM proposals AS p
-            LEFT JOIN decisions AS d ON d.proposal_id = p.id
-            WHERE p.id = ?
-            GROUP BY p.id
-            """,
-            (proposal.id,),
+            "SELECT id FROM proposals WHERE id = ?", (proposal.id,)
         ).fetchone()
-        if existing is None:
-            if str(source["status"]) != SourceImageStatus.PROCESSING.value:
-                raise MemoryStoreError(
-                    "New proposals require a source in processing state."
-                )
-            if decision.attempt != 1:
-                raise MemoryStoreError("A proposal must start with attempt=1.")
-            MemoryStore._insert_proposal(
-                connection,
-                proposal,
-                ProposalStatus.PENDING,
-            )
-            return
-        if (
-            str(existing["source_image_id"]) != proposal.source_image_id
-            or str(existing["raw_candidate_id"]) != proposal.raw_candidate_id
-        ):
-            raise MemoryStoreError(
-                "Stored proposal identity does not match the decision request."
-            )
-        if str(existing["status"]) != ProposalStatus.PENDING.value:
-            raise MemoryStoreError(
-                f"Only pending proposals can receive another decision: {proposal.id}"
-            )
-        expected_attempt = int(existing["last_attempt"]) + 1
-        if decision.attempt != expected_attempt:
-            raise MemoryStoreError(
-                f"Proposal {proposal.id} requires attempt={expected_attempt}, "
-                f"received {decision.attempt}."
-            )
+        if existing is not None:
+            raise MemoryStoreError(f"Proposal already has a terminal record: {proposal.id}")
+        MemoryStore._insert_proposal(connection, proposal, ProposalStatus.PENDING)
 
     @staticmethod
     def _insert_proposal(
@@ -955,18 +791,22 @@ class MemoryStore:
         connection.execute(
             """
             INSERT INTO proposals (
-                id, source_image_id, raw_candidate_id, prompt, score,
+                id, source_image_id, raw_candidate_id, prompt, target_id,
+                target_object_name_zh, target_anchor_json, score,
                 bbox_x_min, bbox_y_min, bbox_x_max, bbox_y_max,
                 mask_area_pixels, mask_area_ratio, mask_path, crop_path,
-                overlay_path, status, filter_reason, error_message,
+                overlay_path, fingerprint_json, status, filter_reason, error_message,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 proposal.id,
                 proposal.source_image_id,
                 proposal.raw_candidate_id,
                 proposal.prompt,
+                proposal.target_id,
+                proposal.target_object_name_zh,
+                proposal.target_anchor.model_dump_json() if proposal.target_anchor else None,
                 proposal.score,
                 proposal.bbox.x_min,
                 proposal.bbox.y_min,
@@ -977,6 +817,7 @@ class MemoryStore:
                 proposal.mask_path,
                 proposal.crop_path,
                 proposal.overlay_path,
+                proposal.fingerprint.model_dump_json() if proposal.fingerprint else None,
                 status.value,
                 proposal.filter_reason,
                 proposal.error_message,
@@ -991,7 +832,7 @@ class MemoryStore:
         proposal: Proposal,
         decision: Decision,
         memory_object: MemoryObject | None,
-        object_annotation: ObjectAnnotation | None,
+        object_summary: ObjectSummary | None,
         observation: Observation | None,
     ) -> None:
         if decision.proposal_id != proposal.id:
@@ -1002,38 +843,22 @@ class MemoryStore:
         ):
             raise MemoryStoreError("Observation does not belong to the proposal.")
         if decision.decision is DecisionType.NEW:
-            if (
-                memory_object is None
-                or object_annotation is not None
-                or observation is None
-            ):
-                raise MemoryStoreError("new requires an object and first observation.")
+            if memory_object is None or object_summary is not None or observation is None:
+                raise MemoryStoreError("new requires one object and first observation.")
             if observation.object_id != memory_object.id:
                 raise MemoryStoreError("New observation must reference the new object.")
         elif decision.decision is DecisionType.EXISTING:
-            if (
-                memory_object is not None
-                or object_annotation is None
-                or observation is None
-            ):
+            if memory_object is not None or object_summary is None or observation is None:
                 raise MemoryStoreError(
-                    "existing requires an annotation update and new observation."
+                    "existing requires one summary update and one observation."
                 )
             if observation.object_id != decision.matched_object_id:
                 raise MemoryStoreError("Observation must use matched_object_id.")
-        elif (
-            memory_object is not None
-            or object_annotation is not None
-            or observation is not None
-        ):
-            raise MemoryStoreError(
-                "ignored and uncertain must not create objects or observations."
-            )
+        elif memory_object is not None or object_summary is not None or observation is not None:
+            raise MemoryStoreError("uncertain must not update objects or observations.")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Provide one explicit transaction for later pipeline write operations."""
-
         if not self.paths.database.is_file():
             raise MemoryStoreError(
                 f"Memory database is not initialized: {self.paths.database}"
