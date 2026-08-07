@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" role="img" aria-labelledby="title desc">
+  <title id="title">Collection Demo 简明架构</title>
+  <desc id="desc">输入图片依次经过 SAM3 自动候选、确定性过滤、DINOv3 视觉组织、Qwen3-VL 聚类审查和一致性决策，最终写入可审计对象记忆。Web 实验台负责控制与审计，历史对象记忆向 DINOv3 和 Qwen 提供视觉指纹与文字摘要。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#2d6570"/>
+    </marker>
+    <style>
+      .canvas { fill: #ffffff; }
+      .title { fill: #16324a; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 34px; font-weight: 700; }
+      .subtitle { fill: #647486; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 17px; }
+      .residency { fill: #234e58; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 16px; font-weight: 600; }
+      .node { fill: #ffffff; stroke: #c9d5df; stroke-width: 2; rx: 12; }
+      .node-model { fill: #f5faf9; stroke: #91b5b2; }
+      .node-memory { fill: #f4f7fb; stroke: #9cb2c8; }
+      .accent-neutral { fill: #7e91a3; }
+      .accent-model { fill: #2d7f7b; }
+      .accent-memory { fill: #466f98; }
+      .stage { fill: #eff3f6; stroke: #c9d5df; stroke-width: 1; }
+      .stage-text { fill: #5d7184; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+      .node-title { fill: #17344a; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 19px; font-weight: 700; text-anchor: middle; }
+      .node-copy { fill: #536778; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 14px; text-anchor: middle; }
+      .node-code { fill: #315f68; font-family: Consolas, 'Noto Sans Mono CJK SC', monospace; font-size: 12px; text-anchor: middle; }
+      .flow { fill: none; stroke: #2d6570; stroke-width: 2.5; marker-end: url(#arrow); }
+      .feedback { fill: none; stroke: #7d8e9e; stroke-width: 1.8; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+      .feedback-label { fill: #637486; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 13px; text-anchor: middle; }
+      .web-band { fill: #f7f9fb; stroke: #c9d5df; stroke-width: 2; rx: 12; }
+      .web-title { fill: #17344a; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 19px; font-weight: 700; }
+      .web-copy { fill: #536778; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 15px; }
+      .boundary { fill: #6a7886; font-family: Arial, 'Noto Sans SC', sans-serif; font-size: 14px; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1600" height="700"/>
+  <text class="title" x="45" y="63">Collection Demo 简明架构</text>
+  <text class="subtitle" x="45" y="96">从场景图片到可审计的长期对象记忆</text>
+  <text class="residency" x="1555" y="65" text-anchor="end">单 GPU · 顺序驻留：SAM3 → DINOv3 → Qwen3-VL</text>
+  <text class="subtitle" x="1555" y="94" text-anchor="end">每个模型完成本阶段后释放，再加载下一模型</text>
+
+  <path class="flow" d="M230 305 H262"/>
+  <path class="flow" d="M447 305 H479"/>
+  <path class="flow" d="M664 305 H696"/>
+  <path class="flow" d="M881 305 H913"/>
+  <path class="flow" d="M1098 305 H1130"/>
+  <path class="flow" d="M1315 305 H1347"/>
+
+  <rect class="node" x="45" y="190" width="185" height="230"/>
+  <rect class="accent-neutral" x="45" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="69" cy="219" r="15"/>
+  <text class="stage-text" x="69" y="219">01</text>
+  <text class="node-title" x="137.5" y="267">输入图片</text>
+  <text class="node-copy" x="137.5" y="305">SHA-256 内容去重</text>
+  <text class="node-copy" x="137.5" y="334">登记唯一 source</text>
+
+  <rect class="node node-model" x="262" y="190" width="185" height="230"/>
+  <rect class="accent-model" x="262" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="286" cy="219" r="15"/>
+  <text class="stage-text" x="286" y="219">02</text>
+  <text class="node-title" x="354.5" y="263">SAM3 自动候选</text>
+  <text class="node-copy" x="354.5" y="303">16×16 正点网格</text>
+  <text class="node-copy" x="354.5" y="332">类无关 raw masks</text>
+
+  <rect class="node" x="479" y="190" width="185" height="230"/>
+  <rect class="accent-neutral" x="479" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="503" cy="219" r="15"/>
+  <text class="stage-text" x="503" y="219">03</text>
+  <text class="node-title" x="571.5" y="263">确定性过滤</text>
+  <text class="node-copy" x="571.5" y="301">分数 · 面积 · IoU</text>
+  <text class="node-copy" x="571.5" y="330">包含关系 · 每图上限</text>
+  <text class="node-code" x="571.5" y="373">kept proposals</text>
+
+  <rect class="node node-model" x="696" y="190" width="185" height="230"/>
+  <rect class="accent-model" x="696" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="720" cy="219" r="15"/>
+  <text class="stage-text" x="720" y="219">04</text>
+  <text class="node-title" x="788.5" y="263">DINOv3 视觉组织</text>
+  <text class="node-copy" x="788.5" y="300">CLS + mask patch 指纹</text>
+  <text class="node-copy" x="788.5" y="329">跨图约束聚类</text>
+  <text class="node-copy" x="788.5" y="358">历史视角匹配</text>
+
+  <rect class="node node-model" x="913" y="190" width="185" height="230"/>
+  <rect class="accent-model" x="913" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="937" cy="219" r="15"/>
+  <text class="stage-text" x="937" y="219">05</text>
+  <text class="node-title" x="1005.5" y="263">Qwen3-VL 聚类审查</text>
+  <text class="node-copy" x="1005.5" y="299">接触表 + 视觉证据</text>
+  <text class="node-copy" x="1005.5" y="328">+ 对象文字摘要</text>
+  <text class="node-code" x="1005.5" y="368">object · ignore · uncertain</text>
+
+  <rect class="node" x="1130" y="190" width="185" height="230"/>
+  <rect class="accent-neutral" x="1130" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="1154" cy="219" r="15"/>
+  <text class="stage-text" x="1154" y="219">06</text>
+  <text class="node-title" x="1222.5" y="263">一致性决策</text>
+  <text class="node-copy" x="1222.5" y="300">语义判断 × 视觉证据</text>
+  <text class="node-code" x="1222.5" y="341">new · existing</text>
+  <text class="node-code" x="1222.5" y="369">uncertain · ignored</text>
+
+  <rect class="node node-memory" x="1347" y="190" width="185" height="230"/>
+  <rect class="accent-memory" x="1347" y="190" width="185" height="7" rx="3.5"/>
+  <circle class="stage" cx="1371" cy="219" r="15"/>
+  <text class="stage-text" x="1371" y="219">07</text>
+  <text class="node-title" x="1439.5" y="263">对象记忆</text>
+  <text class="node-copy" x="1439.5" y="300">SQLite + 相对资产</text>
+  <text class="node-copy" x="1439.5" y="329">对象 · 观测 · 决策</text>
+  <text class="node-copy" x="1439.5" y="358">原始响应 · 报告</text>
+
+  <path class="feedback" d="M1439.5 420 V475 H788.5 V420"/>
+  <path class="feedback" d="M1005.5 475 V420"/>
+  <text class="feedback-label" x="1114" y="467">读取历史对象：视觉指纹 + 文字摘要</text>
+
+  <rect class="web-band" x="45" y="530" width="1487" height="100"/>
+  <text class="web-title" x="77" y="570">Web 实验台 · 控制与审计层</text>
+  <text class="web-copy" x="77" y="606">输入与记忆库管理　·　子进程启动同一 CLI 流程　·　实时进度　·　阶段证据　·　对象卡与候选血缘</text>
+  <text class="web-copy" x="1498" y="588" text-anchor="end">单 worker</text>
+  <text class="web-copy" x="1498" y="613" text-anchor="end">同一时间一个实验</text>
+
+  <text class="boundary" x="800" y="670">边界：结构检查 ≠ 语义准确；漏检、误聚类与身份歧义仍需人工复核。</text>
+</svg>

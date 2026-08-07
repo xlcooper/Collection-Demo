@@ -12,7 +12,7 @@ Collection Demo 是一个端到端对象记忆研究 Demo。使用者不需要�
 
 ## 架构
 
-![Collection Demo 聚类优先对象记忆架构海报](docs/assets/collection-demo-architecture.png)
+![Collection Demo 简明对象记忆架构图](docs/assets/collection-demo-architecture.svg)
 
 当前实现采用“自动候选 → 视觉组织 → 聚类级语义审查 → 一致性提交”的聚类优先架构。三种模型按 `SAM3 → DINOv3 → Qwen3-VL` 顺序加载和释放，避免联合驻留。SAM3 先处理全部唯一新图；DINOv3 为保留候选生成指纹，并只在不同源图之间按 CLS 相似度形成聚类；Qwen 随后按聚类批次阅读代表视角接触表、历史视觉证据和已有对象文字摘要。只有聚类语义判断与历史视觉证据满足提交规则时，系统才新建对象或迭代原有摘要。
 
