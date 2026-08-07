@@ -25,6 +25,7 @@ from object_memory.web_service import (
     WebSettings,
     _basic_authorized,
     create_app,
+    delete_all_input_images,
     deterministic_result_summary,
     input_listing_payload,
     list_memory_libraries,
@@ -153,6 +154,22 @@ class InputFileTests(unittest.TestCase):
         self.assertEqual(listing["duplicates"], 1)
         self.assertFalse(listing["items"][0]["is_duplicate"])
         self.assertEqual(listing["items"][1]["duplicate_of"], "first.png")
+
+    def test_delete_all_inputs_removes_only_exposed_images(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "input"
+            nested = root / "nested"
+            nested.mkdir(parents=True)
+            (root / "first.png").write_bytes(png_bytes())
+            (nested / "second.png").write_bytes(png_bytes())
+            note = root / "keep.txt"
+            note.write_text("not an experiment image", encoding="utf-8")
+
+            deleted = delete_all_input_images(root)
+
+            self.assertEqual(deleted, ["first.png", "nested/second.png"])
+            self.assertEqual(list_input_images(root), [])
+            self.assertTrue(note.is_file())
 
     def test_upload_rejects_invalid_content_and_rolls_back_batch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1313,6 +1330,7 @@ class AppContractTests(unittest.TestCase):
                 "/",
                 "/static",
                 "/api/inputs",
+                "/api/inputs/all",
                 "/api/memories",
                 "/api/memories/{memory_id}",
                 "/api/memories/{memory_id}/select",

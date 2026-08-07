@@ -97,6 +97,21 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn("function memoryControlsLocked()", self.javascript)
         self.assertIn("state.serverCatalogLocked = Boolean(payload.locked);", self.javascript)
 
+    def test_input_collection_has_guarded_clear_action(self) -> None:
+        self.assertIn('id="clear-inputs-button"', self.html)
+        self.assertIn(
+            'apiJson("/api/inputs/all", { method: "DELETE" })',
+            self.javascript,
+        )
+        self.assertIn(
+            "已经生成的对象记忆、源图副本和运行报告不会受到影响",
+            self.javascript,
+        )
+        self.assertIn(
+            "elements.clearInputsButton.disabled = locked || !hasInputs;",
+            self.javascript,
+        )
+
     def test_reasoning_stage_shows_qwen_dino_and_final_decision(self) -> None:
         reasoning = self.javascript[
             self.javascript.index("function renderReasoningStage") : self.javascript.index(

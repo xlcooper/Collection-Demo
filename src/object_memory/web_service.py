@@ -834,6 +834,17 @@ def delete_input_image(input_root: Path, relative_path: str) -> None:
     path.unlink()
 
 
+def delete_all_input_images(input_root: Path) -> list[str]:
+    """Delete only the safe image files currently exposed as experiment inputs."""
+
+    deleted: list[str] = []
+    for item in list_input_images(input_root):
+        relative_path = str(item["path"])
+        resolve_input_file(input_root, relative_path).unlink()
+        deleted.append(relative_path)
+    return deleted
+
+
 def _read_progress_events(path: Path, after_sequence: int = 0) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
@@ -2438,6 +2449,16 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             raise _input_http_error(exc) from exc
         return {"deleted": path, **payload}
 
+    @app.delete("/api/inputs/all")
+    def delete_all_inputs() -> dict[str, Any]:
+        try:
+            with manager.input_mutation():
+                deleted = delete_all_input_images(resolved.input_root)
+                payload = input_listing_payload(resolved.input_root, locked=False)
+        except Exception as exc:
+            raise _input_http_error(exc) from exc
+        return {"deleted": deleted, "deleted_count": len(deleted), **payload}
+
     @app.get("/api/memories")
     def get_memories() -> dict[str, Any]:
         try:
@@ -2617,6 +2638,7 @@ __all__ = [
     "WebSettings",
     "create_app",
     "default_web_settings",
+    "delete_all_input_images",
     "delete_input_image",
     "deterministic_result_summary",
     "input_listing_payload",

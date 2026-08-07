@@ -105,6 +105,7 @@
     deleteMemoryButton: document.querySelector("#delete-memory-button"),
     memoryLibraryMeta: document.querySelector("#memory-library-meta"),
     uploadButton: document.querySelector("#upload-button"),
+    clearInputsButton: document.querySelector("#clear-inputs-button"),
     fileInput: document.querySelector("#file-input"),
     dropZone: document.querySelector("#drop-zone"),
     inputMetrics: document.querySelector("#input-metrics"),
@@ -780,6 +781,7 @@
     const canUseLibrary = Boolean(library?.continuable);
     elements.startRunButton.disabled = locked || !hasInputs || !canUseLibrary;
     elements.uploadButton.disabled = locked;
+    elements.clearInputsButton.disabled = locked || !hasInputs;
     elements.memoryLibrarySelect.disabled = locked || !state.memoryLibraries.length;
     elements.newMemoryButton.disabled = locked;
     elements.deleteMemoryButton.disabled = locked || !library || library.deletable === false;
@@ -789,7 +791,7 @@
     elements.dropZone.classList.toggle("locked", locked);
     elements.dropZone.setAttribute("aria-disabled", String(locked));
     elements.runLockNote.textContent = state.catalogMutationInFlight
-      ? "正在更新记忆库选择，请稍候。"
+      ? "正在更新实验输入或记忆库，请稍候。"
       : experimentRunning
         ? "实验正在运行，输入与记忆库管理已锁定。"
         : !canUseLibrary
@@ -1903,6 +1905,28 @@
     }
   }
 
+  async function clearInputs() {
+    if (memoryControlsLocked() || !state.inputSummary.total) return;
+    const inputCount = state.inputSummary.total;
+    const confirmed = window.confirm(
+      `确定删除当前全部 ${inputCount} 张实验输入吗？\n\n这只会清空实验输入区；已经生成的对象记忆、源图副本和运行报告不会受到影响。`
+    );
+    if (!confirmed) return;
+    state.catalogMutationInFlight = true;
+    renderControlAvailability();
+    try {
+      const payload = await apiJson("/api/inputs/all", { method: "DELETE" });
+      state.catalogMutationInFlight = false;
+      await refreshInputs();
+      toast(`已清空 ${formatInteger(payload.deleted_count)} 张实验输入`);
+    } catch (error) {
+      state.catalogMutationInFlight = false;
+      renderControlAvailability();
+      await refreshInputs({ quiet: true });
+      toast(`无法清空实验输入：${error.message}`, "error");
+    }
+  }
+
   async function startRun() {
     if (memoryControlsLocked() || !state.inputSummary.total) return;
     const library = selectedLibrary();
@@ -1974,6 +1998,7 @@
 
   function bindEvents() {
     elements.uploadButton.addEventListener("click", () => elements.fileInput.click());
+    elements.clearInputsButton.addEventListener("click", clearInputs);
     elements.fileInput.addEventListener("change", () => uploadFiles(elements.fileInput.files));
     elements.dropZone.addEventListener("click", () => {
       if (!memoryControlsLocked()) elements.fileInput.click();

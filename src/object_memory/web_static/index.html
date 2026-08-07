@@ -186,9 +186,12 @@
           <div>
             <p class="eyebrow">01 · INPUT</p>
             <h2 id="inputs-title">实验输入</h2>
-            <p>选择希望系统观察的场景图片。支持上传、预览和移除；相同内容会自动识别，避免重复推理。</p>
+            <p>选择希望系统观察的场景图片。支持上传、预览、逐张删除和一键清空；相同内容会自动识别，避免重复推理。</p>
           </div>
           <div class="heading-actions">
+            <button class="quiet-button danger input-clear-button" id="clear-inputs-button" type="button" disabled>
+              清空输入
+            </button>
             <input
               id="file-input"
               type="file"
