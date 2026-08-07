@@ -1248,30 +1248,16 @@ class RunStateTests(unittest.TestCase):
             command = manager._command(progress)
 
         self.assertIn("--progress-file", command)
-        self.assertIn("--validate-demo", command)
+        self.assertNotIn("--validate-demo", command)
         self.assertIn(str(settings.input_root), command)
         self.assertIn(str(settings.memory_root), command)
         self.assertNotIn("--allow-network", command)
 
-    def test_subprocess_command_omits_demo_gate_for_incremental_validation(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            settings = test_settings(Path(temporary_directory))
-            manager = ExperimentManager(settings)
-            progress = settings.run_state_root / "web_run_x" / "events.jsonl"
-
-            command = manager._command(progress, validate_demo=False)
-
-        self.assertNotIn("--validate-demo", command)
-        self.assertIn("--report", command)
-
-    def test_start_uses_demo_gate_only_for_library_without_prior_runs(self) -> None:
+    def test_start_uses_structure_only_validation_for_every_library(self) -> None:
         class DormantProcess:
             pid = 13579
 
-        for has_prior_run, expected_mode in (
-            (False, "fresh_demo"),
-            (True, "incremental"),
-        ):
+        for has_prior_run in (False, True):
             with self.subTest(has_prior_run=has_prior_run):
                 with tempfile.TemporaryDirectory() as temporary_directory:
                     settings = test_settings(Path(temporary_directory))
@@ -1305,11 +1291,8 @@ class RunStateTests(unittest.TestCase):
                             manager._log_handle = None
                             manager._process = None
 
-                self.assertEqual(payload["state"]["validation_mode"], expected_mode)
-                if has_prior_run:
-                    self.assertNotIn("--validate-demo", command)
-                else:
-                    self.assertIn("--validate-demo", command)
+                self.assertEqual(payload["state"]["validation_mode"], "structure_only")
+                self.assertNotIn("--validate-demo", command)
 
     def test_subprocess_command_uses_captured_selected_memory_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

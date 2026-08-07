@@ -1404,8 +1404,6 @@ class ExperimentManager:
         self,
         events_path: Path,
         memory_root: Path | None = None,
-        *,
-        validate_demo: bool = True,
     ) -> list[str]:
         selected_root = (memory_root or self.settings.memory_root).resolve()
         command = [
@@ -1416,8 +1414,6 @@ class ExperimentManager:
             "--memory-root",
             str(selected_root),
         ]
-        if validate_demo:
-            command.append("--validate-demo")
         command.extend(
             [
                 "--report",
@@ -1446,7 +1442,6 @@ class ExperimentManager:
                     str(library.get("issue") or "This memory library cannot be continued")
                 )
             self._set_selected_memory_id_locked(safe_memory_id)
-            validate_demo = int(library["counts"].get("runs") or 0) == 0
 
             run_dir = self._new_run_dir()
             self._current_run_dir = run_dir
@@ -1472,9 +1467,7 @@ class ExperimentManager:
                 "result_status": None,
                 "memory_id": safe_memory_id,
                 "memory_label": library["label"],
-                "validation_mode": (
-                    "fresh_demo" if validate_demo else "incremental"
-                ),
+                "validation_mode": "structure_only",
                 "memory_root_relative": memory_root.relative_to(
                     self.settings.project_root
                 ).as_posix(),
@@ -1491,11 +1484,7 @@ class ExperimentManager:
             child_environment.pop("OBJECT_MEMORY_WEB_PASSWORD", None)
             try:
                 process = subprocess.Popen(
-                    self._command(
-                        events_path,
-                        memory_root,
-                        validate_demo=validate_demo,
-                    ),
+                    self._command(events_path, memory_root),
                     cwd=self.settings.project_root,
                     env=child_environment,
                     stdin=subprocess.DEVNULL,

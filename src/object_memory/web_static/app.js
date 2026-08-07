@@ -77,6 +77,7 @@
     selectedStage: "input",
     selectedMemoryView: "objects",
     candidateAssetKinds: new Map(),
+    openSamGroups: new Set(),
     lastIntermediateRenderKey: "",
     pendingIntermediateRender: false,
     stagePointerActive: false,
@@ -266,6 +267,14 @@
     if (["ignored", "filtered", "duplicate"].includes(value)) return value;
     if (isRunningStatus(value)) return "running";
     return "neutral";
+  }
+
+  function isLegacyDuplicateDemoCoverageFailure(report) {
+    if (!report || report.status !== "failed" || report.pipeline_status !== "passed") return false;
+    const failedNames = Object.entries(report.demo_coverage || {})
+      .filter(([, covered]) => !covered)
+      .map(([name]) => name);
+    return failedNames.length === 1 && failedNames[0] === "exact_duplicate_image_was_skipped";
   }
 
   function statusPill(status, text = null) {
@@ -485,6 +494,7 @@
             serverSummary: null,
             memory: null,
             candidateAssetKinds: new Map(),
+            openSamGroups: new Set(),
             lastIntermediateRenderKey: "",
             pendingIntermediateRender: false,
           });
@@ -550,6 +560,7 @@
             report: null,
             serverSummary: null,
             candidateAssetKinds: new Map(),
+            openSamGroups: new Set(),
             lastIntermediateRenderKey: "",
             pendingIntermediateRender: false,
             lastDataRefresh: 0,
@@ -568,6 +579,7 @@
         state.report = incoming;
         state.serverSummary = payload.summary || null;
       }
+      renderRun();
       renderSummary();
       renderIntermediates();
     } catch (error) {
@@ -705,7 +717,9 @@
 
   function renderRun() {
     const event = latestProgressEvent();
-    const runStatus = state.run.status || event?.status || "idle";
+    const reportedRunStatus = state.run.status || event?.status || "idle";
+    const legacyDemoCoverageFailure = isLegacyDuplicateDemoCoverageFailure(state.report);
+    const runStatus = legacyDemoCoverageFailure ? "completed" : reportedRunStatus;
     const running = isRunningStatus(runStatus);
     const terminalFailure = ["failed", "interrupted"].includes(runStatus);
     const rawEventStage = event?.stage || state.run.stage || (isRunningStatus(runStatus) ? "starting" : "idle");
@@ -715,10 +729,16 @@
     const current = event?.current ?? state.run.current;
     const total = event?.total ?? state.run.total;
     const terminalMessages = terminalRunMessages(state.run);
-    const rawMessage = terminalFailure
+    const rawMessage = legacyDemoCoverageFailure
+      ? "模型流程已完成；旧固定Demo重复图条件未满足"
+      : terminalFailure
       ? terminalMessages.join(" · ") || "实验进程未正常完成"
       : event?.message || state.run.message || (runStatus === "idle" ? "尚未开始实验" : "等待下一条实验事件");
-    const message = terminalFailure ? rawMessage : localizedProgressMessage(event, rawMessage);
+    const message = legacyDemoCoverageFailure
+      ? rawMessage
+      : terminalFailure
+        ? rawMessage
+        : localizedProgressMessage(event, rawMessage);
 
     elements.runStatusPill.className = `status-pill ${statusClass(runStatus)}`;
     elements.runStatusPill.textContent = statusLabels[runStatus] || runStatus;
@@ -1069,6 +1089,18 @@
           ["多视角聚类", multiView],
         ]
       )}
+      <section class="stage-explainer" aria-label="视觉聚类名词解释">
+        <div>
+          <h4>这一页在做什么</h4>
+          <p>DINOv3把外观看起来接近的候选放在一组，交给后续Qwen一起判断。为了避免把同一张图里的两个相似物体误当成一个实例，同一源图的候选不会自动进入同一组。</p>
+        </div>
+        <dl>
+          <div><dt><code>clu_…</code></dt><dd>聚类编号，表示一组建议共同审查的候选，不等于已经确认的对象。</dd></div>
+          <div><dt><code>prop_…</code></dt><dd>候选编号，对应SAM3产生的一块mask；“成员候选”列出本组包含哪些候选。</dd></div>
+          <div><dt>CLS相似度</dt><dd>DINOv3对候选整体外观的相似程度，越接近1通常越相似，但它不是正确概率。</dd></div>
+          <div><dt>最低 / 平均 / 最高</dt><dd>组内候选两两比较的最低值、平均值和最高值。单成员组没有可比较对象，显示1.000只作占位，不代表身份已确认。</dd></div>
+        </dl>
+      </section>
       <div class="candidate-grid">
         ${clusters.map((cluster) => {
           const similarity = cluster.global_similarity || {};
@@ -1077,12 +1109,11 @@
               <div class="candidate-asset">${previewImage(imageUrl(cluster.contact_sheet), `聚类 ${cluster.cluster_id}`)}</div>
               <div class="candidate-body">
                 <div class="card-title-row">
-                  <strong class="mono">${escapeHtml(cluster.cluster_id)}</strong>
+                  <strong class="mono" title="视觉聚类编号">${escapeHtml(cluster.cluster_id)}</strong>
                   ${statusPill(number(cluster.source_count) > 1 ? "match" : "neutral", `${formatInteger(cluster.member_count)} 个候选 / ${formatInteger(cluster.source_count)} 张图`)}
                 </div>
-                <p>同组候选来自不同源图；同一张图中的相似候选不会自动合并。</p>
-                <p class="meta-line">CLS 相似度 · min ${number(similarity.min, 1).toFixed(3)} · mean ${number(similarity.mean, 1).toFixed(3)} · max ${number(similarity.max, 1).toFixed(3)}</p>
-                <span class="mono-line">members ${array(cluster.member_proposal_ids).map((id) => shortId(id, 13)).join(" · ")}</span>
+                <p class="meta-line">整体外观相似度（CLS）· 最低 ${number(similarity.min, 1).toFixed(3)} · 平均 ${number(similarity.mean, 1).toFixed(3)} · 最高 ${number(similarity.max, 1).toFixed(3)}</p>
+                <span class="mono-line">成员候选 · ${array(cluster.member_proposal_ids).map((id) => shortId(id, 13)).join(" · ")}</span>
               </div>
             </article>
           `;
@@ -1109,13 +1140,28 @@
     return [...merged.values()];
   }
 
+  function samFilterReasonLabel(reason) {
+    const labels = {
+      low_confidence: "质量分不足",
+      mask_too_small: "区域过小",
+      mask_too_large: "覆盖范围过大",
+      duplicate_mask: "重复mask",
+      contained_mask: "被更完整区域包含",
+      candidate_limit: "超过每图保留上限",
+      empty_mask: "空mask",
+      mask_shape_mismatch: "mask尺寸异常",
+      invalid_bbox: "定位框异常",
+    };
+    return labels[reason] || reason;
+  }
+
   function renderSamStage(images) {
     const relevant = images.filter(hasSamEvidence);
     if (!relevant.length) {
       updateHtml(
         elements.stagePanel,
         `${stagePanelHeader(
-          "STEP 03 · SEGMENTATION",
+          "STEP 02 · AUTOMATIC SEGMENTATION",
           "SAM3 自动点网格分割",
           stagePurposes.sam3,
           []
@@ -1138,29 +1184,41 @@
           ["过滤候选区域", filtered],
         ]
       )}
-      <div class="evidence-list">
+      <div class="sam-result-list">
         ${relevant
           .map((image) => {
             const sam = image.sam || {};
-            const candidates = candidatesForImage(image);
+            const candidates = candidatesForImage(image).filter(
+              (candidate) => candidate.status !== "filtered" && !candidate.filter_reason
+            );
+            const groupId = image.source_id || image.input_path || "unknown-source";
+            const filterCounts = Object.entries(sam.filter_counts || {});
             return `
-              <article class="evidence-card" style="grid-template-columns: 1fr">
-                <div class="evidence-body">
+              <details class="sam-result-group" data-sam-group="${escapeHtml(groupId)}" ${state.openSamGroups.has(groupId) ? "open" : ""}>
+                <summary class="sam-result-summary">
+                  <div class="sam-result-title">
+                    <strong>${escapeHtml(fileName(image.input_path) || shortId(image.source_id, 20) || "未知源图")}</strong>
+                    <span class="mono-line" title="${escapeHtml(image.source_id || "")}">${escapeHtml(shortId(image.source_id, 20))} · SAM3 ${escapeHtml(sam.inference_seconds ?? "—")}s · ${formatInteger(sam.raw_candidates ?? sam.grid_points)} 个原始候选</span>
+                  </div>
+                  <div class="sam-result-counts">
+                    ${statusPill("info", `保留 ${number(sam.kept)} 个`)}
+                    ${number(sam.filtered) ? statusPill("filtered", `过滤 ${number(sam.filtered)} 个`) : ""}
+                    <span class="sam-expand-hint">展开查看全部保留候选</span>
+                  </div>
+                </summary>
+                <div class="sam-result-content">
                   <div class="card-title-row">
                     <div>
-                      <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">SAM3 ${escapeHtml(sam.inference_seconds ?? "—")}s · ${number(sam.raw_candidates ?? sam.grid_points)} 个点网格原始候选</span>
-                    </div>
-                    <div class="chip-list" style="margin-top:0">
-                      ${statusPill("info", `保留 ${number(sam.kept)} 个候选区域`)}
-                      ${number(sam.filtered) ? statusPill("filtered", `过滤 ${number(sam.filtered)} 个候选区域`) : ""}
+                      <h4>脚本筛选结果</h4>
+                      <span class="mono-line">候选来源 automatic_point_grid · 下方只展示最终保留并进入DINOv3的候选</span>
                     </div>
                   </div>
-                  <div class="chip-list"><span class="chip prompt">候选来源 · <b>automatic_point_grid</b></span></div>
+                  ${filterCounts.length ? `<div class="chip-list">${filterCounts.map(([reason, count]) => `<span class="chip">${escapeHtml(samFilterReasonLabel(reason))} · <b>${formatInteger(count)}</b></span>`).join("")}</div>` : ""}
                   ${image.error ? `<p class="meta-line">阶段错误 · ${escapeHtml(image.error)}</p>` : ""}
                   ${candidates.length ? `<div class="candidate-grid">${candidates.map(candidateCard).join("")}</div>` : ""}
+                  ${candidates.length ? "" : emptyState("没有保留候选", "这张图的点网格结果全部被质量分或几何规则过滤。", "02")}
                 </div>
-              </article>
+              </details>
             `;
           })
           .join("")}
@@ -1594,9 +1652,11 @@
       return;
     }
     const metrics = reportMetrics(report);
-    const status = report.status || "failed";
+    const reportedStatus = report.status || "failed";
+    const legacyDemoCoverageFailure = isLegacyDuplicateDemoCoverageFailure(report);
+    const status = legacyDemoCoverageFailure ? "passed" : reportedStatus;
     elements.summaryStatus.className = `status-pill ${statusClass(status)}`;
-    elements.summaryStatus.textContent = statusLabels[status] || status;
+    elements.summaryStatus.textContent = legacyDemoCoverageFailure ? "流程通过" : statusLabels[status] || status;
 
     const qwen = report.models?.qwen || {};
     const sam = report.models?.sam3 || {};
@@ -1612,11 +1672,18 @@
     const structurePassed = status === "passed";
     const completedWithErrors = status === "completed_with_errors";
     const outcomeClass = structurePassed ? "passed" : completedWithErrors ? "warning" : "failed";
-    const formalTitle = structurePassed
+    const formalTitle = legacyDemoCoverageFailure
+      ? "实验流程成功，旧固定 Demo 覆盖条件未满足"
+      : structurePassed
       ? "实验完成，结果已写入对象记忆"
       : completedWithErrors
         ? "实验已结束，但部分内容处理失败"
         : "实验未形成可验收的完整结果";
+    const outcomeExplanation = legacyDemoCoverageFailure
+      ? "SAM3、DINOv3、Qwen和记忆写入均已完成。报告之所以记录为失败，只是因为旧版Web把“输入中必须出现完全重复图片”当成固定Demo验收条件；本次输入均不重复，所以误触发了该条件。"
+      : structurePassed
+        ? "流程完整结束且结构化结果可读取；物体是否找全、粒度是否完整、颜色是否正确及跨图身份是否一致，仍需结合下方证据人工确认。"
+        : "先查看运行错误与对应阶段证据；缺失或失败的内容不会被摘要数字包装成成功结果。";
     updateHtml(elements.summaryContent, `
       <section class="summary-outcome ${outcomeClass}">
         <div>
@@ -1632,7 +1699,7 @@
           <span>运行编号 · <code>${escapeHtml(report.run?.run_id || "—")}</code></span>
           <span>总耗时 · <b>${elapsed == null ? "—" : formatSeconds(elapsed)}</b></span>
         </div>
-        <p>${structurePassed ? "流程完整结束且结构化结果可读取；物体是否找全、粒度是否完整、颜色是否正确及跨图身份是否一致，仍需结合下方证据人工确认。" : "先查看运行错误与对应阶段证据；缺失或失败的内容不会被摘要数字包装成成功结果。"}</p>
+        <p>${escapeHtml(outcomeExplanation)}</p>
       </section>
       <div class="summary-stage-grid">
         ${summaryStageCard("01", "输入整理", [
@@ -1721,6 +1788,7 @@
       serverSummary: null,
       memory: null,
       candidateAssetKinds: new Map(),
+      openSamGroups: new Set(),
       lastIntermediateRenderKey: "",
       pendingIntermediateRender: false,
     });
@@ -1899,10 +1967,10 @@
     if (!library?.continuable) return;
     const counts = library.counts || {};
     const memoryContext = library.status === "empty"
-      ? "这是空白库，本次会创建一份独立对象记忆，并执行首次 Demo 结构覆盖检查。"
-      : `本次结果会并入现有 ${formatInteger(counts.active_objects)} 个对象和 ${formatInteger(counts.observations)} 条观测，不会生成独立副本，也不会重复套用空白库的首次覆盖条件。`;
+      ? "这是空白库，本次会创建一份独立对象记忆；结果状态只判断流程和数据是否完整。"
+      : `本次结果会并入现有 ${formatInteger(counts.active_objects)} 个对象和 ${formatInteger(counts.observations)} 条观测，不会生成独立副本。`;
     const confirmed = window.confirm(
-      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n目标记忆库：${library.label}（${memoryStatusText(library.status)}）\n${memoryContext}\n\n运行期间会锁定输入和记忆库管理，并联合加载 Qwen3-VL、SAM3 与 DINOv3，随后逐图闭环处理。是否继续？`
+      `将使用当前 ${state.inputSummary.total} 个输入文件启动完整端到端实验。\n\n目标记忆库：${library.label}（${memoryStatusText(library.status)}）\n${memoryContext}\n\n运行期间会锁定输入和记忆库管理，并按 SAM3 → DINOv3 → Qwen3-VL 顺序处理。是否继续？`
     );
     if (!confirmed) return;
     state.viewEpoch += 1;
@@ -1923,6 +1991,7 @@
         serverSummary: null,
         memory: null,
         candidateAssetKinds: new Map(),
+        openSamGroups: new Set(),
         lastIntermediateRenderKey: "",
         pendingIntermediateRender: false,
         lastDataRefresh: 0,
@@ -2019,6 +2088,12 @@
     elements.stagePanel.addEventListener("pointerdown", () => {
       state.stagePointerActive = true;
     });
+    elements.stagePanel.addEventListener("toggle", (event) => {
+      const group = event.target.closest?.("[data-sam-group]");
+      if (!group?.dataset.samGroup) return;
+      if (group.open) state.openSamGroups.add(group.dataset.samGroup);
+      else state.openSamGroups.delete(group.dataset.samGroup);
+    }, true);
     window.addEventListener("pointerup", releaseStagePointer);
     window.addEventListener("pointercancel", releaseStagePointer);
     window.addEventListener("blur", releaseStagePointer);

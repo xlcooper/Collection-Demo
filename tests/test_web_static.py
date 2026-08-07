@@ -73,6 +73,42 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn("const direct = data.input_path || data.source_id", self.javascript)
         self.assertIn(".concat(array(image.filtered_proposals))", self.javascript)
 
+    def test_sam_results_are_collapsed_by_source_image(self) -> None:
+        for expected in (
+            'class="sam-result-group"',
+            'data-sam-group="${escapeHtml(groupId)}"',
+            "state.openSamGroups.has(groupId)",
+            "展开查看全部保留候选",
+            'candidate.status !== "filtered" && !candidate.filter_reason',
+        ):
+            self.assertIn(expected, self.javascript)
+        self.assertIn(".sam-result-group[open]", self.stylesheet)
+
+    def test_cluster_stage_explains_identifiers_and_similarity_once(self) -> None:
+        for expected in (
+            "clu_…",
+            "prop_…",
+            "CLS相似度",
+            "最低 / 平均 / 最高",
+            "单成员组没有可比较对象",
+        ):
+            self.assertIn(expected, self.javascript)
+        self.assertEqual(
+            self.javascript.count("同一源图的候选不会自动进入同一组"),
+            1,
+        )
+
+    def test_legacy_demo_coverage_failure_is_explained_as_pipeline_success(self) -> None:
+        for expected in (
+            'report.pipeline_status !== "passed"',
+            'failedNames[0] === "exact_duplicate_image_was_skipped"',
+            'const runStatus = legacyDemoCoverageFailure ? "completed" : reportedRunStatus;',
+            "legacyDemoCoverageFailure",
+            "实验流程成功，旧固定 Demo 覆盖条件未满足",
+            "本次输入均不重复",
+        ):
+            self.assertIn(expected, self.javascript)
+
     def test_polling_is_serial_and_evidence_refresh_is_throttled(self) -> None:
         refresh_run = self.javascript[
             self.javascript.index("async function refreshRun") : self.javascript.index(
