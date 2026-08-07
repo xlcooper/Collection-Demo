@@ -71,7 +71,8 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertIn('inputPath ? `input:${inputPath}` : ""', self.javascript)
         self.assertIn("const aliases = new Map();", self.javascript)
         self.assertIn("const direct = data.input_path || data.source_id", self.javascript)
-        self.assertIn(".concat(array(image.filtered_proposals))", self.javascript)
+        self.assertIn("function samKeptCandidatesForImage(image)", self.javascript)
+        self.assertNotIn(".concat(array(image.filtered_proposals))", self.javascript)
 
     def test_sam_results_are_collapsed_by_source_image(self) -> None:
         for expected in (
@@ -79,9 +80,18 @@ class WebStaticContractTests(unittest.TestCase):
             'data-sam-group="${escapeHtml(groupId)}"',
             "state.openSamGroups.has(groupId)",
             "展开查看全部保留候选",
-            'candidate.status !== "filtered" && !candidate.filter_reason',
+            "const candidates = samKeptCandidatesForImage(image);",
+            "不受后续Qwen判断影响",
+            'statusPill("info", "SAM阶段保留")',
         ):
             self.assertIn(expected, self.javascript)
+        sam_card = self.javascript[
+            self.javascript.index("function samCandidateCard") : self.javascript.index(
+                "function restoreCandidateAssetViews"
+            )
+        ]
+        self.assertNotIn("candidate.status", sam_card)
+        self.assertNotIn("candidate.filter_reason", sam_card)
         self.assertIn(".sam-result-group[open]", self.stylesheet)
 
     def test_cluster_stage_explains_identifiers_and_similarity_once(self) -> None:

@@ -1122,22 +1122,18 @@
     `);
   }
 
-  function candidatesForImage(image) {
+  function samKeptCandidatesForImage(image) {
     const direct = array(
       image.kept_proposals || image.proposals || image.sam?.proposals
-    ).concat(array(image.filtered_proposals));
+    );
+    if (direct.length) return direct;
     const fromDecisions = array(image.decisions)
       .map((decision) => {
         if (!decision.candidate) return null;
         return { id: decision.proposal_id, ...decision.candidate, decision };
       })
       .filter(Boolean);
-    const merged = new Map();
-    for (const candidate of [...direct, ...fromDecisions]) {
-      const key = candidate.id || candidate.proposal_id || candidate.raw_candidate_id;
-      if (key) merged.set(key, { ...(merged.get(key) || {}), ...candidate });
-    }
-    return [...merged.values()];
+    return fromDecisions;
   }
 
   function samFilterReasonLabel(reason) {
@@ -1188,9 +1184,7 @@
         ${relevant
           .map((image) => {
             const sam = image.sam || {};
-            const candidates = candidatesForImage(image).filter(
-              (candidate) => candidate.status !== "filtered" && !candidate.filter_reason
-            );
+            const candidates = samKeptCandidatesForImage(image);
             const groupId = image.source_id || image.input_path || "unknown-source";
             const filterCounts = Object.entries(sam.filter_counts || {});
             return `
@@ -1210,12 +1204,12 @@
                   <div class="card-title-row">
                     <div>
                       <h4>脚本筛选结果</h4>
-                      <span class="mono-line">候选来源 automatic_point_grid · 下方只展示最终保留并进入DINOv3的候选</span>
+                      <span class="mono-line">候选来源 automatic_point_grid · 下方完整展示本阶段保留并送入DINOv3的候选，不受后续Qwen判断影响</span>
                     </div>
                   </div>
                   ${filterCounts.length ? `<div class="chip-list">${filterCounts.map(([reason, count]) => `<span class="chip">${escapeHtml(samFilterReasonLabel(reason))} · <b>${formatInteger(count)}</b></span>`).join("")}</div>` : ""}
                   ${image.error ? `<p class="meta-line">阶段错误 · ${escapeHtml(image.error)}</p>` : ""}
-                  ${candidates.length ? `<div class="candidate-grid">${candidates.map(candidateCard).join("")}</div>` : ""}
+                  ${candidates.length ? `<div class="candidate-grid">${candidates.map(samCandidateCard).join("")}</div>` : ""}
                   ${candidates.length ? "" : emptyState("没有保留候选", "这张图的点网格结果全部被质量分或几何规则过滤。", "02")}
                 </div>
               </details>
@@ -1227,7 +1221,7 @@
     restoreCandidateAssetViews();
   }
 
-  function candidateCard(candidate) {
+  function samCandidateCard(candidate) {
     const id = candidate.id || candidate.proposal_id || candidate.raw_candidate_id || "candidate";
     const crop = candidate.crop || candidate.crop_path;
     const mask = candidate.mask || candidate.mask_path;
@@ -1258,12 +1252,10 @@
         <div class="candidate-body">
           <div class="card-title-row">
             <strong class="mono">${escapeHtml(shortId(id, 20))}</strong>
-            ${candidate.status ? statusPill(candidate.status) : ""}
+            ${statusPill("info", "SAM阶段保留")}
           </div>
           <p>候选来源 · <b>${escapeHtml(candidate.candidate_source || candidate.prompt || "automatic_point_grid")}</b></p>
           <p class="meta-line">SAM3 点提示质量分 · ${number(candidate.score).toFixed(3)}</p>
-          ${candidate.filter_reason ? `<p class="meta-line">过滤原因 · ${escapeHtml(candidate.filter_reason)}</p>` : ""}
-          ${candidate.error ? `<p class="meta-line">错误 · ${escapeHtml(candidate.error)}</p>` : ""}
           <span class="mono-line">bbox ${escapeHtml(bboxText(candidate.bbox))} · area ${number(candidate.mask_area_ratio) ? `${(number(candidate.mask_area_ratio) * 100).toFixed(2)}%` : "—"}</span>
         </div>
       </article>
