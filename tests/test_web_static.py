@@ -100,7 +100,7 @@ class WebStaticContractTests(unittest.TestCase):
     def test_reasoning_stage_shows_qwen_dino_and_final_decision(self) -> None:
         reasoning = self.javascript[
             self.javascript.index("function renderReasoningStage") : self.javascript.index(
-                "function annotationBox"
+                "function renderMemory()"
             )
         ]
         for expected in (
