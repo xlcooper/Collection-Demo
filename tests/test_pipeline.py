@@ -257,9 +257,8 @@ class PipelineTests(unittest.TestCase):
             qwen = FakeQwenRuntime(events, invalid=True)
             sam = FakeSamRuntime(events)
             dino = FakeDinoRuntime(events)
-            report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
-                [image], run_id="run_invalid"
-            )
+            pipeline = make_pipeline(root, qwen=qwen, sam=sam, dino=dino)
+            report = pipeline.run([image], run_id="run_invalid")
             self.assertEqual(qwen.calls, 1)
             self.assertIn("sam.predict", events)
             self.assertIn("dino.extract", events)
