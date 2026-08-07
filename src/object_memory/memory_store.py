@@ -6,7 +6,7 @@ import json
 import sqlite3
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Iterator, Sequence
 
 from .assets import MemoryPaths
 from .schemas import (
@@ -192,6 +192,12 @@ class DecisionWriteResult:
     proposal_status: ProposalStatus
     object_id: str | None
     observation_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ClusterWriteResult:
+    object_id: str | None
+    proposal_results: tuple[DecisionWriteResult, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +419,210 @@ class MemoryStore:
         with self.transaction() as connection:
             self._require_processing_source(connection, proposal.source_image_id)
             self._insert_proposal(connection, proposal, ProposalStatus.FILTERED)
+
+    def record_filtered_proposals(self, proposals: Sequence[Proposal]) -> None:
+        """Persist one semantically rejected cluster in a single transaction."""
+
+        items = list(proposals)
+        if not items:
+            raise ValueError("At least one filtered proposal is required")
+        for proposal in items:
+            if proposal.status is not ProposalStatus.FILTERED or not proposal.filter_reason:
+                raise MemoryStoreError(
+                    "Filtered proposals require status='filtered' and filter_reason."
+                )
+        with self.transaction() as connection:
+            for proposal in items:
+                self._require_processing_source(connection, proposal.source_image_id)
+                self._insert_proposal(connection, proposal, ProposalStatus.FILTERED)
+
+    def commit_cluster_decisions(
+        self,
+        *,
+        proposals: Sequence[Proposal],
+        decisions: Sequence[Decision],
+        memory_object: MemoryObject | None,
+        object_summary: ObjectSummary | None,
+        observations: Sequence[Observation],
+    ) -> ClusterWriteResult:
+        """Atomically persist one reviewed cluster and all of its observations."""
+
+        proposal_list = list(proposals)
+        decision_list = list(decisions)
+        observation_list = list(observations)
+        if not proposal_list or len(proposal_list) != len(decision_list):
+            raise MemoryStoreError(
+                "A cluster requires one decision for every non-empty proposal list."
+            )
+        proposal_ids = [proposal.id for proposal in proposal_list]
+        if len(proposal_ids) != len(set(proposal_ids)):
+            raise MemoryStoreError("Cluster proposal IDs must be unique.")
+        decision_by_proposal = {
+            decision.proposal_id: decision for decision in decision_list
+        }
+        if set(decision_by_proposal) != set(proposal_ids):
+            raise MemoryStoreError("Cluster decisions do not cover every proposal.")
+        observation_by_proposal = {
+            observation.proposal_id: observation for observation in observation_list
+        }
+        if len(observation_by_proposal) != len(observation_list):
+            raise MemoryStoreError("Cluster observations must use unique proposals.")
+        proposal_by_id = {proposal.id: proposal for proposal in proposal_list}
+        if any(
+            observation.source_image_id
+            != proposal_by_id[observation.proposal_id].source_image_id
+            for observation in observation_list
+        ):
+            raise MemoryStoreError(
+                "Every cluster observation must belong to its proposal source."
+            )
+
+        result_object_id: str | None = None
+        if memory_object is not None:
+            if object_summary is not None:
+                raise MemoryStoreError("A new cluster cannot also update an object.")
+            result_object_id = memory_object.id
+            new_decisions = [
+                decision
+                for decision in decision_list
+                if decision.decision is DecisionType.NEW
+            ]
+            existing_decisions = [
+                decision
+                for decision in decision_list
+                if decision.decision is DecisionType.EXISTING
+            ]
+            if len(new_decisions) != 1 or len(existing_decisions) != len(
+                decision_list
+            ) - 1:
+                raise MemoryStoreError(
+                    "A new cluster requires one new decision and existing member decisions."
+                )
+            if any(
+                decision.matched_object_id != result_object_id
+                for decision in existing_decisions
+            ):
+                raise MemoryStoreError(
+                    "New-cluster member decisions must reference the created object."
+                )
+        elif object_summary is not None:
+            matched_ids = {
+                decision.matched_object_id
+                for decision in decision_list
+                if decision.decision is DecisionType.EXISTING
+            }
+            if len(matched_ids) != 1 or None in matched_ids:
+                raise MemoryStoreError(
+                    "An existing cluster must reference exactly one active object."
+                )
+            result_object_id = next(iter(matched_ids))
+            if any(
+                decision.decision is not DecisionType.EXISTING
+                or decision.matched_object_id != result_object_id
+                for decision in decision_list
+            ):
+                raise MemoryStoreError(
+                    "Every decision in an existing cluster must reference one object."
+                )
+        elif observation_list:
+            raise MemoryStoreError(
+                "Uncertain cluster decisions cannot create observations."
+            )
+        elif any(
+            decision.decision is not DecisionType.UNCERTAIN
+            for decision in decision_list
+        ):
+            raise MemoryStoreError(
+                "A cluster without an object update must contain only uncertain decisions."
+            )
+
+        if result_object_id is not None:
+            if set(observation_by_proposal) != set(proposal_ids):
+                raise MemoryStoreError(
+                    "Accepted clusters require one observation per proposal."
+                )
+            if any(
+                observation.object_id != result_object_id
+                for observation in observation_list
+            ):
+                raise MemoryStoreError(
+                    "All cluster observations must reference the resolved object."
+                )
+
+        with self.transaction() as connection:
+            for proposal in proposal_list:
+                self._prepare_proposal_for_decision(connection, proposal)
+            if memory_object is not None:
+                connection.execute(
+                    """
+                    INSERT INTO objects (id, summary_json, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        memory_object.id,
+                        memory_object.summary.model_dump_json(),
+                        memory_object.status.value,
+                        memory_object.created_at.isoformat(),
+                        memory_object.updated_at.isoformat(),
+                    ),
+                )
+            elif object_summary is not None:
+                exists = connection.execute(
+                    "SELECT id FROM objects WHERE id = ? AND status = 'active'",
+                    (result_object_id,),
+                ).fetchone()
+                if exists is None:
+                    raise MemoryStoreError(
+                        "Existing cluster references a missing or archived object: "
+                        f"{result_object_id}"
+                    )
+                connection.execute(
+                    """
+                    UPDATE objects SET summary_json = ?, updated_at = ?
+                    WHERE id = ? AND status = 'active'
+                    """,
+                    (
+                        object_summary.model_dump_json(),
+                        utc_now().isoformat(),
+                        result_object_id,
+                    ),
+                )
+            for observation in observation_list:
+                self._insert_observation(connection, observation)
+            for decision in decision_list:
+                self._insert_decision(connection, decision)
+            now = utc_now().isoformat()
+            connection.executemany(
+                "UPDATE proposals SET status = ?, updated_at = ? WHERE id = ?",
+                [
+                    (ProposalStatus.DECIDED.value, now, proposal.id)
+                    for proposal in proposal_list
+                ],
+            )
+
+        results = tuple(
+            DecisionWriteResult(
+                proposal_id=proposal.id,
+                decision_id=decision_by_proposal[proposal.id].id,
+                decision=decision_by_proposal[proposal.id].decision,
+                proposal_status=ProposalStatus.DECIDED,
+                object_id=(
+                    observation_by_proposal[proposal.id].object_id
+                    if proposal.id in observation_by_proposal
+                    else None
+                ),
+                observation_id=(
+                    observation_by_proposal[proposal.id].id
+                    if proposal.id in observation_by_proposal
+                    else None
+                ),
+            )
+            for proposal in proposal_list
+        )
+        return ClusterWriteResult(
+            object_id=result_object_id,
+            proposal_results=results,
+        )
 
     def commit_decision(
         self,
@@ -823,6 +1033,73 @@ class MemoryStore:
                 proposal.error_message,
                 proposal.created_at.isoformat(),
                 proposal.updated_at.isoformat(),
+            ),
+        )
+
+    @staticmethod
+    def _insert_observation(
+        connection: sqlite3.Connection,
+        observation: Observation,
+    ) -> None:
+        fingerprint = observation.fingerprint
+        connection.execute(
+            """
+            INSERT INTO observations (
+                id, object_id, proposal_id, source_image_id,
+                fingerprint_path, fingerprint_sha256,
+                fingerprint_model_id, fingerprint_revision, feature_layer,
+                input_size, storage_dtype, global_dimension, local_count,
+                l2_normalized, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                observation.id,
+                observation.object_id,
+                observation.proposal_id,
+                observation.source_image_id,
+                fingerprint.path,
+                fingerprint.sha256,
+                fingerprint.model_id,
+                fingerprint.revision,
+                fingerprint.feature_layer,
+                fingerprint.input_size,
+                fingerprint.storage_dtype,
+                fingerprint.global_dimension,
+                fingerprint.local_count,
+                int(fingerprint.l2_normalized),
+                observation.created_at.isoformat(),
+            ),
+        )
+
+    @staticmethod
+    def _insert_decision(
+        connection: sqlite3.Connection,
+        decision: Decision,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO decisions (
+                id, proposal_id, decision, matched_object_id, confidence,
+                reason_code, short_reason, prompt_version, qwen_hypothesis,
+                qwen_matched_object_id, visual_evidence_json,
+                raw_response_path, attempt, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                decision.id,
+                decision.proposal_id,
+                decision.decision.value,
+                decision.matched_object_id,
+                decision.confidence,
+                decision.reason_code,
+                decision.short_reason,
+                decision.prompt_version,
+                decision.qwen_hypothesis.value,
+                decision.qwen_matched_object_id,
+                decision.visual_evidence.model_dump_json(),
+                decision.raw_response_path,
+                decision.attempt,
+                decision.created_at.isoformat(),
             ),
         )
 

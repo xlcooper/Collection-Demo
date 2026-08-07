@@ -12,9 +12,10 @@ from typing import Any, Protocol
 
 STAGE_BOUNDARIES: dict[str, tuple[float, float]] = {
     "input_registration": (0.0, 10.0),
-    "scene_guidance": (10.0, 35.0),
-    "sam3": (35.0, 65.0),
-    "candidate_reasoning": (65.0, 95.0),
+    "sam3": (10.0, 40.0),
+    "dinov3": (40.0, 70.0),
+    "clustering": (70.0, 75.0),
+    "cluster_review": (75.0, 95.0),
     "report": (95.0, 100.0),
 }
 

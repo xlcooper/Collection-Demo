@@ -1,9 +1,10 @@
-"""Per-image Qwen -> SAM3 -> DINOv3 -> memory orchestration."""
+"""SAM3 point grid -> DINOv3 clustering -> Qwen cluster review pipeline."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -14,18 +15,24 @@ from uuid import uuid4
 from PIL import Image
 
 from .assets import MemoryPaths
+from .candidate_clustering import (
+    CandidateCluster,
+    FingerprintedCandidate,
+    cluster_candidates,
+    cluster_historical_evidence,
+    write_cluster_contact_sheet,
+)
+from .cluster_review import (
+    ClusterReviewEvaluation,
+    ClusterReviewInput,
+    evaluate_cluster_reviews,
+)
 from .config import AppConfig, config_digest
 from .dinov3_adapter import (
     FingerprintData,
     HistoricalFingerprint,
-    match_fingerprint,
     read_fingerprint,
     write_fingerprint,
-)
-from .identity_decision import (
-    associate_targets,
-    decide_identity,
-    unmatched_proposal_decision,
 )
 from .memory_loop import MemoryLoop
 from .memory_store import MemoryStore, RunSummary
@@ -33,12 +40,19 @@ from .mllm_adapter import MllmPrediction
 from .progress import ProgressReporter
 from .sam3_adapter import Sam3Prediction
 from .sam3_postprocess import process_candidates
-from .scene_guidance import (
-    SceneGuidanceEvaluation,
-    SceneImageInput,
-    evaluate_scene_guidance,
+from .schemas import (
+    ClusterReview,
+    ClusterVerdict,
+    DecisionReasonCode,
+    DecisionType,
+    IdentityHypothesis,
+    Proposal,
+    ProposalStatus,
+    Run,
+    SourceImage,
+    VisualEvidence,
+    VisualMatchType,
 )
-from .schemas import Proposal, Run, SceneTarget, SourceImage
 
 
 SUPPORTED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -49,7 +63,7 @@ class SamRuntime(Protocol):
 
     def load(self) -> None: ...
 
-    def predict(self, image: Image.Image, prompts: Sequence[str]) -> Sam3Prediction: ...
+    def predict(self, image: Image.Image) -> Sam3Prediction: ...
 
     @property
     def peak_memory_mib(self) -> float: ...
@@ -102,15 +116,14 @@ class ImageWork:
     source: SourceImage | None = None
     duplicate: bool = False
     status: str = "discovered"
-    qwen: dict[str, Any] | None = None
     kept: tuple[Proposal, ...] = ()
     filtered: tuple[Proposal, ...] = ()
     filter_counts: dict[str, int] = field(default_factory=dict)
     raw_candidate_count: int = 0
-    prompt_detection_counts: dict[str, int] = field(default_factory=dict)
     sam_inference_seconds: float = 0.0
     fingerprint_count: int = 0
     fingerprint_inference_seconds: float = 0.0
+    cluster_ids: list[str] = field(default_factory=list)
     decisions: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
 
@@ -122,19 +135,13 @@ class ImageWork:
             "stored_source": self.source.relative_path if self.source else None,
             "duplicate": self.duplicate,
             "status": self.status,
-            "qwen": self.qwen,
-            "scene_guidance": self.qwen.get("response") if self.qwen else None,
             "sam": {
-                "above_confidence_threshold_candidates": self.raw_candidate_count,
+                "candidate_source": "automatic_point_grid",
+                "grid_points": self.raw_candidate_count,
+                "raw_candidates": self.raw_candidate_count,
                 "kept": len(self.kept),
                 "filtered": len(self.filtered),
                 "filter_counts": self.filter_counts,
-                "prompt_detection_counts": self.prompt_detection_counts,
-                "zero_candidate_prompts": [
-                    prompt
-                    for prompt, count in self.prompt_detection_counts.items()
-                    if count == 0
-                ],
                 "inference_seconds": round(self.sam_inference_seconds, 3),
             },
             "kept_proposals": [
@@ -146,14 +153,47 @@ class ImageWork:
             "dinov3": {
                 "fingerprints": self.fingerprint_count,
                 "inference_seconds": round(self.fingerprint_inference_seconds, 3),
+                "cluster_ids": self.cluster_ids,
             },
             "decisions": self.decisions,
             "error": self.error,
         }
 
 
+@dataclass(slots=True)
+class ClusterWork:
+    cluster: CandidateCluster
+    contact_sheet: str
+    historical_evidence: VisualEvidence | None = None
+    qwen_review: ClusterReview | None = None
+    raw_response: str | None = None
+    final_decision: str | None = None
+    object_id: str | None = None
+    error: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            **self.cluster.report(),
+            "contact_sheet": self.contact_sheet,
+            "historical_visual_evidence": (
+                self.historical_evidence.model_dump(mode="json")
+                if self.historical_evidence is not None
+                else None
+            ),
+            "qwen_review": (
+                self.qwen_review.model_dump(mode="json")
+                if self.qwen_review is not None
+                else None
+            ),
+            "raw_response": self.raw_response,
+            "final_decision": self.final_decision,
+            "object_id": self.object_id,
+            "error": self.error,
+        }
+
+
 class RecordingPredictor:
-    """Retain the only raw Qwen response even when schema validation fails."""
+    """Retain the only raw response for one Qwen cluster batch."""
 
     def __init__(self, runtime: MllmRuntime) -> None:
         self.runtime = runtime
@@ -206,7 +246,7 @@ def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 class ObjectMemoryPipeline:
-    """Run a state-dependent per-image loop with all three models resident."""
+    """Run the staged batch workflow while preserving explicit evidence."""
 
     def __init__(
         self,
@@ -233,18 +273,18 @@ class ObjectMemoryPipeline:
             "generated_tokens": 0,
             "inference_seconds": 0.0,
         }
-        self._sam_metrics = {"loaded": False, "inference_seconds": 0.0}
+        self._sam_metrics = {
+            "loaded": False,
+            "inference_seconds": 0.0,
+            "raw_candidates": 0,
+        }
         self._dino_metrics = {
             "loaded": False,
             "fingerprints": 0,
             "inference_seconds": 0.0,
+            "clusters": 0,
         }
-        self._peak_memory_mib = {
-            "qwen": 0.0,
-            "sam3": 0.0,
-            "dinov3": 0.0,
-            "joint": 0.0,
-        }
+        self._peak_memory_mib = {"qwen": 0.0, "sam3": 0.0, "dinov3": 0.0}
 
     def run(
         self,
@@ -284,7 +324,7 @@ class ObjectMemoryPipeline:
             status="running",
             current=0,
             total=len(works),
-            message="Object-memory run started",
+            message="Object-memory batch run started",
             data={"memory_root": str(self.paths.root), "input_count": len(works)},
             overall_percent=0.0,
         )
@@ -307,54 +347,21 @@ class ObjectMemoryPipeline:
                     "work_status": work.status,
                     "error": work.error,
                 },
+                overall_percent=10.0 * index / len(works),
             )
 
         pending = [work for work in works if work.status == "registered"]
+        cluster_works: list[ClusterWork] = []
         if pending:
-            self._load_models(pending, errors)
-        try:
-            for index, work in enumerate(pending, start=1):
-                self._emit(
-                    event="image_loop_started",
-                    stage="per_image_loop",
-                    status="running",
-                    current=index - 1,
-                    total=len(pending),
-                    message=f"Processing {work.input_path.name}",
-                    data={"source_id": work.source.id if work.source else None},
-                    overall_percent=self._image_progress(
-                        index=index,
-                        total=len(pending),
-                        fraction=0.0,
-                    ),
-                )
-                self._process_image(
-                    run,
-                    work,
-                    errors,
-                    image_index=index,
-                    image_total=len(pending),
-                )
-                self._emit(
-                    event="image_loop_completed",
-                    stage="per_image_loop",
-                    status=work.status,
-                    current=index,
-                    total=len(pending),
-                    message=f"Finished {work.input_path.name}: {work.status}",
-                    data=work.as_dict(),
-                    overall_percent=self._image_progress(
-                        index=index,
-                        total=len(pending),
-                        fraction=1.0,
-                    ),
-                )
-        finally:
-            self._capture_peak_memory()
-            self._close_models()
+            self._run_sam_stage(run, pending, errors)
+            fingerprinted = self._run_dino_stage(run, pending, errors)
+            if fingerprinted:
+                cluster_works = self._build_clusters(run, fingerprinted)
+                self._run_qwen_stage(run, cluster_works, works, errors)
+        self._finalize_sources(works, errors)
 
         summary = self.loop.complete_run(run.id, external_errors=len(errors))
-        checks = self._build_checks(works, summary)
+        checks = self._build_checks(works, cluster_works, summary)
         status = (
             "passed"
             if summary.status.value == "completed" and all(checks.values())
@@ -362,7 +369,15 @@ class ObjectMemoryPipeline:
             if summary.status.value != "completed"
             else "failed"
         )
-        report = self._build_report(run, works, summary, checks, status, errors)
+        report = self._build_report(
+            run,
+            works,
+            cluster_works,
+            summary,
+            checks,
+            status,
+            errors,
+        )
         report_path = self.paths.run_reports / f"{run.id}.json"
         report["run_report"] = self.paths.relative_asset(report_path)
         write_json_atomic(report_path, report)
@@ -378,284 +393,396 @@ class ObjectMemoryPipeline:
         )
         return report
 
-    def _load_models(self, works: Sequence[ImageWork], errors: list[str]) -> None:
+    def _run_sam_stage(
+        self,
+        run: Run,
+        works: Sequence[ImageWork],
+        errors: list[str],
+    ) -> None:
+        active = [work for work in works if work.status == "registered"]
+        if not active:
+            return
         self._emit(
-            event="models_load_started",
-            stage="models",
+            event="sam3_batch_started",
+            stage="sam3",
             status="running",
             current=0,
-            total=3,
-            message="Loading Qwen, SAM3, and DINOv3 for joint residency",
+            total=len(active),
+            message="SAM3 point-grid candidate generation started",
             data={},
             overall_percent=10.0,
         )
         try:
-            self.mllm_runtime.load()
-            self._qwen_metrics["loaded"] = True
             self.sam_runtime.load()
             self._sam_metrics["loaded"] = True
-            self.dino_runtime.load()
-            self._dino_metrics["loaded"] = True
-        except Exception as exc:  # noqa: BLE001 - joint residency is an experiment result
-            message = f"{type(exc).__name__}: {exc}"
-            errors.append(f"joint model residency: {message}")
-            for work in works:
-                if work.source is not None and work.status == "registered":
-                    self._fail_source(work, message, errors)
-            self._capture_peak_memory()
-            self._close_models()
-            return
-        self._emit(
-            event="models_load_completed",
-            stage="models",
-            status="completed",
-            current=3,
-            total=3,
-            message="All three models are resident",
-            data={
-                "qwen_load_seconds": self.mllm_runtime.model_load_seconds,
-                "sam3_load_seconds": self.sam_runtime.model_load_seconds,
-                "dinov3_load_seconds": self.dino_runtime.model_load_seconds,
-                "combined_peak_memory_mib": self._combined_peak_memory(),
-            },
-            overall_percent=10.0,
-        )
-
-    def _process_image(
-        self,
-        run: Run,
-        work: ImageWork,
-        errors: list[str],
-        *,
-        image_index: int,
-        image_total: int,
-    ) -> None:
-        if work.status != "registered" or work.source is None:
-            return
-        if not all(
-            (
-                self._qwen_metrics["loaded"],
-                self._sam_metrics["loaded"],
-                self._dino_metrics["loaded"],
-            )
-        ):
-            return
-        source_asset = self.paths.resolve_asset(work.source.relative_path)
-        self._emit(
-            event="scene_guidance_image_started",
-            stage="scene_guidance",
-            status="running",
-            current=0,
-            total=1,
-            message=f"Qwen is reading {work.input_path.name} and current text memory",
-            data={"input_path": str(work.input_path), "source_id": work.source.id},
-            overall_percent=self._image_progress(
-                index=image_index,
-                total=image_total,
-                fraction=0.0,
-            ),
-        )
-        evaluation, raw_path = self._run_qwen_once(run, work, source_asset, errors)
-        if evaluation is None or raw_path is None:
-            return
-        self._emit(
-            event="scene_guidance_image_completed",
-            stage="scene_guidance",
-            status="completed",
-            current=1,
-            total=1,
-            message=f"Qwen single-pass response completed for {work.input_path.name}",
-            data={
-                "input_path": str(work.input_path),
-                "source_id": work.source.id,
-                "work_status": work.status,
-                "qwen": work.qwen,
-                "scene_guidance": evaluation.response.model_dump(mode="json"),
-            },
-            overall_percent=self._image_progress(
-                index=image_index,
-                total=image_total,
-                fraction=0.25,
-            ),
-        )
-        targets = list(evaluation.response.targets)
-        if not targets:
-            self._complete_source(work, errors)
-            return
-
-        try:
-            self._emit(
-                event="sam3_image_started",
-                stage="sam3",
-                status="running",
-                current=0,
-                total=1,
-                message=f"SAM3 is segmenting {work.input_path.name}",
-                data={"input_path": str(work.input_path), "source_id": work.source.id},
-                overall_percent=self._image_progress(
-                    index=image_index,
-                    total=image_total,
-                    fraction=0.25,
-                ),
-            )
-            prompts = list(dict.fromkeys(target.sam_text_prompt for target in targets))
-            with Image.open(source_asset) as opened:
-                image = opened.convert("RGB")
-            prediction = self.sam_runtime.predict(image, prompts)
-            self._sam_metrics["inference_seconds"] += prediction.inference_seconds
-            work.sam_inference_seconds = prediction.inference_seconds
-            work.raw_candidate_count = len(prediction.candidates)
-            work.prompt_detection_counts = prediction.prompt_counts
-            processed = process_candidates(
-                prediction.candidates,
-                image=image,
-                source_image_id=work.source.id,
-                run_id=run.id,
-                paths=self.paths,
-                settings=self.config.sam3_pipeline,
-            )
-            work.kept = processed.kept
-            work.filtered = processed.filtered
-            work.filter_counts = processed.filter_counts
-            for proposal in work.filtered:
-                self.loop.record_filtered_proposal(proposal)
-            self._emit(
-                event="sam3_image_completed",
-                stage="sam3",
-                status="completed",
-                current=1,
-                total=1,
-                message=f"SAM3 completed {work.input_path.name}",
-                data={
-                    "input_path": str(work.input_path),
-                    "source_id": work.source.id,
-                    "work_status": work.status,
-                    "sam": work.as_dict()["sam"],
-                    "kept_proposals": [
-                        proposal.model_dump(mode="json") for proposal in work.kept
-                    ],
-                    "filtered_proposals": [
-                        proposal.model_dump(mode="json") for proposal in work.filtered
-                    ],
-                },
-                overall_percent=self._image_progress(
-                    index=image_index,
-                    total=image_total,
-                    fraction=0.6,
-                ),
-            )
         except Exception as exc:  # noqa: BLE001
-            self._fail_source(work, f"{type(exc).__name__}: {exc}", errors)
-            return
-
-        assignments = associate_targets(
-            work.kept,
-            targets,
-            image_width=work.source.width,
-            image_height=work.source.height,
-            minimum_iou=self.config.mllm_pipeline.target_proposal_iou_threshold,
-        )
-        try:
-            historical = [
-                HistoricalFingerprint(
-                    object_id=record.object_id,
-                    observation_id=record.observation_id,
-                    data=read_fingerprint(
-                        self.paths.resolve_asset(record.path),
-                        expected_sha256=record.sha256,
-                    ),
-                )
-                for record in self.loop.fingerprint_records()
-            ]
-        except Exception as exc:  # noqa: BLE001 - corrupt history stops this source
             message = f"{type(exc).__name__}: {exc}"
-            for proposal in work.kept:
-                self._record_proposal_failure(proposal, message, work, errors)
-            self._fail_source(work, message, errors, append_error=False)
+            errors.append(f"SAM3 load: {message}")
+            self.sam_runtime.close()
+            for work in active:
+                self._fail_source(work, message, errors, append_error=False)
             return
-        self._emit(
-            event="visual_identity_started",
-            stage="candidate_reasoning",
-            status="running",
-            current=0,
-            total=len(work.kept),
-            message=f"DINOv3 is fingerprinting {len(work.kept)} proposals",
-            data={"input_path": str(work.input_path), "source_id": work.source.id},
-            overall_percent=self._image_progress(
-                index=image_index,
-                total=image_total,
-                fraction=0.6,
-            ),
-        )
-        for index, proposal in enumerate(work.kept):
-            try:
-                decision_report = self._process_proposal(
-                    proposal,
-                    assignments.get(proposal.id),
-                    historical=historical,
-                    raw_path=raw_path,
-                )
-                work.decisions.append(decision_report)
-                work.fingerprint_count += 1
-                work.fingerprint_inference_seconds += float(
-                    getattr(self.dino_runtime, "last_inference_seconds", 0.0)
-                )
-            except Exception as exc:  # noqa: BLE001 - stop this source, no rescue
-                message = f"{type(exc).__name__}: {exc}"
-                errors.append(f"proposal {proposal.id}: {message}")
-                self._record_proposal_failure(proposal, message, work, errors)
-                for remaining in work.kept[index + 1 :]:
-                    self._record_proposal_failure(
-                        remaining,
-                        f"source stopped after proposal failure: {proposal.id}",
+        try:
+            for index, work in enumerate(active, start=1):
+                if work.source is None or work.status != "registered":
+                    continue
+                try:
+                    source_asset = self.paths.resolve_asset(work.source.relative_path)
+                    with Image.open(source_asset) as opened:
+                        image = opened.convert("RGB")
+                    prediction = self.sam_runtime.predict(image)
+                    processed = process_candidates(
+                        prediction.candidates,
+                        image=image,
+                        source_image_id=work.source.id,
+                        run_id=run.id,
+                        paths=self.paths,
+                        settings=self.config.sam3_pipeline,
+                    )
+                    work.kept = processed.kept
+                    work.filtered = processed.filtered
+                    work.filter_counts = processed.filter_counts
+                    work.raw_candidate_count = len(prediction.candidates)
+                    work.sam_inference_seconds = prediction.inference_seconds
+                    self._sam_metrics["inference_seconds"] += prediction.inference_seconds
+                    self._sam_metrics["raw_candidates"] += len(prediction.candidates)
+                    for proposal in work.filtered:
+                        self.loop.record_filtered_proposal(proposal)
+                    self._emit(
+                        event="sam3_image_completed",
+                        stage="sam3",
+                        status="completed",
+                        current=index,
+                        total=len(active),
+                        message=f"SAM3 point grid completed: {work.input_path.name}",
+                        data={
+                            "input_path": str(work.input_path),
+                            "source_id": work.source.id,
+                            "work_status": work.status,
+                            "sam": work.as_dict()["sam"],
+                            "kept_proposals": [
+                                proposal.model_dump(mode="json")
+                                for proposal in work.kept
+                            ],
+                            "filtered_proposals": [
+                                proposal.model_dump(mode="json")
+                                for proposal in work.filtered
+                            ],
+                        },
+                        overall_percent=10.0 + 30.0 * index / len(active),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    self._fail_source(
                         work,
+                        f"{type(exc).__name__}: {exc}",
                         errors,
                     )
-                self._fail_source(work, message, errors, append_error=False)
-                return
-        self._emit(
-            event="visual_identity_completed",
-            stage="candidate_reasoning",
-            status="completed",
-            current=len(work.kept),
-            total=len(work.kept),
-            message=f"Visual identity decisions completed for {work.input_path.name}",
-            data={
-                "input_path": str(work.input_path),
-                "source_id": work.source.id,
-                "work_status": work.status,
-                "dinov3": work.as_dict()["dinov3"],
-                "decisions": work.decisions,
-            },
-            overall_percent=self._image_progress(
-                index=image_index,
-                total=image_total,
-                fraction=1.0,
-            ),
-        )
-        self._complete_source(work, errors)
+        finally:
+            self._peak_memory_mib["sam3"] = max(
+                self._peak_memory_mib["sam3"], self.sam_runtime.peak_memory_mib
+            )
+            self.sam_runtime.close()
 
-    def _run_qwen_once(
+    def _run_dino_stage(
         self,
         run: Run,
-        work: ImageWork,
-        source_asset: Path,
+        works: Sequence[ImageWork],
         errors: list[str],
-    ) -> tuple[SceneGuidanceEvaluation | None, str | None]:
-        assert work.source is not None
-        recorder = RecordingPredictor(self.mllm_runtime)
-        evaluation: SceneGuidanceEvaluation | None = None
-        call_error: str | None = None
-        cards = self.loop.object_cards()
+    ) -> list[FingerprintedCandidate]:
+        active = [
+            work
+            for work in works
+            if work.status == "registered" and work.kept
+        ]
+        if not active:
+            return []
+        total_candidates = sum(len(work.kept) for work in active)
+        self._emit(
+            event="dinov3_batch_started",
+            stage="dinov3",
+            status="running",
+            current=0,
+            total=total_candidates,
+            message="DINOv3 fingerprint extraction started",
+            data={},
+            overall_percent=40.0,
+        )
         try:
-            evaluation = evaluate_scene_guidance(
+            self.dino_runtime.load()
+            self._dino_metrics["loaded"] = True
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
+            errors.append(f"DINOv3 load: {message}")
+            self.dino_runtime.close()
+            for work in active:
+                for proposal in work.kept:
+                    self._record_proposal_failure(proposal, message, work, errors)
+                self._fail_source(work, message, errors, append_error=False)
+            return []
+
+        completed = 0
+        fingerprinted: list[FingerprintedCandidate] = []
+        try:
+            for work in active:
+                source_candidates: list[FingerprintedCandidate] = []
+                source_error: str | None = None
+                for proposal in work.kept:
+                    try:
+                        if not proposal.crop_path or not proposal.mask_path:
+                            raise ValueError("Kept proposal has no crop or mask asset")
+                        data = self.dino_runtime.extract(
+                            crop_path=self.paths.resolve_asset(proposal.crop_path),
+                            mask_path=self.paths.resolve_asset(proposal.mask_path),
+                            bbox=proposal.bbox,
+                            crop_padding_pixels=(
+                                self.config.sam3_pipeline.crop_padding_pixels
+                            ),
+                        )
+                        fingerprint_path = (
+                            self.paths.resolve_asset(proposal.crop_path).parent
+                            / "fingerprint.npz"
+                        )
+                        proposal.fingerprint = write_fingerprint(
+                            fingerprint_path,
+                            data,
+                            relative_path=self.paths.relative_asset(fingerprint_path),
+                            model_id=self.config.models.dinov3_model_id,
+                            revision=self.config.models.dinov3_revision,
+                            feature_layer=self.dino_runtime.feature_layer,
+                            input_size=self.config.visual_fingerprint.input_size,
+                            storage_dtype=(
+                                self.config.visual_fingerprint.storage_dtype
+                            ),
+                        )
+                        inference_seconds = float(
+                            getattr(
+                                self.dino_runtime,
+                                "last_inference_seconds",
+                                0.0,
+                            )
+                        )
+                        work.fingerprint_count += 1
+                        work.fingerprint_inference_seconds += inference_seconds
+                        self._dino_metrics["fingerprints"] += 1
+                        self._dino_metrics["inference_seconds"] += inference_seconds
+                        source_candidates.append(
+                            FingerprintedCandidate(proposal=proposal, data=data)
+                        )
+                        completed += 1
+                        self._emit(
+                            event="dinov3_candidate_completed",
+                            stage="dinov3",
+                            status="completed",
+                            current=completed,
+                            total=total_candidates,
+                            message=f"DINOv3 fingerprinted {proposal.id}",
+                            data={
+                                "source_id": proposal.source_image_id,
+                                "proposal_id": proposal.id,
+                                "fingerprint": proposal.fingerprint.model_dump(
+                                    mode="json"
+                                ),
+                            },
+                            overall_percent=(
+                                40.0 + 30.0 * completed / total_candidates
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        source_error = f"{type(exc).__name__}: {exc}"
+                        break
+                if source_error is not None:
+                    for proposal in work.kept:
+                        if proposal.status is ProposalStatus.PENDING:
+                            self._record_proposal_failure(
+                                proposal,
+                                source_error,
+                                work,
+                                errors,
+                            )
+                    self._fail_source(
+                        work,
+                        source_error,
+                        errors,
+                        append_error=False,
+                    )
+                    continue
+                fingerprinted.extend(source_candidates)
+        finally:
+            self._peak_memory_mib["dinov3"] = max(
+                self._peak_memory_mib["dinov3"],
+                self.dino_runtime.peak_memory_mib,
+            )
+            self.dino_runtime.close()
+        return fingerprinted
+
+    def _build_clusters(
+        self,
+        run: Run,
+        candidates: Sequence[FingerprintedCandidate],
+    ) -> list[ClusterWork]:
+        clusters = cluster_candidates(candidates, self.config.visual_fingerprint)
+        self._dino_metrics["clusters"] = len(clusters)
+        cluster_works: list[ClusterWork] = []
+        for cluster in clusters:
+            for member in cluster.members:
+                member.proposal.target_id = cluster.id
+            contact_sheet = write_cluster_contact_sheet(
+                cluster,
+                run_id=run.id,
+                paths=self.paths,
+                cell_size=self.config.visual_fingerprint.contact_sheet_cell_size,
+            )
+            cluster_works.append(
+                ClusterWork(cluster=cluster, contact_sheet=contact_sheet)
+            )
+        self._emit(
+            event="dinov3_clustering_completed",
+            stage="clustering",
+            status="completed",
+            current=len(clusters),
+            total=len(clusters),
+            message=f"DINOv3 formed {len(clusters)} candidate clusters",
+            data={
+                "clusters": [cluster_work.as_dict() for cluster_work in cluster_works]
+            },
+            overall_percent=75.0,
+        )
+        return cluster_works
+
+    def _run_qwen_stage(
+        self,
+        run: Run,
+        cluster_works: list[ClusterWork],
+        image_works: Sequence[ImageWork],
+        errors: list[str],
+    ) -> None:
+        if not cluster_works:
+            return
+        batch_size = self.config.mllm_pipeline.max_clusters_per_batch
+        total_batches = math.ceil(len(cluster_works) / batch_size)
+        self._emit(
+            event="cluster_review_started",
+            stage="cluster_review",
+            status="running",
+            current=0,
+            total=total_batches,
+            message="Qwen cluster review started",
+            data={"cluster_count": len(cluster_works)},
+            overall_percent=75.0,
+        )
+        try:
+            self.mllm_runtime.load()
+            self._qwen_metrics["loaded"] = True
+        except Exception as exc:  # noqa: BLE001
+            message = f"{type(exc).__name__}: {exc}"
+            errors.append(f"Qwen load: {message}")
+            self.mllm_runtime.close()
+            self._fail_cluster_works(cluster_works, image_works, message, errors)
+            return
+
+        try:
+            for batch_index in range(total_batches):
+                start = batch_index * batch_size
+                batch = cluster_works[start : start + batch_size]
+                historical = self._historical_fingerprints()
+                for cluster_work in batch:
+                    cluster_work.historical_evidence = cluster_historical_evidence(
+                        cluster_work.cluster,
+                        historical,
+                        self.config.visual_fingerprint,
+                    )
+                evaluation, raw_path, error = self._run_qwen_batch(
+                    run,
+                    batch,
+                    batch_index=batch_index + 1,
+                )
+                if raw_path is not None:
+                    for cluster_work in batch:
+                        cluster_work.raw_response = raw_path
+                if evaluation is None or raw_path is None:
+                    message = error or "Qwen cluster review produced no usable response"
+                    remaining = cluster_works[start:]
+                    self._fail_cluster_works(
+                        remaining,
+                        image_works,
+                        message,
+                        errors,
+                    )
+                    break
+                reviews = {review.cluster_id: review for review in evaluation.reviews}
+                for cluster_work in batch:
+                    cluster_work.qwen_review = reviews[cluster_work.cluster.id]
+                    try:
+                        self._apply_cluster_review(
+                            cluster_work,
+                            image_works=image_works,
+                            raw_path=raw_path,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        message = f"{type(exc).__name__}: {exc}"
+                        cluster_work.error = message
+                        cluster_work.final_decision = "failed"
+                        self._fail_cluster_works(
+                            [cluster_work],
+                            image_works,
+                            message,
+                            errors,
+                        )
+                self._emit(
+                    event="cluster_review_batch_completed",
+                    stage="cluster_review",
+                    status="completed",
+                    current=batch_index + 1,
+                    total=total_batches,
+                    message=(
+                        f"Qwen reviewed cluster batch {batch_index + 1}/"
+                        f"{total_batches}"
+                    ),
+                    data={"clusters": [item.as_dict() for item in batch]},
+                    overall_percent=(
+                        75.0 + 20.0 * (batch_index + 1) / total_batches
+                    ),
+                )
+        finally:
+            self._peak_memory_mib["qwen"] = max(
+                self._peak_memory_mib["qwen"],
+                self.mllm_runtime.peak_memory_mib,
+            )
+            self.mllm_runtime.close()
+
+    def _run_qwen_batch(
+        self,
+        run: Run,
+        batch: Sequence[ClusterWork],
+        *,
+        batch_index: int,
+    ) -> tuple[ClusterReviewEvaluation | None, str | None, str | None]:
+        cards = self.loop.object_cards()
+        recorder = RecordingPredictor(self.mllm_runtime)
+        evaluation: ClusterReviewEvaluation | None = None
+        call_error: str | None = None
+        try:
+            inputs = [
+                ClusterReviewInput(
+                    cluster=item.cluster,
+                    contact_sheet_path=self.paths.resolve_asset(item.contact_sheet),
+                    historical_evidence=(
+                        item.historical_evidence
+                        if item.historical_evidence is not None
+                        else VisualEvidence(result=VisualMatchType.NO_MATCH)
+                    ),
+                )
+                for item in batch
+            ]
+            evaluation = evaluate_cluster_reviews(
                 recorder,
-                image=SceneImageInput(work.source.id, source_asset),
+                inputs=inputs,
                 cards=cards,
                 settings=self.config.mllm_pipeline,
             )
-        except Exception as exc:  # noqa: BLE001 - one call, failure is evidence
+        except Exception as exc:  # noqa: BLE001
             call_error = f"{type(exc).__name__}: {exc}"
+
         self._qwen_metrics["calls"] += recorder.attempted_calls
         self._qwen_metrics["input_tokens"] += sum(
             prediction.input_tokens for prediction in recorder.predictions
@@ -666,22 +793,30 @@ class ObjectMemoryPipeline:
         self._qwen_metrics["inference_seconds"] += sum(
             prediction.inference_seconds for prediction in recorder.predictions
         )
+
         raw_path: str | None = None
         try:
-            path = self.paths.raw_response_dir(run.id, work.source.id) / "response.json"
+            scope_id = f"cluster_batch_{batch_index:04d}"
+            path = self.paths.raw_response_dir(run.id, scope_id) / "response.json"
             payload = {
-                "stage": "single_qwen_object_memory",
+                "stage": "cluster_semantic_review",
                 "prompt_version": self.config.mllm_pipeline.prompt_version,
-                "source_id": work.source.id,
+                "batch_id": scope_id,
+                "cluster_ids": [item.cluster.id for item in batch],
                 "memory_context": {
                     "object_card_count": len(cards),
                     "object_card_ids": [card.object_id for card in cards],
                     "selection": "all_active_text_summaries",
-                    "historical_images_supplied": False,
                 },
+                "cluster_inputs": [item.as_dict() for item in batch],
                 "error": call_error,
                 "response": (
-                    evaluation.response.model_dump(mode="json")
+                    {
+                        "reviews": [
+                            review.model_dump(mode="json")
+                            for review in evaluation.reviews
+                        ]
+                    }
                     if evaluation is not None
                     else None
                 ),
@@ -697,94 +832,233 @@ class ObjectMemoryPipeline:
             }
             write_json_atomic(path, payload)
             raw_path = self.paths.relative_asset(path)
-        except Exception as exc:  # noqa: BLE001 - raw evidence is mandatory
+        except Exception as exc:  # noqa: BLE001
             call_error = f"raw response persistence failed: {type(exc).__name__}: {exc}"
             evaluation = None
-        work.qwen = {
-            "calls": recorder.attempted_calls,
-            "object_card_count": len(cards),
-            "object_card_ids": [card.object_id for card in cards],
-            "raw_response": raw_path,
-            "response": (
-                evaluation.response.model_dump(mode="json")
-                if evaluation is not None
-                else None
-            ),
-            "error": call_error,
-        }
-        if evaluation is None:
-            message = call_error or "Qwen produced no usable single-pass response"
-            self._fail_source(work, message, errors)
-        return evaluation, raw_path
+        return evaluation, raw_path, call_error
 
-    def _process_proposal(
+    def _apply_cluster_review(
         self,
-        proposal: Proposal,
-        target: SceneTarget | None,
+        cluster_work: ClusterWork,
         *,
-        historical: Sequence[HistoricalFingerprint],
+        image_works: Sequence[ImageWork],
         raw_path: str,
-    ) -> dict[str, Any]:
-        if not proposal.crop_path or not proposal.mask_path:
-            raise ValueError("Kept proposal has no crop or mask asset")
-        fingerprint_data = self.dino_runtime.extract(
-            crop_path=self.paths.resolve_asset(proposal.crop_path),
-            mask_path=self.paths.resolve_asset(proposal.mask_path),
-            bbox=proposal.bbox,
-            crop_padding_pixels=self.config.sam3_pipeline.crop_padding_pixels,
+    ) -> None:
+        review = cluster_work.qwen_review
+        evidence = cluster_work.historical_evidence
+        if review is None or evidence is None:
+            raise ValueError("Cluster review and visual evidence are required")
+        proposals = [member.proposal for member in cluster_work.cluster.members]
+        if review.verdict is ClusterVerdict.IGNORE:
+            self.loop.record_filtered_cluster(
+                proposals,
+                cluster_id=cluster_work.cluster.id,
+                reason=review.short_reason,
+            )
+            cluster_work.final_decision = "ignored"
+            self._record_cluster_results(
+                cluster_work,
+                image_works,
+                proposal_results=None,
+            )
+            return
+
+        decision_type, reason_code, short_reason = self._resolve_cluster_identity(
+            review,
+            evidence,
         )
-        fingerprint_path = self.paths.resolve_asset(proposal.crop_path).parent / "fingerprint.npz"
-        fingerprint = write_fingerprint(
-            fingerprint_path,
-            fingerprint_data,
-            relative_path=self.paths.relative_asset(fingerprint_path),
-            model_id=self.config.models.dinov3_model_id,
-            revision=self.config.models.dinov3_revision,
-            feature_layer=self.dino_runtime.feature_layer,
-            input_size=self.config.visual_fingerprint.input_size,
-            storage_dtype=self.config.visual_fingerprint.storage_dtype,
-        )
-        proposal.fingerprint = fingerprint
-        visual = match_fingerprint(
-            fingerprint_data,
-            historical,
-            self.config.visual_fingerprint,
-        )
-        result = (
-            decide_identity(target, visual)
-            if target is not None
-            else unmatched_proposal_decision(visual)
-        )
-        write_result = self.loop.apply_decision(
-            proposal=proposal,
-            result=result,
-            fingerprint=fingerprint,
+        write_result = self.loop.apply_cluster_decision(
+            proposals=proposals,
+            review=review,
+            decision_type=decision_type,
+            visual_evidence=evidence,
             prompt_version=self.config.mllm_pipeline.prompt_version,
             raw_response_path=raw_path,
+            reason_code=reason_code,
+            short_reason=short_reason,
         )
-        self._dino_metrics["fingerprints"] += 1
-        self._dino_metrics["inference_seconds"] += float(
-            getattr(self.dino_runtime, "last_inference_seconds", 0.0)
+        cluster_work.final_decision = decision_type.value
+        cluster_work.object_id = write_result.object_id
+        self._record_cluster_results(
+            cluster_work,
+            image_works,
+            proposal_results=write_result.proposal_results,
         )
-        return {
-            "proposal_id": proposal.id,
-            "target_id": target.target_id if target else None,
-            "target_object_name_zh": target.object_name_zh if target else None,
-            "sam_text_prompt": proposal.prompt,
-            "status": write_result.proposal_status.value,
-            "decision": write_result.decision.value,
-            "object_id": write_result.object_id,
-            "qwen_identity_hypothesis": result.qwen_hypothesis.value,
-            "qwen_matched_object_id": result.qwen_matched_object_id,
-            "visual_evidence": result.visual_evidence.model_dump(mode="json"),
-            "confidence": result.confidence,
-            "reason_code": result.reason_code.value,
-            "short_reason": result.short_reason,
-            "fingerprint": fingerprint.model_dump(mode="json"),
-            "candidate": self._candidate_report(proposal),
-            "raw_response": raw_path,
-            "errors": [],
+
+    @staticmethod
+    def _resolve_cluster_identity(
+        review: ClusterReview,
+        evidence: VisualEvidence,
+    ) -> tuple[DecisionType, DecisionReasonCode, str]:
+        if review.verdict is ClusterVerdict.UNCERTAIN:
+            return (
+                DecisionType.UNCERTAIN,
+                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+                "Qwen无法确认该视觉聚类是否为一个完整且一致的物体。",
+            )
+        if evidence.result is VisualMatchType.AMBIGUOUS:
+            return (
+                DecisionType.UNCERTAIN,
+                DecisionReasonCode.AMBIGUOUS_MATCH,
+                "聚类对历史对象的第一、第二视觉匹配不足以安全区分。",
+            )
+        if review.identity_hypothesis is IdentityHypothesis.NEW:
+            if evidence.result is VisualMatchType.NO_MATCH:
+                return (
+                    DecisionType.NEW,
+                    DecisionReasonCode.NEW_OBJECT,
+                    "Qwen确认其为完整对象，且DINOv3未匹配已有对象。",
+                )
+            return (
+                DecisionType.UNCERTAIN,
+                DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+                "Qwen判断为新对象，但DINOv3聚类证据匹配已有对象。",
+            )
+        if (
+            review.identity_hypothesis is IdentityHypothesis.EXISTING
+            and evidence.result is VisualMatchType.MATCH
+            and evidence.matched_object_id == review.matched_object_id
+        ):
+            return (
+                DecisionType.EXISTING,
+                DecisionReasonCode.VISUAL_INSTANCE_MATCH,
+                "Qwen对象判断与DINOv3历史视角匹配一致。",
+            )
+        return (
+            DecisionType.UNCERTAIN,
+            DecisionReasonCode.INSUFFICIENT_EVIDENCE,
+            "Qwen已有对象判断未得到同一DINOv3对象匹配支持。",
+        )
+
+    def _record_cluster_results(
+        self,
+        cluster_work: ClusterWork,
+        image_works: Sequence[ImageWork],
+        *,
+        proposal_results: Sequence[Any] | None,
+    ) -> None:
+        work_by_source = {
+            work.source.id: work
+            for work in image_works
+            if work.source is not None
         }
+        result_by_proposal = {
+            result.proposal_id: result for result in (proposal_results or [])
+        }
+        review = cluster_work.qwen_review
+        evidence = cluster_work.historical_evidence
+        for member in cluster_work.cluster.members:
+            proposal = member.proposal
+            work = work_by_source[proposal.source_image_id]
+            if cluster_work.cluster.id not in work.cluster_ids:
+                work.cluster_ids.append(cluster_work.cluster.id)
+            result = result_by_proposal.get(proposal.id)
+            work.decisions.append(
+                {
+                    "proposal_id": proposal.id,
+                    "cluster_id": cluster_work.cluster.id,
+                    "status": proposal.status.value,
+                    "decision": (
+                        result.decision.value
+                        if result is not None
+                        else cluster_work.final_decision
+                    ),
+                    "object_id": (
+                        result.object_id if result is not None else None
+                    ),
+                    "qwen_cluster_verdict": (
+                        review.verdict.value if review is not None else None
+                    ),
+                    "qwen_identity_hypothesis": (
+                        review.identity_hypothesis.value
+                        if review is not None
+                        else None
+                    ),
+                    "qwen_matched_object_id": (
+                        review.matched_object_id if review is not None else None
+                    ),
+                    "visual_evidence": (
+                        evidence.model_dump(mode="json")
+                        if evidence is not None
+                        else None
+                    ),
+                    "fingerprint": (
+                        proposal.fingerprint.model_dump(mode="json")
+                        if proposal.fingerprint is not None
+                        else None
+                    ),
+                    "candidate": self._candidate_report(proposal),
+                    "raw_response": cluster_work.raw_response,
+                    "errors": [],
+                }
+            )
+
+    def _historical_fingerprints(self) -> list[HistoricalFingerprint]:
+        return [
+            HistoricalFingerprint(
+                object_id=record.object_id,
+                observation_id=record.observation_id,
+                data=read_fingerprint(
+                    self.paths.resolve_asset(record.path),
+                    expected_sha256=record.sha256,
+                ),
+            )
+            for record in self.loop.fingerprint_records()
+        ]
+
+    def _fail_cluster_works(
+        self,
+        cluster_works: Sequence[ClusterWork],
+        image_works: Sequence[ImageWork],
+        message: str,
+        errors: list[str],
+    ) -> None:
+        work_by_source = {
+            work.source.id: work
+            for work in image_works
+            if work.source is not None
+        }
+        for cluster_work in cluster_works:
+            cluster_work.error = cluster_work.error or message
+            cluster_work.final_decision = "failed"
+            for member in cluster_work.cluster.members:
+                proposal = member.proposal
+                if proposal.status is not ProposalStatus.PENDING:
+                    continue
+                work = work_by_source[proposal.source_image_id]
+                self._record_proposal_failure(proposal, message, work, errors)
+        errors.append(f"cluster review: {message}")
+
+    def _finalize_sources(
+        self,
+        works: Sequence[ImageWork],
+        errors: list[str],
+    ) -> None:
+        for work in works:
+            if work.status != "registered" or work.source is None:
+                continue
+            pending = [
+                proposal
+                for proposal in work.kept
+                if proposal.status is ProposalStatus.PENDING
+            ]
+            if pending:
+                message = "Source contains proposals without a terminal cluster result"
+                for proposal in pending:
+                    self._record_proposal_failure(proposal, message, work, errors)
+                self._fail_source(work, message, errors)
+                continue
+            if any(
+                proposal.status is ProposalStatus.FAILED
+                for proposal in work.kept
+            ):
+                self._fail_source(
+                    work,
+                    "Source contains failed cluster proposals",
+                    errors,
+                )
+                continue
+            self._complete_source(work, errors)
 
     def _register_image(
         self,
@@ -839,6 +1113,8 @@ class ObjectMemoryPipeline:
         work: ImageWork,
         errors: list[str],
     ) -> None:
+        if proposal.status is not ProposalStatus.PENDING:
+            return
         try:
             self.loop.record_proposal_failure(proposal, message)
         except Exception as exc:  # noqa: BLE001
@@ -846,7 +1122,7 @@ class ObjectMemoryPipeline:
         work.decisions.append(
             {
                 "proposal_id": proposal.id,
-                "target_id": proposal.target_id,
+                "cluster_id": proposal.target_id,
                 "status": "failed",
                 "decision": None,
                 "candidate": self._candidate_report(proposal),
@@ -882,92 +1158,49 @@ class ObjectMemoryPipeline:
                 errors.append(f"fail source {work.source.id}: {exc}")
         work.status = "failed"
 
-    def _close_models(self) -> None:
-        for runtime in (self.dino_runtime, self.sam_runtime, self.mllm_runtime):
-            try:
-                runtime.close()
-            except Exception:
-                pass
-
-    def _capture_peak_memory(self) -> None:
-        qwen_peak = self.mllm_runtime.peak_memory_mib
-        sam_peak = self.sam_runtime.peak_memory_mib
-        dino_peak = self.dino_runtime.peak_memory_mib
-        self._peak_memory_mib = {
-            "qwen": max(self._peak_memory_mib["qwen"], qwen_peak),
-            "sam3": max(self._peak_memory_mib["sam3"], sam_peak),
-            "dinov3": max(self._peak_memory_mib["dinov3"], dino_peak),
-            "joint": max(
-                self._peak_memory_mib["joint"], qwen_peak, sam_peak, dino_peak
-            ),
-        }
-
-    def _combined_peak_memory(self) -> float:
-        return max(
-            self._peak_memory_mib["joint"],
-            self.mllm_runtime.peak_memory_mib,
-            self.sam_runtime.peak_memory_mib,
-            self.dino_runtime.peak_memory_mib,
-        )
-
-    @staticmethod
-    def _image_progress(*, index: int, total: int, fraction: float) -> float:
-        if total <= 0 or index < 1 or index > total:
-            raise ValueError("Image progress requires one valid 1-based index")
-        if not 0.0 <= fraction <= 1.0:
-            raise ValueError("Image progress fraction must be between 0 and 1")
-        span = 85.0 / total
-        return 10.0 + span * ((index - 1) + fraction)
-
     def _build_report(
         self,
         run: Run,
         works: Sequence[ImageWork],
+        cluster_works: Sequence[ClusterWork],
         summary: RunSummary,
         checks: dict[str, bool],
         status: str,
         errors: list[str],
     ) -> dict[str, Any]:
-        visual_scores = [
-            decision["visual_evidence"].get("visual_score")
-            for work in works
-            for decision in work.decisions
-            if isinstance(decision.get("visual_evidence"), dict)
-            and decision["visual_evidence"].get("visual_score") is not None
-        ]
-        visual_result_counts = {result: 0 for result in ("match", "no_match", "ambiguous")}
-        for work in works:
-            for decision in work.decisions:
-                evidence = decision.get("visual_evidence")
-                if not isinstance(evidence, dict):
-                    continue
-                result = evidence.get("result")
-                if result in visual_result_counts:
-                    visual_result_counts[result] += 1
+        final_cluster_counts: dict[str, int] = {}
+        for cluster_work in cluster_works:
+            key = cluster_work.final_decision or "pending"
+            final_cluster_counts[key] = final_cluster_counts.get(key, 0) + 1
         return {
-            "schema_version": 7,
+            "schema_version": 8,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "test": "object_memory_demo_single_pass_dinov3",
+            "test": "object_memory_demo_sam_grid_dino_cluster_review",
             "status": status,
             "run": summary.as_dict(),
             "checks": checks,
             "strategy": {
-                "workflow": "per_image_qwen_sam3_dinov3_commit",
-                "qwen_call_policy": "exactly one call per unique new source image",
-                "qwen_memory_context": "all active object text summaries only",
+                "workflow": "sam3_point_grid_dinov3_cluster_qwen_review",
+                "sam_candidate_source": (
+                    f"automatic {self.config.sam3_pipeline.points_per_side}x"
+                    f"{self.config.sam3_pipeline.points_per_side} positive point grid"
+                ),
+                "script_filtering": "score, area, IoU, containment, per-image cap",
+                "candidate_clustering": "DINOv3 CLS cosine across different sources",
+                "same_source_cluster_merge": False,
+                "qwen_call_policy": "one call per cluster batch",
+                "qwen_input": "cluster contact sheets plus active text summaries",
                 "second_qwen_stage": False,
-                "sam_prompt_deduplication": True,
-                "target_proposal_association": "same prompt plus normalized bbox IoU",
-                "automatic_identity_assets": "DINOv3 fingerprints only",
-                "uncertain_policy": "terminal; no retry or second Qwen call",
-                "object_text_policy": "one iterated structured summary per object",
+                "object_text_policy": "one cluster-level structured summary per object",
                 "prompt_version": self.config.mllm_pipeline.prompt_version,
             },
             "models": {
                 "qwen": {
                     **self._qwen_metrics,
                     "model_id": self.config.models.qwen_model_id,
-                    "model_load_seconds": round(self.mllm_runtime.model_load_seconds, 3),
+                    "model_load_seconds": round(
+                        self.mllm_runtime.model_load_seconds, 3
+                    ),
                     "peak_memory_mib": round(self._peak_memory_mib["qwen"], 2),
                     "placement": self.mllm_runtime.model_placement,
                     "snapshot": self.mllm_runtime.resolved_snapshot,
@@ -975,8 +1208,14 @@ class ObjectMemoryPipeline:
                 "sam3": {
                     **self._sam_metrics,
                     "checkpoint": str(self.config.models.sam3_checkpoint),
-                    "confidence_threshold": self.config.sam3_pipeline.confidence_threshold,
-                    "model_load_seconds": round(self.sam_runtime.model_load_seconds, 3),
+                    "points_per_side": self.config.sam3_pipeline.points_per_side,
+                    "points_per_batch": self.config.sam3_pipeline.points_per_batch,
+                    "confidence_threshold": (
+                        self.config.sam3_pipeline.confidence_threshold
+                    ),
+                    "model_load_seconds": round(
+                        self.sam_runtime.model_load_seconds, 3
+                    ),
                     "peak_memory_mib": round(self._peak_memory_mib["sam3"], 2),
                 },
                 "dinov3": {
@@ -986,25 +1225,23 @@ class ObjectMemoryPipeline:
                     "model_path": str(self.config.models.dinov3_model_path),
                     "feature_layer": self.dino_runtime.feature_layer,
                     "input_size": self.config.visual_fingerprint.input_size,
-                    "model_load_seconds": round(self.dino_runtime.model_load_seconds, 3),
+                    "model_load_seconds": round(
+                        self.dino_runtime.model_load_seconds, 3
+                    ),
                     "peak_memory_mib": round(self._peak_memory_mib["dinov3"], 2),
                     "placement": self.dino_runtime.model_placement,
-                    "visual_score_count": len(visual_scores),
-                    "visual_score_min": min(visual_scores) if visual_scores else None,
-                    "visual_score_max": max(visual_scores) if visual_scores else None,
-                    "visual_score_mean": (
-                        sum(visual_scores) / len(visual_scores)
-                        if visual_scores
-                        else None
-                    ),
-                    "result_counts": visual_result_counts,
                 },
-                "joint_peak_memory_mib": round(self._combined_peak_memory(), 2),
+                "execution_peak_memory_mib": round(
+                    max(self._peak_memory_mib.values()), 2
+                ),
+                "residency_policy": "sequential SAM3 then DINOv3 then Qwen",
             },
             "visual_fingerprint_config": self.config.visual_fingerprint.model_dump(
                 mode="json"
             ),
             "images": [work.as_dict() for work in works],
+            "clusters": [cluster_work.as_dict() for cluster_work in cluster_works],
+            "cluster_counts": final_cluster_counts,
             "external_errors": errors,
             "core_counts": self.store.status().counts,
         }
@@ -1013,7 +1250,7 @@ class ObjectMemoryPipeline:
     def _candidate_report(proposal: Proposal) -> dict[str, Any]:
         return {
             "raw_candidate_id": proposal.raw_candidate_id,
-            "sam_text_prompt": proposal.prompt,
+            "candidate_source": proposal.prompt,
             "score": proposal.score,
             "bbox": proposal.bbox.model_dump(mode="json"),
             "mask_area_ratio": proposal.mask_area_ratio,
@@ -1024,44 +1261,40 @@ class ObjectMemoryPipeline:
 
     def _build_checks(
         self,
-        works: Sequence[ImageWork], summary: RunSummary
+        works: Sequence[ImageWork],
+        cluster_works: Sequence[ClusterWork],
+        summary: RunSummary,
     ) -> dict[str, bool]:
-        processed = [work for work in works if not work.duplicate and work.source]
-        successful = [work for work in processed if work.status == "completed"]
-        decided = [
-            decision
-            for work in works
-            for decision in work.decisions
-            if decision.get("status") == "decided"
-        ]
-
-        def fingerprint_asset_is_valid(decision: dict[str, Any]) -> bool:
-            fingerprint = decision.get("fingerprint")
-            if not isinstance(fingerprint, dict):
-                return False
-            path = fingerprint.get("path")
-            expected_hash = fingerprint.get("sha256")
-            if not isinstance(path, str) or not isinstance(expected_hash, str):
-                return False
-            asset = self.paths.resolve_asset(path)
-            return asset.is_file() and sha256_file(asset) == expected_hash
-
+        decided_or_filtered = {
+            ProposalStatus.DECIDED,
+            ProposalStatus.FILTERED,
+            ProposalStatus.FAILED,
+        }
         return {
             "input_images_nonempty": bool(works),
             "every_input_accounted_for": all(
                 work.duplicate or work.status in {"completed", "failed"}
                 for work in works
             ),
-            "single_qwen_call_per_completed_source": all(
-                work.qwen is not None and work.qwen.get("calls") == 1
-                for work in successful
+            "automatic_candidate_source_recorded": all(
+                proposal.prompt == "automatic_point_grid"
+                for work in works
+                for proposal in (*work.kept, *work.filtered)
             ),
-            "second_qwen_stage_absent": True,
-            "every_decided_proposal_has_fingerprint": all(
-                bool(decision.get("fingerprint")) for decision in decided
+            "every_kept_proposal_has_fingerprint_or_failure": all(
+                proposal.fingerprint is not None
+                or proposal.status is ProposalStatus.FAILED
+                for work in works
+                for proposal in work.kept
             ),
-            "fingerprint_assets_exist_and_match_hashes": all(
-                fingerprint_asset_is_valid(decision) for decision in decided
+            "every_candidate_has_terminal_status": all(
+                proposal.status in decided_or_filtered
+                for work in works
+                for proposal in work.kept
+            ),
+            "every_cluster_has_qwen_result_or_failure": all(
+                cluster_work.final_decision is not None
+                for cluster_work in cluster_works
             ),
             "no_source_left_processing": summary.source_counts["processing"] == 0,
             "no_pending_proposals": summary.proposal_counts["pending"] == 0,
@@ -1073,8 +1306,11 @@ class ObjectMemoryPipeline:
         works: Sequence[ImageWork],
         original_error: BaseException,
     ) -> None:
-        self._capture_peak_memory()
-        self._close_models()
+        for runtime in (self.mllm_runtime, self.dino_runtime, self.sam_runtime):
+            try:
+                runtime.close()
+            except Exception:
+                pass
         message = f"{type(original_error).__name__}: {original_error}"
         cleanup_errors: list[str] = []
         for work in works:
@@ -1094,6 +1330,11 @@ class ObjectMemoryPipeline:
                 original_error.add_note("Cleanup also failed: " + "; ".join(cleanup_errors))
             except BaseException:
                 pass
+
+    @staticmethod
+    def _new_run_id() -> str:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        return f"run_{timestamp}"
 
     def _emit(
         self,
@@ -1118,8 +1359,3 @@ class ObjectMemoryPipeline:
                 data=data,
                 overall_percent=overall_percent,
             )
-
-    @staticmethod
-    def _new_run_id() -> str:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        return f"run_{timestamp}"

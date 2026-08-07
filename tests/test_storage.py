@@ -21,23 +21,23 @@ from object_memory.memory_store import (
     MemoryStoreError,
 )
 from object_memory.schemas import (
-    CurrentViewFacts,
+    ClusterReview,
+    ClusterVerdict,
     IdentityHypothesis,
-    NormalizedBoundingBox,
     ObjectSummary,
     PartAppearance,
-    SceneTarget,
 )
 
 
 class ConfigTests(unittest.TestCase):
     def test_default_config_is_valid(self) -> None:
         config = load_config(DEFAULT_CONFIG_PATH)
-        self.assertEqual(config.schema_version, 4)
-        self.assertEqual(config.mllm_pipeline.scene_batch_size, 1)
+        self.assertEqual(config.schema_version, 5)
+        self.assertEqual(config.sam3_pipeline.points_per_side, 16)
+        self.assertEqual(config.mllm_pipeline.max_clusters_per_batch, 8)
         self.assertEqual(
             config.mllm_pipeline.prompt_version,
-            "object-memory-single-pass-v1",
+            "object-memory-cluster-review-v1",
         )
         self.assertEqual(
             config.models.dinov3_model_id,
@@ -52,10 +52,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.sam3_pipeline.overlay_alpha, 0.0)
         self.assertEqual(len(config_digest(config)), 64)
 
-    def test_scene_target_count_cannot_exceed_candidate_capacity(self) -> None:
+    def test_cluster_representative_count_has_a_small_upper_bound(self) -> None:
         payload = load_config(DEFAULT_CONFIG_PATH).model_dump(mode="python")
-        payload["mllm_pipeline"]["max_scene_targets_per_image"] = 13
-        payload["sam3_pipeline"]["max_candidates_per_image"] = 12
+        payload["visual_fingerprint"]["max_cluster_representatives"] = 9
         with self.assertRaises(ValidationError):
             AppConfig.model_validate(payload)
 
@@ -67,7 +66,7 @@ class ConfigTests(unittest.TestCase):
 
 
 class SchemaTests(unittest.TestCase):
-    def test_part_aware_summary_and_existing_hypothesis_validate(self) -> None:
+    def test_part_aware_summary_and_existing_cluster_validate(self) -> None:
         summary = ObjectSummary(
             object_name_zh="人体工学鼠标",
             coarse_category="电子设备",
@@ -78,20 +77,15 @@ class SchemaTests(unittest.TestCase):
             part_appearance=[],
             summary_confidence=0.9,
         )
-        target = SceneTarget(
-            target_id="target_1",
-            object_name_zh="人体工学鼠标",
-            sam_text_prompt="computer mouse",
-            current_view_facts=CurrentViewFacts(category="鼠标"),
+        review = ClusterReview(
+            cluster_id="clu_mouse",
+            verdict=ClusterVerdict.OBJECT,
             identity_hypothesis=IdentityHypothesis.EXISTING,
             matched_object_id="obj_1",
-            identity_short_reason="轮廓一致",
-            proposed_object_summary=summary,
-            temporary_target_anchor=NormalizedBoundingBox(
-                x_min=0.1, y_min=0.1, x_max=0.8, y_max=0.9
-            ),
+            short_reason="轮廓一致",
+            object_summary=summary,
         )
-        self.assertEqual(target.matched_object_id, "obj_1")
+        self.assertEqual(review.matched_object_id, "obj_1")
 
     def test_existing_hypothesis_requires_object_id(self) -> None:
         summary = ObjectSummary(
@@ -102,17 +96,12 @@ class SchemaTests(unittest.TestCase):
             summary_confidence=0.5,
         )
         with self.assertRaises(ValidationError):
-            SceneTarget(
-                target_id="target_1",
-                object_name_zh="鼠标",
-                sam_text_prompt="computer mouse",
-                current_view_facts=CurrentViewFacts(category="鼠标"),
+            ClusterReview(
+                cluster_id="clu_mouse",
+                verdict=ClusterVerdict.OBJECT,
                 identity_hypothesis=IdentityHypothesis.EXISTING,
-                identity_short_reason="不完整",
-                proposed_object_summary=summary,
-                temporary_target_anchor=NormalizedBoundingBox(
-                    x_min=0.1, y_min=0.1, x_max=0.8, y_max=0.9
-                ),
+                short_reason="不完整",
+                object_summary=summary,
             )
 
     def test_object_summary_rejects_duplicate_part_labels(self) -> None:

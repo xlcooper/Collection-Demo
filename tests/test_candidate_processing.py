@@ -203,7 +203,7 @@ class CandidatePostprocessTests(unittest.TestCase):
             0.0,
         )
 
-    def test_candidate_limit_reserves_one_mask_per_text_prompt(self) -> None:
+    def test_candidate_limit_keeps_the_highest_scoring_survivors(self) -> None:
         image = Image.new("RGB", (60, 60), (220, 220, 220))
         masks: list[np.ndarray] = []
         for left, top in ((2, 2), (22, 2), (42, 42)):
@@ -223,16 +223,19 @@ class CandidatePostprocessTests(unittest.TestCase):
                 source_image_id="src_prompt_fairness",
                 run_id="run_prompt_fairness",
                 paths=MemoryPaths(Path(temporary_directory) / "assets"),
-                settings=Sam3PipelineConfig(max_candidates_per_image=2),
+                settings=Sam3PipelineConfig(
+                    confidence_threshold=0.5,
+                    max_candidates_per_image=2,
+                ),
             )
 
         self.assertEqual(
-            {proposal.prompt for proposal in result.kept},
-            {"coffee cup", "computer mouse"},
+            [proposal.raw_candidate_id for proposal in result.kept],
+            ["cup_one", "cup_two"],
         )
         self.assertEqual(result.filter_counts["candidate_limit"], 1)
 
-    def test_containment_does_not_remove_a_different_text_concept(self) -> None:
+    def test_containment_removes_redundant_inner_point_candidate(self) -> None:
         image = Image.new("RGB", (40, 40), (220, 220, 220))
         outer = np.zeros((40, 40), dtype=bool)
         outer[5:30, 5:30] = True
@@ -242,8 +245,8 @@ class CandidatePostprocessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             result = process_candidates(
                 [
-                    candidate("cup", "coffee cup", 0.98, outer, (5, 5, 30, 30)),
-                    candidate("spoon", "metal spoon", 0.95, inner, (12, 12, 20, 20)),
+                    candidate("outer", "automatic_point_grid", 0.98, outer, (5, 5, 30, 30)),
+                    candidate("inner", "automatic_point_grid", 0.95, inner, (12, 12, 20, 20)),
                 ],
                 image=image,
                 source_image_id="src_cross_prompt_containment",
@@ -252,10 +255,10 @@ class CandidatePostprocessTests(unittest.TestCase):
                 settings=Sam3PipelineConfig(),
             )
 
-        self.assertEqual(len(result.kept), 2)
-        self.assertNotIn("contained_mask", result.filter_counts)
+        self.assertEqual(len(result.kept), 1)
+        self.assertEqual(result.filter_counts["contained_mask"], 1)
 
-    def test_identical_masks_are_deduplicated_across_text_concepts(self) -> None:
+    def test_identical_point_candidates_are_deduplicated(self) -> None:
         image = Image.new("RGB", (40, 40), (220, 220, 220))
         shared_mask = np.zeros((40, 40), dtype=bool)
         shared_mask[5:25, 5:25] = True
@@ -265,14 +268,14 @@ class CandidatePostprocessTests(unittest.TestCase):
                 [
                     candidate(
                         "cup",
-                        "coffee cup",
+                        "automatic_point_grid",
                         0.98,
                         shared_mask,
                         (5, 5, 25, 25),
                     ),
                     candidate(
                         "container",
-                        "drink container",
+                        "automatic_point_grid",
                         0.95,
                         shared_mask.copy(),
                         (5, 5, 25, 25),
@@ -286,10 +289,10 @@ class CandidatePostprocessTests(unittest.TestCase):
             )
 
         self.assertEqual(len(result.kept), 1)
-        self.assertEqual(result.kept[0].prompt, "coffee cup")
+        self.assertEqual(result.kept[0].prompt, "automatic_point_grid")
         self.assertEqual(result.filter_counts["duplicate_mask"], 1)
 
-    def test_text_guided_candidates_filter_large_regions_and_apply_limit(self) -> None:
+    def test_automatic_candidates_filter_large_regions_and_apply_limit(self) -> None:
         image = Image.new("RGB", (20, 20), (220, 220, 220))
         large_mask = np.ones((20, 20), dtype=bool)
         first_mask = np.zeros((20, 20), dtype=bool)

@@ -14,14 +14,14 @@ class WebStaticContractTests(unittest.TestCase):
         self.javascript = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
         self.stylesheet = (STATIC_ROOT / "app.css").read_text(encoding="utf-8")
 
-    def test_page_explains_the_single_pass_three_model_workflow(self) -> None:
+    def test_page_explains_the_automatic_cluster_workflow(self) -> None:
         for expected in (
             "Collection Demo",
             "Qwen3-VL-8B-Instruct-FP8",
-            "SAM3 0.1.0 · BF16 · 文本阈值 0.4",
+            "SAM3 0.1.0 · BF16 · 16×16 自动点网格",
             "DINOv3 ViT-B/16 · CLS + mask 内 patch",
-            "三模型联合驻留",
-            "视觉身份决策",
+            "SAM → DINO → Qwen 顺序驻留",
+            "语义审查",
             "SQLite · 对象与观测",
             "运行完整实验",
         ):
@@ -29,9 +29,9 @@ class WebStaticContractTests(unittest.TestCase):
 
         for stage in (
             "input",
-            "scene_guidance",
             "sam3",
-            "candidate_reasoning",
+            "clustering",
+            "cluster_review",
             "memory",
             "report",
         ):
@@ -63,12 +63,13 @@ class WebStaticContractTests(unittest.TestCase):
         self.assertNotIn("localStorage", self.javascript)
         self.assertNotIn("sessionStorage", self.javascript)
 
-    def test_intermediate_images_are_keyed_by_input_path(self) -> None:
+    def test_intermediate_images_merge_input_and_source_aliases(self) -> None:
         self.assertIn(
             'const inputPath = String(image?.input_path || "")',
             self.javascript,
         )
-        self.assertIn('if (inputPath) return `input:${inputPath}`;', self.javascript)
+        self.assertIn('inputPath ? `input:${inputPath}` : ""', self.javascript)
+        self.assertIn("const aliases = new Map();", self.javascript)
         self.assertIn("const direct = data.input_path || data.source_id", self.javascript)
         self.assertIn(".concat(array(image.filtered_proposals))", self.javascript)
 
@@ -119,14 +120,14 @@ class WebStaticContractTests(unittest.TestCase):
             )
         ]
         for expected in (
-            "1 · Qwen 文字身份假设",
-            "2 · DINOv3 视觉证据",
-            "3 · 最终决定",
-            "decision.qwen_identity_hypothesis",
-            "decision.visual_evidence",
+            "1 · DINOv3 聚类依据",
+            "2 · 历史对象匹配",
+            "3 · Qwen语义判断与最终决定",
+            "cluster.qwen_review",
+            "cluster.historical_visual_evidence",
             "visual.global_similarity",
             "visual.local_match_ratio",
-            "decision.decision",
+            "cluster.final_decision",
         ):
             self.assertIn(expected, reasoning)
 
@@ -144,9 +145,9 @@ class WebStaticContractTests(unittest.TestCase):
 
     def test_lineage_table_exposes_three_stage_identity_evidence(self) -> None:
         for expected in (
-            "Qwen目标 / SAM3提示",
-            "Qwen假设",
-            "DINOv3证据",
+            "DINO聚类",
+            "Qwen聚类假设",
+            "历史DINO证据",
             "最终决定",
             "candidate.visual_evidence",
         ):

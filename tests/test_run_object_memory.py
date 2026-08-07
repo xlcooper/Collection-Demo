@@ -31,7 +31,7 @@ class DemoCoverageTests(unittest.TestCase):
     def test_startup_failure_uses_current_report_schema(self) -> None:
         report = failure_report(ValueError("bad configuration"))
 
-        self.assertEqual(report["schema_version"], 7)
+        self.assertEqual(report["schema_version"], 8)
         self.assertEqual(report["status"], "failed")
         self.assertNotIn("run", report)
 

@@ -117,7 +117,6 @@ def process_candidates(
                 break
             if (
                 contained_by is None
-                and candidate.raw.prompt == kept_candidate.raw.prompt
                 and candidate.proposal.mask_area_pixels
                 < kept_candidate.proposal.mask_area_pixels
                 and intersection / candidate.proposal.mask_area_pixels
@@ -138,29 +137,10 @@ def process_candidates(
             continue
         deduplicated_prepared.append(candidate)
 
-    # Reserve the best surviving mask for every requested concept before using
-    # remaining capacity by global score. This prevents a high-frequency prompt
-    # from starving another concept selected by the scene-guidance stage.
-    prompt_order = list(dict.fromkeys(candidate.prompt for candidate in candidates))
-    selected_ids: set[str] = set()
-    for prompt in prompt_order:
-        best_for_prompt = next(
-            (
-                candidate
-                for candidate in deduplicated_prepared
-                if candidate.raw.prompt == prompt
-            ),
-            None,
-        )
-        if best_for_prompt is None:
-            continue
-        if len(selected_ids) >= settings.max_candidates_per_image:
-            break
-        selected_ids.add(best_for_prompt.proposal.id)
-    for candidate in deduplicated_prepared:
-        if len(selected_ids) >= settings.max_candidates_per_image:
-            break
-        selected_ids.add(candidate.proposal.id)
+    selected_ids = {
+        candidate.proposal.id
+        for candidate in deduplicated_prepared[: settings.max_candidates_per_image]
+    }
 
     kept_prepared: list[_PreparedCandidate] = []
     for candidate in deduplicated_prepared:

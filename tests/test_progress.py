@@ -38,8 +38,8 @@ class ProgressReporterTests(unittest.TestCase):
             path = Path(temporary_directory) / "progress.jsonl"
             reporter = ProgressReporter(JsonlProgressWriter(path), run_id="run_1")
             reporter.emit(
-                event="visual_identity_started",
-                stage="candidate_reasoning",
+                event="dinov3_clustering_started",
+                stage="clustering",
                 status="running",
                 current=0,
                 total=2,
@@ -49,7 +49,7 @@ class ProgressReporterTests(unittest.TestCase):
             )
             record = json.loads(path.read_text(encoding="utf-8").strip())
         self.assertTrue(REQUIRED_EVENT_FIELDS.issubset(record))
-        self.assertEqual(record["event"], "visual_identity_started")
+        self.assertEqual(record["event"], "dinov3_clustering_started")
 
     def test_sink_failure_is_explicit(self) -> None:
         reporter = ProgressReporter(FailingSink(), run_id="run_1")
@@ -64,9 +64,9 @@ class ProgressReporterTests(unittest.TestCase):
                 data={},
             )
 
-    def test_failure_report_uses_single_pass_schema(self) -> None:
+    def test_failure_report_uses_cluster_pipeline_schema(self) -> None:
         report = failure_report(RuntimeError("boom"), run_id="run_1")
-        self.assertEqual(report["schema_version"], 7)
+        self.assertEqual(report["schema_version"], 8)
         self.assertEqual(report["run"]["run_id"], "run_1")
 
 

@@ -44,7 +44,7 @@ IMAGE_FORMATS = {
     ".png": "PNG",
     ".webp": "WEBP",
 }
-MEMORY_IMAGE_PREFIXES = frozenset({"sources", "proposals", "objects"})
+MEMORY_IMAGE_PREFIXES = frozenset({"sources", "proposals", "clusters", "objects"})
 AUDIT_JSON_PREFIXES = frozenset({"raw_responses", "run_reports"})
 ACTIVE_RUN_STATUSES = frozenset({"starting", "running"})
 PROCESS_LOG_TAIL_BYTES = 16 * 1024
@@ -1874,7 +1874,7 @@ def _object_observations(
             SELECT
                 o.*, p.crop_path, p.mask_path, p.overlay_path,
                 s.relative_path AS source_path,
-                p.prompt AS sam_text_prompt, p.score AS sam_score,
+                p.score AS sam_score,
                 d.decision, d.matched_object_id,
                 d.confidence AS decision_confidence,
                 d.reason_code, d.short_reason, d.raw_response_path,
@@ -1891,7 +1891,7 @@ def _object_observations(
         statement = """
             SELECT
                 o.*, s.relative_path AS source_path,
-                p.prompt AS sam_text_prompt, p.score AS sam_score,
+                p.score AS sam_score,
                 d.decision, d.matched_object_id,
                 d.confidence AS decision_confidence,
                 d.reason_code, d.short_reason, d.raw_response_path
@@ -2168,35 +2168,35 @@ def deterministic_result_summary(
         else {}
     )
 
-    scene_targets = 0
-    sam_prompts = 0
-    zero_prompts = 0
     raw_candidates = 0
     kept_candidates = 0
     filtered_candidates = 0
     for image in image_items:
         if not isinstance(image, dict):
             continue
-        guidance = image.get("scene_guidance")
-        if isinstance(guidance, dict):
-            targets = guidance.get("targets")
-            if isinstance(targets, list):
-                scene_targets += len(targets)
-            else:
-                target_count = guidance.get("target_count")
-                if isinstance(target_count, int):
-                    scene_targets += target_count
         sam = image.get("sam")
         if isinstance(sam, dict):
-            prompt_counts = sam.get("prompt_detection_counts")
-            if isinstance(prompt_counts, dict):
-                sam_prompts += len(prompt_counts)
-            zero = sam.get("zero_candidate_prompts")
-            if isinstance(zero, list):
-                zero_prompts += len(zero)
-            raw_candidates += int(sam.get("above_confidence_threshold_candidates") or 0)
+            raw_candidates += int(
+                sam.get("raw_candidates")
+                or sam.get("grid_points")
+                or sam.get("above_confidence_threshold_candidates")
+                or 0
+            )
             kept_candidates += int(sam.get("kept") or 0)
             filtered_candidates += int(sam.get("filtered") or 0)
+
+    clusters = report.get("clusters")
+    cluster_items = clusters if isinstance(clusters, list) else []
+    cluster_counts = (
+        report.get("cluster_counts")
+        if isinstance(report.get("cluster_counts"), dict)
+        else {}
+    )
+    reviewed_clusters = sum(
+        1
+        for cluster in cluster_items
+        if isinstance(cluster, dict) and cluster.get("qwen_review")
+    )
 
     summary_errors: list[dict[str, Any]] = []
     seen_error_messages: set[str] = set()
@@ -2255,6 +2255,12 @@ def deterministic_result_summary(
                             f"images[{image_index}].decisions[{decision_index}].errors",
                             error,
                         )
+    for cluster_index, cluster in enumerate(cluster_items):
+        if isinstance(cluster, dict):
+            append_error(
+                f"clusters[{cluster_index}].error",
+                cluster.get("error"),
+            )
     elapsed = state.get("elapsed_seconds") if isinstance(state, dict) else None
     sam_metrics = (
         report.get("models", {}).get("sam3", {})
@@ -2270,10 +2276,7 @@ def deterministic_result_summary(
         "unique_sources": sum(int(value or 0) for value in source_counts.values()),
         "duplicate_sources_skipped": int(run.get("duplicate_sources_skipped") or 0),
         "source_counts": source_counts,
-        "scene_targets": scene_targets,
-        "sam_prompts": sam_prompts,
-        "sam_zero_candidate_prompts": zero_prompts,
-        "sam_above_threshold_candidates": raw_candidates,
+        "sam_grid_raw_candidates": raw_candidates,
         "sam_kept": kept_candidates,
         "sam_filtered": filtered_candidates,
         "sam_confidence_threshold": (
@@ -2283,6 +2286,9 @@ def deterministic_result_summary(
         ),
         "proposal_counts": proposal_counts,
         "decision_counts": decision_counts,
+        "clusters": len(cluster_items),
+        "reviewed_clusters": reviewed_clusters,
+        "cluster_counts": cluster_counts,
         "observations_added": int(run.get("observations_added") or 0),
         "active_objects_total": int(run.get("active_objects_total") or 0),
         "elapsed_seconds": elapsed,
@@ -2291,7 +2297,8 @@ def deterministic_result_summary(
         "manual_review_required": True,
         "review_notice": (
             "A passed structure report does not establish semantic object-memory "
-            "accuracy; inspect targets, candidates, decisions, and object timelines."
+            "accuracy; inspect automatic candidates, visual clusters, semantic "
+            "reviews, final decisions, and object timelines."
         ),
     }
 

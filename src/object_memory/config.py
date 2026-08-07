@@ -58,11 +58,13 @@ class ModelConfig(BaseModel):
 
 
 class Sam3PipelineConfig(BaseModel):
-    """Deterministic settings for text-guided SAM3 candidate generation."""
+    """Deterministic settings for class-agnostic point-grid candidates."""
 
     model_config = ConfigDict(extra="forbid")
 
-    confidence_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    points_per_side: int = Field(default=16, ge=2, le=64)
+    points_per_batch: int = Field(default=32, ge=1, le=256)
+    confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
     min_mask_area_ratio: float = Field(default=0.0005, ge=0.0, le=1.0)
     max_mask_area_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
     duplicate_mask_iou_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
@@ -96,18 +98,16 @@ class Sam3PipelineConfig(BaseModel):
 
 
 class MllmPipelineConfig(BaseModel):
-    """Settings for the one-call-per-image Qwen object-memory survey."""
+    """Settings for batched Qwen review after visual clustering."""
 
     model_config = ConfigDict(extra="forbid")
 
     prompt_version: Literal[
-        "object-memory-single-pass-v1"
-    ] = "object-memory-single-pass-v1"
-    scene_batch_size: Literal[1] = 1
-    max_scene_targets_per_image: int = Field(default=12, ge=1, le=24)
+        "object-memory-cluster-review-v1"
+    ] = "object-memory-cluster-review-v1"
+    max_clusters_per_batch: int = Field(default=8, ge=1, le=16)
     max_pixels: int = Field(default=1024 * 1024, gt=0)
     max_new_tokens: int = Field(default=4096, gt=0)
-    target_proposal_iou_threshold: float = Field(default=0.1, gt=0.0, le=1.0)
 
 
 class VisualFingerprintConfig(BaseModel):
@@ -131,6 +131,13 @@ class VisualFingerprintConfig(BaseModel):
     match_threshold: float = Field(default=0.75, ge=-1.0, le=1.0)
     ambiguity_margin: float = Field(default=0.05, ge=0.0, le=2.0)
     local_top_k: int = Field(default=3, ge=1, le=64)
+    cluster_global_similarity_threshold: float = Field(
+        default=0.75,
+        ge=-1.0,
+        le=1.0,
+    )
+    max_cluster_representatives: int = Field(default=4, ge=1, le=8)
+    contact_sheet_cell_size: int = Field(default=320, ge=160, le=640)
 
     @model_validator(mode="after")
     def validate_matching_weights(self) -> "VisualFingerprintConfig":
@@ -146,7 +153,7 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     storage: StorageConfig = Field(default_factory=StorageConfig)
     models: ModelConfig = Field(default_factory=ModelConfig)
     sam3_pipeline: Sam3PipelineConfig = Field(default_factory=Sam3PipelineConfig)
@@ -154,18 +161,6 @@ class AppConfig(BaseModel):
     visual_fingerprint: VisualFingerprintConfig = Field(
         default_factory=VisualFingerprintConfig
     )
-
-    @model_validator(mode="after")
-    def validate_scene_target_capacity(self) -> "AppConfig":
-        if (
-            self.mllm_pipeline.max_scene_targets_per_image
-            > self.sam3_pipeline.max_candidates_per_image
-        ):
-            raise ValueError(
-                "max_scene_targets_per_image must not exceed "
-                "max_candidates_per_image"
-            )
-        return self
 
 
 def load_config(path: str | Path | None = None) -> AppConfig:

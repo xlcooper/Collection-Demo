@@ -12,11 +12,10 @@
     cli: "实验入口收尾",
     input_registration: "输入登记与 SHA-256 去重",
     input: "输入登记与 SHA-256 去重",
-    models: "联合加载 Qwen3-VL、SAM3 与 DINOv3",
-    per_image_loop: "逐图对象记忆闭环",
-    scene_guidance: "Qwen3-VL 目标规划",
-    sam3: "SAM3 分割与候选过滤",
-    candidate_reasoning: "DINOv3 视觉身份决策",
+    sam3: "SAM3 自动点网格分割",
+    dinov3: "DINOv3 候选指纹",
+    clustering: "DINOv3 跨图聚类",
+    cluster_review: "Qwen3-VL 聚类语义审查",
     memory: "写入 SQLite 对象记忆",
     report: "生成结果摘要",
     completed: "实验已完成",
@@ -49,12 +48,12 @@
   const stagePurposes = {
     input:
       "作用：登记输入文件并按 SHA-256 识别内容副本。页面区分输入文件、本次在所选记忆库中新登记的源图，以及因内容相同而跳过的文件。",
-    scene_guidance:
-      "作用：Qwen3-VL 每张新图只调用一次，同时提出完整物体、当前可见类内特征、文字身份假设与拟议对象摘要。唯一送入 SAM3 的是英文 sam_text_prompt，执行时不会改写。",
     sam3:
-      "作用：SAM3 按英文提示词定位并分割图像区域，脚本再过滤过小、重复或被包含的区域。报告只把已完成并记录检测数的查询计入统计；保留结果仍是候选区域，不是最终对象。",
-    candidate_reasoning:
-      "作用：区分 Qwen3-VL 的文字身份假设、DINOv3 的视角视觉匹配证据和最终决定；两类证据冲突时保持不确定。",
+      "作用：SAM3 对每张新图铺设自动点网格，脚本按分数、面积、重叠和包含关系清理候选。这里的候选还不是对象。",
+    clustering:
+      "作用：DINOv3 为过滤后的候选生成视觉指纹，并把不同图片中的相似候选聚为对象假设。聚类只减少审查单位，不删除任何视角证据。",
+    cluster_review:
+      "作用：Qwen3-VL 按聚类判断完整物体、背景、零件或不确定项，再结合DINOv3历史匹配形成最终对象归属。",
   };
 
   const state = {
@@ -233,9 +232,10 @@
       "running",
       "hashing",
       "input",
-      "scene_guidance",
       "sam3",
-      "candidate_reasoning",
+      "dinov3",
+      "clustering",
+      "cluster_review",
       "memory",
       "report",
     ].includes(String(status));
@@ -664,17 +664,13 @@
       input_registration_started: "正在读取图片并计算 SHA-256",
       input_registered: `已登记 ${filename || `第 ${current} 张图片`}（${current}/${total}）`,
       input_registration_completed: "输入登记与内容去重完成",
-      models_load_started: "正在联合加载 Qwen3-VL、SAM3 与 DINOv3",
-      models_load_completed: "三个模型已完成联合驻留",
-      image_loop_started: `正在逐图处理第 ${current + 1}/${total} 张图`,
-      image_loop_completed: `已完成第 ${current}/${total} 张图的闭环处理`,
-      scene_guidance_started: "准备进行场景目标规划",
-      scene_guidance_image_started: "Qwen 正在查看当前图与已有对象文字档案",
-      scene_guidance_image_completed: "Qwen 单次调用已完成",
-      sam3_image_started: `SAM3 正在处理第 ${current + 1}/${total} 张图`,
+      sam3_batch_started: "SAM3 正在对全部新图片生成点网格候选",
       sam3_image_completed: `SAM3 已完成第 ${current}/${total} 张图`,
-      visual_identity_started: "DINOv3 正在生成视觉指纹并比较历史视角",
-      visual_identity_completed: "视觉身份证据与最终决定已写入",
+      dinov3_batch_started: "DINOv3 正在提取全部候选的视觉指纹",
+      dinov3_candidate_completed: `DINOv3 已完成 ${current}/${total} 个候选`,
+      dinov3_clustering_completed: "DINOv3 跨图聚类已完成",
+      cluster_review_started: "Qwen 正在按聚类批量进行语义审查",
+      cluster_review_batch_completed: `Qwen 已完成第 ${current}/${total} 个聚类批次`,
       report_started: "正在汇总实验报告",
       report_completed: "运行报告已写入",
       run_completed: "端到端流程已结束",
@@ -687,9 +683,13 @@
   }
 
   function latestFlowStage(event) {
-    const flowStages = ["input", "scene_guidance", "sam3", "candidate_reasoning", "memory", "report"];
+    const flowStages = ["input", "sam3", "clustering", "cluster_review", "memory", "report"];
     const asFlowStage = (stage) => {
-      const candidate = stage === "input_registration" ? "input" : stage;
+      const candidate = stage === "input_registration"
+        ? "input"
+        : stage === "dinov3"
+          ? "clustering"
+          : stage;
       return flowStages.includes(candidate) ? candidate : null;
     };
     for (const stage of [event?.stage, state.run.stage]) {
@@ -762,7 +762,7 @@
   }
 
   function renderFlow(activeStage, progress, failed = false) {
-    const order = ["input", "scene_guidance", "sam3", "candidate_reasoning", "memory", "report"];
+    const order = ["input", "sam3", "clustering", "cluster_review", "memory", "report"];
     let activeIndex = order.indexOf(activeStage);
     if (activeIndex < 0 && progress >= 100) activeIndex = order.length - 1;
     document.querySelectorAll("[data-flow-stage]").forEach((node) => {
@@ -815,19 +815,29 @@
     elements.runTimer.textContent = formatSeconds(runElapsedSeconds());
   }
 
-  function imageStateKey(image) {
-    const inputPath = String(image?.input_path || "").trim().replaceAll("\\", "/");
-    if (inputPath) return `input:${inputPath}`;
-    const sourceId = String(image?.source_id || "").trim();
-    return sourceId ? `source:${sourceId}` : "";
-  }
-
   function imageStates() {
     const byKey = new Map();
+    const aliases = new Map();
     const mergeImage = (image) => {
-      const key = imageStateKey(image);
-      if (!key) return;
-      const previous = byKey.get(key) || {};
+      const inputPath = String(image?.input_path || "").trim().replaceAll("\\", "/");
+      const sourceId = String(image?.source_id || "").trim();
+      const keys = [
+        inputPath ? `input:${inputPath}` : "",
+        sourceId ? `source:${sourceId}` : "",
+      ].filter(Boolean);
+      if (!keys.length) return;
+      const existingKeys = [...new Set(keys.map((item) => aliases.get(item)).filter(Boolean))];
+      const key = existingKeys[0] || keys[0];
+      let previous = {};
+      for (const existingKey of existingKeys) {
+        previous = { ...previous, ...(byKey.get(existingKey) || {}) };
+        if (existingKey !== key) byKey.delete(existingKey);
+      }
+      if (existingKeys.length > 1) {
+        for (const [alias, existingKey] of aliases.entries()) {
+          if (existingKeys.includes(existingKey)) aliases.set(alias, key);
+        }
+      }
       const merged = {
         ...previous,
         ...image,
@@ -839,6 +849,7 @@
         }
       }
       byKey.set(key, merged);
+      keys.forEach((item) => aliases.set(item, key));
     };
     const visibleEvents = !state.run.memory_id || state.run.memory_id === state.selectedMemoryId
       ? state.events
@@ -893,9 +904,28 @@
     return Boolean(
       number(sam.kept) ||
         number(sam.filtered) ||
-        number(sam.above_confidence_threshold_candidates) ||
-        Object.keys(sam.prompt_detection_counts || {}).length ||
-        (image.error && array(image.scene_guidance?.targets).length > 0)
+        number(sam.raw_candidates) ||
+        number(sam.grid_points) ||
+        number(sam.above_confidence_threshold_candidates)
+    );
+  }
+
+  function clusterStates() {
+    const merged = new Map();
+    const merge = (cluster) => {
+      const id = cluster?.cluster_id;
+      if (!id) return;
+      merged.set(id, { ...(merged.get(id) || {}), ...cluster });
+    };
+    const visibleEvents = !state.run.memory_id || state.run.memory_id === state.selectedMemoryId
+      ? state.events
+      : [];
+    for (const event of visibleEvents) {
+      array(event.data?.clusters).forEach(merge);
+    }
+    array(state.report?.clusters).forEach(merge);
+    return [...merged.values()].sort(
+      (first, second) => number(second.member_count) - number(first.member_count) || String(first.cluster_id).localeCompare(String(second.cluster_id))
     );
   }
 
@@ -910,6 +940,7 @@
       report.status || "",
       report.generated_at_utc || report.run?.finished_at_utc || "",
       array(report.images).length,
+      array(report.clusters).length,
       state.inputSummary.total,
       state.inputSummary.unique,
     ]);
@@ -925,35 +956,28 @@
     const tableScrollPositions = captureStageTableScrollPositions();
     state.pendingIntermediateRender = false;
     const images = imageStates();
+    const clusters = clusterStates();
     const uniqueImages = images.filter((image) => !image.duplicate && image.source_id);
-    const guidedImages = images.filter((image) => image.scene_guidance);
     const samImages = images.filter(hasSamEvidence);
-    const decidedImages = images.filter(
-      (image) => array(image.decisions).length || image.candidate_reasoning
-    );
-    const sceneCount = images.reduce(
-      (sum, image) => sum + array(image.scene_guidance?.targets).length,
-      0
-    );
     const keptCount = images.reduce((sum, image) => sum + number(image.sam?.kept, 0), 0);
-    const decisionCount = images.reduce((sum, image) => sum + array(image.decisions).length, 0);
+    const reviewedClusters = clusters.filter((cluster) => cluster.qwen_review || cluster.final_decision).length;
     document.querySelector("#tab-count-input").textContent = images.length
       ? `${images.length} 个输入文件 · ${uniqueImages.length} 张本次登记源图`
       : "等待结果";
-    document.querySelector("#tab-count-scene").textContent = guidedImages.length
-      ? `${uniqueImages.length} 张本次登记源图 · ${sceneCount} 个 Qwen 目标条目`
+    document.querySelector("#tab-count-scene").textContent = clusters.length
+      ? `${clusters.length} 个跨图候选聚类`
       : "等待结果";
     document.querySelector("#tab-count-sam").textContent = samImages.length
       ? `${samImages.length} 张 SAM3 结果图片 · ${keptCount} 个保留候选区域`
       : "等待结果";
-    document.querySelector("#tab-count-reasoning").textContent = decidedImages.length
-      ? `${decisionCount} 条候选判断记录`
+    document.querySelector("#tab-count-reasoning").textContent = reviewedClusters
+      ? `${reviewedClusters} 个聚类已有语义结果`
       : "等待结果";
 
     if (state.selectedStage === "input") renderDedupStage(images);
-    if (state.selectedStage === "scene_guidance") renderSceneStage(images);
     if (state.selectedStage === "sam3") renderSamStage(images);
-    if (state.selectedStage === "candidate_reasoning") renderReasoningStage(images);
+    if (state.selectedStage === "clustering") renderClusterStage(clusters);
+    if (state.selectedStage === "cluster_review") renderReasoningStage(clusters);
     restoreStageTableScrollPositions(tableScrollPositions);
     state.lastIntermediateRenderKey = renderKey;
   }
@@ -1019,98 +1043,50 @@
     return String(path || "").replaceAll("\\", "/").split("/").pop();
   }
 
-  function renderSceneStage(images) {
-    const guided = images.filter((image) => image.scene_guidance);
-    if (!guided.length) {
+  function renderClusterStage(clusters) {
+    if (!clusters.length) {
       updateHtml(
         elements.stagePanel,
         `${stagePanelHeader(
-          "STEP 02 · TARGET PLANNING",
-          "Qwen3-VL 目标规划",
-          stagePurposes.scene_guidance,
+          "STEP 03 · VISUAL CLUSTERING",
+          "DINOv3 跨图片聚类",
+          stagePurposes.clustering,
           []
-        )}${emptyState("等待目标规划结果", "Qwen3-VL 完成场景理解后，这里会显示每张图的中文物体名称与计划发送给 SAM3 的英文提示词。", "02")}`
+        )}${emptyState("等待视觉聚类结果", "DINOv3 完成全部候选指纹后，这里会显示跨图片的对象假设。", "03")}`
       );
       return;
     }
-    const targetCount = guided.reduce(
-      (sum, image) => sum + array(image.scene_guidance?.targets).length,
-      0
-    );
-    const actualQueryCount = guided.reduce(
-      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
-      0
-    );
+    const members = clusters.reduce((sum, cluster) => sum + number(cluster.member_count), 0);
+    const multiView = clusters.filter((cluster) => number(cluster.source_count) > 1).length;
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
-        "STEP 02 · TARGET PLANNING",
-        "Qwen3-VL 目标规划",
-        stagePurposes.scene_guidance,
+        "STEP 03 · VISUAL CLUSTERING",
+        "DINOv3 跨图片聚类",
+        stagePurposes.clustering,
         [
-          ["本次登记源图", images.filter((image) => !image.duplicate && image.source_id).length],
-          ["Qwen 目标条目", targetCount],
-          ["SAM3 已完成查询", actualQueryCount],
+          ["候选聚类", clusters.length],
+          ["聚类成员", members],
+          ["多视角聚类", multiView],
         ]
       )}
-      <div class="evidence-list">
-        ${guided
-          .map((image) => {
-            const guidance = image.scene_guidance || {};
-            const targets = array(guidance.targets);
-            const promptCounts = image.sam?.prompt_detection_counts || {};
-            return `
-              <article class="evidence-card">
-                <div class="evidence-image">${previewImage(sourcePreview(image), `源图 ${image.source_id || ""}`)}</div>
-                <div class="evidence-body">
-                  <div class="card-title-row">
-                    <div>
-                      <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">逐图单次 Qwen 调用</span>
-                    </div>
-                    <div class="chip-list" style="margin-top:0">
-                      ${guidance.errors?.length ? statusPill("failed", "有错误") : statusPill("info", `本图 ${targets.length} 个 Qwen 目标条目`)}
-                      ${image.qwen?.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(image.qwen.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
-                    </div>
-                  </div>
-                  <p>${escapeHtml(guidance.scene_summary || guidance.no_target_reason || guidance.errors?.join("；") || "尚无可用场景摘要")}</p>
-                  <div class="sam-prompt-note">中文物体名称不会用于 SAM3 查询。下方展示英文查询原文；有检测数字表示查询已完成并写入报告，未记录条目可能尚未执行或在该图的 SAM3 阶段中途失败。</div>
-                  <div class="target-prompt-list">
-                    ${targets.length
-                      ? targets
-                          .map(
-                            (target, index) => {
-                              const prompt = target.sam_text_prompt || "";
-                              const sent = Object.prototype.hasOwnProperty.call(promptCounts, prompt);
-                              const queryStatus = sent
-                                ? `SAM3 查询已完成 · 返回 ${formatInteger(promptCounts[prompt])} 个阈值以上区域`
-                                : image.sam
-                                  ? "未完成或未记录"
-                                  : "等待 SAM3 查询";
-                              return `
-                                <article class="target-prompt-card">
-                                  <div class="target-prompt-heading">
-                                    <strong>目标 ${String(index + 1).padStart(2, "0")}</strong>
-                                    ${statusPill(sent ? "completed" : "neutral", queryStatus)}
-                                  </div>
-                                  <dl>
-                                    <div><dt>中文物体名称</dt><dd>${escapeHtml(target.object_name_zh || target.target_id)}</dd></div>
-                                    <div class="sam-query-row"><dt>${sent ? "已完成查询的 SAM3 英文原文" : "计划用于 SAM3 的英文原文"}</dt><dd><code>${escapeHtml(prompt)}</code></dd></div>
-                                    <div><dt>当前可见类内特征</dt><dd>${escapeHtml(array(target.current_view_facts?.visible_identity_features).join("；") || "未记录")}</dd></div>
-                                    <div><dt>文字身份假设</dt><dd>${escapeHtml(target.identity_hypothesis || "—")} · ${escapeHtml(target.identity_short_reason || "未提供判断原因")}</dd></div>
-                                    <div><dt>拟议摘要置信度</dt><dd>${Math.round(number(target.proposed_object_summary?.summary_confidence) * 100)}%</dd></div>
-                                  </dl>
-                                </article>
-                              `;
-                            }
-                          )
-                          .join("")
-                      : '<span class="chip">本图无 Qwen 目标条目</span>'}
-                  </div>
+      <div class="candidate-grid">
+        ${clusters.map((cluster) => {
+          const similarity = cluster.global_similarity || {};
+          return `
+            <article class="candidate-card">
+              <div class="candidate-asset">${previewImage(imageUrl(cluster.contact_sheet), `聚类 ${cluster.cluster_id}`)}</div>
+              <div class="candidate-body">
+                <div class="card-title-row">
+                  <strong class="mono">${escapeHtml(cluster.cluster_id)}</strong>
+                  ${statusPill(number(cluster.source_count) > 1 ? "match" : "neutral", `${formatInteger(cluster.member_count)} 个候选 / ${formatInteger(cluster.source_count)} 张图`)}
                 </div>
-              </article>
-            `;
-          })
-          .join("")}
+                <p>同组候选来自不同源图；同一张图中的相似候选不会自动合并。</p>
+                <p class="meta-line">CLS 相似度 · min ${number(similarity.min, 1).toFixed(3)} · mean ${number(similarity.mean, 1).toFixed(3)} · max ${number(similarity.max, 1).toFixed(3)}</p>
+                <span class="mono-line">members ${array(cluster.member_proposal_ids).map((id) => shortId(id, 13)).join(" · ")}</span>
+              </div>
+            </article>
+          `;
+        }).join("")}
       </div>
     `);
   }
@@ -1140,27 +1116,24 @@
         elements.stagePanel,
         `${stagePanelHeader(
           "STEP 03 · SEGMENTATION",
-          "SAM3 分割与候选筛选",
+          "SAM3 自动点网格分割",
           stagePurposes.sam3,
           []
-        )}${emptyState("等待对象分割结果", "SAM3 完成文本引导分割后，这里会显示候选区域与筛选结果。", "03")}`
+        )}${emptyState("等待对象分割结果", "SAM3 完成自动点网格分割后，这里会显示候选区域与脚本筛选结果。", "02")}`
       );
       return;
     }
     const kept = relevant.reduce((sum, image) => sum + number(image.sam?.kept), 0);
     const filtered = relevant.reduce((sum, image) => sum + number(image.sam?.filtered), 0);
-    const queryCount = relevant.reduce(
-      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
-      0
-    );
+    const rawCount = relevant.reduce((sum, image) => sum + number(image.sam?.raw_candidates ?? image.sam?.grid_points), 0);
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
-        "STEP 03 · SEGMENTATION",
-        "SAM3 分割与候选筛选",
+        "STEP 02 · AUTOMATIC SEGMENTATION",
+        "SAM3 自动点网格分割",
         stagePurposes.sam3,
         [
           ["SAM3 结果图片", relevant.length],
-          ["已完成英文查询", queryCount],
+          ["点网格原始候选", rawCount],
           ["保留候选区域", kept],
           ["过滤候选区域", filtered],
         ]
@@ -1170,25 +1143,20 @@
           .map((image) => {
             const sam = image.sam || {};
             const candidates = candidatesForImage(image);
-            const promptCounts = Object.entries(sam.prompt_detection_counts || {});
             return `
               <article class="evidence-card" style="grid-template-columns: 1fr">
                 <div class="evidence-body">
                   <div class="card-title-row">
                     <div>
                       <h4>${escapeHtml(image.source_id || image.input_path || "未知源图")}</h4>
-                      <span class="mono-line">SAM3 ${escapeHtml(sam.inference_seconds ?? "—")}s · ${number(sam.above_confidence_threshold_candidates)} 个阈值以上候选区域</span>
+                      <span class="mono-line">SAM3 ${escapeHtml(sam.inference_seconds ?? "—")}s · ${number(sam.raw_candidates ?? sam.grid_points)} 个点网格原始候选</span>
                     </div>
                     <div class="chip-list" style="margin-top:0">
                       ${statusPill("info", `保留 ${number(sam.kept)} 个候选区域`)}
                       ${number(sam.filtered) ? statusPill("filtered", `过滤 ${number(sam.filtered)} 个候选区域`) : ""}
                     </div>
                   </div>
-                  <div class="chip-list">
-                    ${promptCounts
-                      .map(([prompt, count]) => `<span class="chip ${number(count) === 0 ? "" : "prompt"}">已完成查询的英文原文 · <code>${escapeHtml(prompt)}</code> · <b>返回 ${formatInteger(count)} 个阈值以上区域</b></span>`)
-                      .join("") || '<span class="chip">暂无提示统计</span>'}
-                  </div>
+                  <div class="chip-list"><span class="chip prompt">候选来源 · <b>automatic_point_grid</b></span></div>
                   ${image.error ? `<p class="meta-line">阶段错误 · ${escapeHtml(image.error)}</p>` : ""}
                   ${candidates.length ? `<div class="candidate-grid">${candidates.map(candidateCard).join("")}</div>` : ""}
                 </div>
@@ -1234,8 +1202,8 @@
             <strong class="mono">${escapeHtml(shortId(id, 20))}</strong>
             ${candidate.status ? statusPill(candidate.status) : ""}
           </div>
-          <p>来源英文提示词 · <b>${escapeHtml(candidate.sam_text_prompt || candidate.prompt || "unknown")}</b></p>
-          <p class="meta-line">SAM3 文本匹配分数 · ${number(candidate.score).toFixed(3)}</p>
+          <p>候选来源 · <b>${escapeHtml(candidate.candidate_source || candidate.prompt || "automatic_point_grid")}</b></p>
+          <p class="meta-line">SAM3 点提示质量分 · ${number(candidate.score).toFixed(3)}</p>
           ${candidate.filter_reason ? `<p class="meta-line">过滤原因 · ${escapeHtml(candidate.filter_reason)}</p>` : ""}
           ${candidate.error ? `<p class="meta-line">错误 · ${escapeHtml(candidate.error)}</p>` : ""}
           <span class="mono-line">bbox ${escapeHtml(bboxText(candidate.bbox))} · area ${number(candidate.mask_area_ratio) ? `${(number(candidate.mask_area_ratio) * 100).toFixed(2)}%` : "—"}</span>
@@ -1265,78 +1233,77 @@
       .join(", ");
   }
 
-  function renderReasoningStage(images) {
-    const relevant = images.filter((image) => array(image.decisions).length || image.candidate_reasoning);
+  function renderReasoningStage(clusters) {
+    const relevant = clusters.filter((cluster) => cluster.qwen_review || cluster.final_decision || cluster.error);
     if (!relevant.length) {
       updateHtml(
         elements.stagePanel,
         `${stagePanelHeader(
-          "STEP 04 · VISUAL IDENTITY",
-          "DINOv3 视觉身份决策",
-          stagePurposes.candidate_reasoning,
+          "STEP 04 · SEMANTIC REVIEW",
+          "Qwen3-VL 聚类语义审查",
+          stagePurposes.cluster_review,
           []
-        )}${emptyState("等待视觉身份结果", "DINOv3 生成视觉指纹后，这里会并列显示文字假设、视觉证据和最终决定。", "04")}`
+        )}${emptyState("等待语义审查结果", "Qwen完成聚类批次后，这里会解释候选组如何形成或未形成对象。", "04")}`
       );
       return;
     }
-    const decisions = relevant.flatMap((image) => array(image.decisions).map((decision) => ({ image, decision })));
     updateHtml(elements.stagePanel, `
       ${stagePanelHeader(
-        "STEP 04 · VISUAL IDENTITY",
-        "Qwen3-VL 假设 × DINOv3 证据",
-        stagePurposes.candidate_reasoning,
+        "STEP 04 · SEMANTIC REVIEW",
+        "聚类证据 → Qwen判断 → 最终对象",
+        stagePurposes.cluster_review,
         [
-          ["候选判断记录", decisions.length],
+          ["已审查聚类", relevant.length],
+          ["形成对象", relevant.filter((cluster) => ["new", "existing"].includes(cluster.final_decision)).length],
+          ["过滤 / 待定", relevant.filter((cluster) => ["ignored", "uncertain"].includes(cluster.final_decision)).length],
         ]
       )}
       <div class="candidate-grid">
-        ${decisions
-          .map(({ image, decision }) => {
-            const candidate = decision.candidate || {};
-            const errors = array(decision.errors).map(errorValueText).filter(Boolean);
-            const visual = decision.visual_evidence || {};
-            const qwenHypothesis = decision.qwen_identity_hypothesis || decision.qwen_hypothesis;
-            const objectReason = decision.short_reason || (decision.decision ? "未提供对象决定理由" : "未形成对象身份决定");
+        ${relevant
+          .map((cluster) => {
+            const review = cluster.qwen_review || {};
+            const visual = cluster.historical_visual_evidence || {};
+            const similarity = cluster.global_similarity || {};
+            const summary = review.object_summary || {};
             return `
               <article class="candidate-card">
                 <div class="candidate-asset">${previewImage(
-                  imageUrl(candidate.crop || candidate.crop_path || candidate.overlay || candidate.overlay_path),
-                  `候选 ${decision.proposal_id}`
+                  imageUrl(cluster.contact_sheet),
+                  `聚类 ${cluster.cluster_id}`
                 )}</div>
                 <div class="candidate-body">
                   <div class="card-title-row">
-                    <strong class="mono">${escapeHtml(shortId(decision.proposal_id, 21))}</strong>
+                    <strong class="mono">${escapeHtml(cluster.cluster_id)}</strong>
                     <div class="chip-list" style="margin-top:0">
-                      ${decision.status ? statusPill(decision.status) : ""}
-                      ${decision.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(decision.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
+                      ${cluster.final_decision ? statusPill(cluster.final_decision) : statusPill("pending")}
+                      ${cluster.raw_response ? `<a class="quiet-button" href="${escapeHtml(auditJsonUrl(cluster.raw_response))}" target="_blank" rel="noopener">原始响应</a>` : ""}
                     </div>
                   </div>
                   <div class="reasoning-steps">
                     <section class="reasoning-step">
                       <div class="reasoning-step-heading">
-                        <span>1 · Qwen 文字身份假设</span>
-                        ${qwenHypothesis ? statusPill(qwenHypothesis) : statusPill("pending", "无目标对应")}
+                        <span>1 · DINOv3 聚类依据</span>
+                        ${statusPill(number(cluster.source_count) > 1 ? "match" : "neutral", `${formatInteger(cluster.member_count)} 个候选`)}
                       </div>
-                      <p>${escapeHtml(decision.target_object_name_zh || "当前候选未与一个Qwen临时目标框唯一对应")}</p>
-                      <span class="mono-line">target ${escapeHtml(shortId(decision.target_id, 16))} · object ${escapeHtml(shortId(decision.qwen_matched_object_id, 16))}</span>
-                      ${errors.length ? `<ul class="reasoning-errors">${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>` : ""}
+                      <p>跨图CLS相似度 min ${number(similarity.min, 1).toFixed(3)} · mean ${number(similarity.mean, 1).toFixed(3)} · max ${number(similarity.max, 1).toFixed(3)}</p>
+                      <span class="mono-line">sources ${formatInteger(cluster.source_count)} · representatives ${formatInteger(array(cluster.representative_proposal_ids).length)}</span>
                     </section>
                     <section class="reasoning-step">
                       <div class="reasoning-step-heading">
-                        <span>2 · DINOv3 视觉证据</span>
-                        ${visual.result ? statusPill(visual.result) : statusPill(decision.status || "pending")}
+                        <span>2 · 历史对象匹配</span>
+                        ${visual.result ? statusPill(visual.result) : statusPill(cluster.final_decision || "pending")}
                       </div>
                       <p>global ${visual.global_similarity == null ? "—" : number(visual.global_similarity).toFixed(3)} · local ${visual.local_match_ratio == null ? "—" : number(visual.local_match_ratio).toFixed(3)} · combined ${visual.visual_score == null ? "—" : number(visual.visual_score).toFixed(3)}</p>
                       <span class="mono-line">best object ${escapeHtml(shortId(visual.matched_object_id, 16))} · margin ${visual.score_margin == null ? "—" : number(visual.score_margin).toFixed(3)}</span>
                     </section>
                     <section class="reasoning-step">
                       <div class="reasoning-step-heading">
-                        <span>3 · 最终决定</span>
-                        ${decision.decision ? statusPill(decision.decision) : statusPill(decision.status || "pending", "未形成决定")}
+                        <span>3 · Qwen语义判断与最终决定</span>
+                        ${review.verdict ? statusPill(review.verdict, `Qwen：${review.verdict}`) : statusPill("pending", "等待Qwen")}
                       </div>
-                      <p>${escapeHtml(objectReason)}</p>
-                      <span class="mono-line">source ${escapeHtml(shortId(image.source_id, 16))} · confidence ${decision.confidence == null ? "—" : `${Math.round(number(decision.confidence) * 100)}%`}</span>
-                      ${decision.object_id || decision.matched_object_id ? `<span class="chip">object <b class="mono">${escapeHtml(decision.object_id || decision.matched_object_id)}</b></span>` : ""}
+                      <p><b>${escapeHtml(summary.object_name_zh || "未形成对象名称")}</b> · ${escapeHtml(review.short_reason || cluster.error || "尚无判断原因")}</p>
+                      <span class="mono-line">identity ${escapeHtml(review.identity_hypothesis || "—")} · final ${escapeHtml(cluster.final_decision || "—")}</span>
+                      ${cluster.object_id ? `<span class="chip">object <b class="mono">${escapeHtml(cluster.object_id)}</b></span>` : ""}
                     </section>
                   </div>
                 </div>
@@ -1480,7 +1447,7 @@
     updateHtml(elements.memoryContent, `
       <div class="table-wrap">
         <table class="lineage-table">
-          <thead><tr><th>候选</th><th>source</th><th>Qwen目标 / SAM3提示</th><th>SAM分数</th><th>候选状态</th><th>Qwen假设</th><th>DINOv3证据</th><th>最终决定</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
+          <thead><tr><th>候选</th><th>source</th><th>DINO聚类</th><th>SAM点质量</th><th>候选状态</th><th>Qwen聚类假设</th><th>历史DINO证据</th><th>最终决定</th><th>对象</th><th>资产</th><th>审计</th></tr></thead>
           <tbody>
             ${candidates
               .map((candidate) => {
@@ -1489,7 +1456,7 @@
                   <tr>
                     <td class="mono" title="${escapeHtml(candidate.id || candidate.proposal_id || "")}">${escapeHtml(shortId(candidate.id || candidate.proposal_id, 17))}</td>
                     <td class="mono" title="${escapeHtml(candidate.source_image_id || "")}">${escapeHtml(shortId(candidate.source_image_id, 14))}</td>
-                    <td>${escapeHtml(candidate.target_object_name_zh || "未对应目标")}<br><code>${escapeHtml(candidate.prompt || candidate.sam_text_prompt || "—")}</code></td>
+                    <td class="mono" title="${escapeHtml(candidate.target_id || "")}">${escapeHtml(shortId(candidate.target_id, 16) || "—")}<br><code>${escapeHtml(candidate.prompt || "automatic_point_grid")}</code></td>
                     <td>${candidate.score == null ? "—" : number(candidate.score).toFixed(3)}</td>
                     <td>${statusPill(candidate.status || "pending")}</td>
                     <td>${candidate.qwen_hypothesis ? statusPill(candidate.qwen_hypothesis) : "—"}</td>
@@ -1514,25 +1481,27 @@
     const sourceCounts = run.source_counts || {};
     const proposalCounts = run.proposal_counts || {};
     const decisions = run.decision_counts || {};
-    const sceneTargets = images.reduce(
-      (sum, image) => sum + array(image.scene_guidance?.targets).length,
+    const clusters = array(report?.clusters);
+    const clusterCounts = report?.cluster_counts || {};
+    const rawCandidates = images.reduce(
+      (sum, image) => sum + number(image.sam?.raw_candidates ?? image.sam?.grid_points ?? image.sam?.above_confidence_threshold_candidates),
       0
     );
-    const samPrompts = images.reduce(
-      (sum, image) => sum + Object.keys(image.sam?.prompt_detection_counts || {}).length,
-      0
-    );
-    const rawCandidates = images.reduce((sum, image) => sum + number(image.sam?.above_confidence_threshold_candidates), 0);
-    const zeroPrompts = images.reduce((sum, image) => sum + array(image.sam?.zero_candidate_prompts).length, 0);
     return {
       inputs: images.length,
       uniqueSources: Object.values(sourceCounts).reduce((sum, value) => sum + number(value), 0),
       duplicates: number(run.duplicate_sources_skipped, images.filter((image) => image.duplicate).length),
-      sceneTargets,
-      samPrompts,
       rawCandidates,
-      kept: number(proposalCounts.decided) + number(proposalCounts.pending) + number(proposalCounts.failed),
+      kept: images.reduce((sum, image) => sum + number(image.sam?.kept), 0),
+      scriptFiltered: images.reduce((sum, image) => sum + number(image.sam?.filtered), 0),
       filtered: number(proposalCounts.filtered),
+      clusters: clusters.length,
+      reviewedClusters: clusters.filter((cluster) => cluster.qwen_review).length,
+      newClusters: number(clusterCounts.new),
+      existingClusters: number(clusterCounts.existing),
+      ignoredClusters: number(clusterCounts.ignored),
+      uncertainClusters: number(clusterCounts.uncertain),
+      failedClusters: number(clusterCounts.failed),
       newCount: number(decisions.new),
       existingCount: number(decisions.existing),
       ignoredCount: number(decisions.ignored),
@@ -1540,7 +1509,6 @@
       failedProposals: number(proposalCounts.failed),
       observations: number(run.observations_added),
       objects: number(run.active_objects_total),
-      zeroPrompts,
     };
   }
 
@@ -1570,6 +1538,7 @@
     collect(report?.error);
     collect(report?.progress_error);
     collect(report?.external_errors);
+    array(report?.clusters).forEach((cluster) => collect(cluster?.error));
     array(report?.images).forEach((image) => {
       collect(image?.error);
       collect(image?.candidate_reasoning?.errors);
@@ -1636,10 +1605,7 @@
     const checks = Object.entries(report.checks || {});
     const demoCoverage = Object.entries(report.demo_coverage || {});
     const libraryLabel = selectedLibrary()?.label || state.memory?.memory_label || "默认记忆库";
-    const decisionTotal = metrics.newCount + metrics.existingCount + metrics.ignoredCount + metrics.uncertainCount;
-    const queryGap = Math.max(0, metrics.sceneTargets - metrics.samPrompts);
-    const decisionGap = Math.max(0, metrics.kept - decisionTotal - metrics.failedProposals);
-    const threshold = number(sam.confidence_threshold, 0.4);
+    const threshold = number(sam.confidence_threshold, 0.88);
     const elapsed = state.serverSummary && "elapsed_seconds" in state.serverSummary
       ? state.serverSummary.elapsed_seconds
       : state.run.elapsed_seconds;
@@ -1674,23 +1640,23 @@
           ["本次登记源图", metrics.uniqueSources],
           ["重复文件跳过", metrics.duplicates],
         ])}
-        ${summaryStageCard("02", "目标与查询", [
-          ["Qwen 目标条目", metrics.sceneTargets],
-          ["SAM3 已完成英文查询", metrics.samPrompts],
-          ["返回 0 区域的查询", metrics.zeroPrompts],
-        ], queryGap ? `${queryGap} 个 Qwen 目标没有形成已完成并记录的 SAM3 查询，请查看目标规划或 SAM3 阶段错误。` : "每条已完成查询都可在中间结果中查看英文原文。")}
-        ${summaryStageCard("03", "候选区域", [
-          [`高于 ${threshold.toFixed(2)} 阈值的区域`, metrics.rawCandidates],
+        ${summaryStageCard("02", "自动分割", [
+          ["点网格原始候选", metrics.rawCandidates],
           ["保留候选", metrics.kept],
-          ["脚本过滤候选", metrics.filtered],
+          ["脚本过滤候选", metrics.scriptFiltered],
+        ], `点提示质量阈值 ${threshold.toFixed(2)}；候选尚未被视为对象。`)}
+        ${summaryStageCard("03", "视觉聚类", [
+          ["DINO视觉指纹", number(dino.fingerprints)],
+          ["候选聚类", metrics.clusters],
+          ["已审查聚类", metrics.reviewedClusters],
         ])}
-        ${summaryStageCard("04", "对象决策", [
-          ["新对象", metrics.newCount],
-          ["归入已有对象", metrics.existingCount],
-          ...(metrics.ignoredCount ? [["旧版忽略候选", metrics.ignoredCount]] : []),
-          ["不确定待复核", metrics.uncertainCount],
-          ["处理失败", metrics.failedProposals],
-        ], decisionGap ? `${decisionGap} 个保留候选没有形成决定，请查看对象决策阶段。` : "当前决定为新对象、已有对象或不确定；失败单独记录。")}
+        ${summaryStageCard("04", "聚类语义决定", [
+          ["新对象聚类", metrics.newClusters],
+          ["已有对象聚类", metrics.existingClusters],
+          ["背景 / 零件过滤", metrics.ignoredClusters],
+          ["不确定聚类", metrics.uncertainClusters],
+          ["失败聚类", metrics.failedClusters],
+        ], "每个聚类的接触表、视觉相似度、Qwen判断和最终对象ID可在中间结果中追溯。")}
         ${summaryStageCard("05", "记忆写入", [
           ["本次新增观测", metrics.observations],
           ["库内活跃对象", metrics.objects],
@@ -1706,9 +1672,9 @@
         <article class="detail-panel">
           <h3>人工复核清单</h3>
           <ul class="review-list">
-            <li><a href="#intermediates">目标遗漏与中文名称 / 英文查询是否一致</a></li>
-            <li><a href="#intermediates">SAM3 返回 0 区域的查询与候选召回</a></li>
-            <li><a href="#intermediates">完整物体粒度、颜色与候选有效性</a></li>
+            <li><a href="#intermediates">点网格是否覆盖了所有真实物体</a></li>
+            <li><a href="#intermediates">DINO是否把同一物体跨视角聚在一起</a></li>
+            <li><a href="#intermediates">背景、零件和完整物体的Qwen判断是否正确</a></li>
             <li><a href="#memory">跨图片的对象身份归并与观测时间线</a></li>
           </ul>
         </article>
@@ -1716,8 +1682,8 @@
       <article class="detail-panel timing-panel">
         <h3>模型与耗时</h3>
         <div class="timing-grid">
-          ${timingMetric("Qwen 加载", qwen.model_load_seconds, qwen.loaded ? "联合驻留" : `${number(qwen.load_count)} 次驻留`)}
-          ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.calls ?? qwen.total_calls)} 次调用`)}
+          ${timingMetric("Qwen 加载", qwen.model_load_seconds, qwen.loaded ? "聚类后顺序驻留" : "未加载")}
+          ${timingMetric("Qwen 推理", qwen.inference_seconds, `${number(qwen.calls ?? qwen.total_calls)} 个聚类批次`)}
           ${timingMetric("SAM3 推理", sam.inference_seconds, `峰值 ${number(sam.peak_memory_mib).toFixed(0)} MiB`)}
           ${timingMetric("DINOv3 推理", dino.inference_seconds, `${number(dino.fingerprints)} 个视觉指纹`)}
         </div>

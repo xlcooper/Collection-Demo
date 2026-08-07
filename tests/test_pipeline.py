@@ -1,4 +1,4 @@
-"""Deterministic tests for the per-image Qwen/SAM3/DINOv3 loop."""
+"""Deterministic tests for the SAM3 -> DINOv3 -> Qwen cluster loop."""
 
 from __future__ import annotations
 
@@ -20,15 +20,19 @@ from object_memory.dinov3_adapter import FingerprintData
 from object_memory.memory_store import MemoryStore
 from object_memory.mllm_adapter import MllmPrediction
 from object_memory.pipeline import ObjectMemoryPipeline
-from object_memory.sam3_adapter import RawSamCandidate, Sam3Prediction
+from object_memory.sam3_adapter import (
+    AUTOMATIC_CANDIDATE_SOURCE,
+    RawSamCandidate,
+    Sam3Prediction,
+)
 
 
-def summary_payload(description: str) -> dict[str, Any]:
+def summary_payload(name: str = "银灰色人体工学鼠标") -> dict[str, Any]:
     return {
-        "object_name_zh": "银灰色人体工学鼠标",
+        "object_name_zh": name,
         "coarse_category": "电子设备",
         "fine_category": "鼠标",
-        "stable_description": description,
+        "stable_description": "银灰色非对称鼠标，右侧轮廓明显隆起。",
         "stable_identity_features": ["整体非左右对称", "右侧轮廓隆起"],
         "brand_or_markings": [],
         "part_appearance": [
@@ -43,11 +47,16 @@ class FakeQwenRuntime:
     model_placement = ["cuda:0"]
     resolved_snapshot = "fake-qwen"
 
-    def __init__(self, events: list[str], *, invalid: bool = False, two_targets: bool = False, no_targets: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        invalid: bool = False,
+        ignore: bool = False,
+    ) -> None:
         self.events = events
         self.invalid = invalid
-        self.two_targets = two_targets
-        self.no_targets = no_targets
+        self.ignore = ignore
         self.calls = 0
 
     def load(self) -> None:
@@ -65,54 +74,28 @@ class FakeQwenRuntime:
         if self.invalid:
             raw = "{}"
         else:
-            source_id = re.search(r"source_id=(src_[A-Za-z0-9_-]+)", text).group(1)
-            object_ids = re.findall(r'"object_id": "(obj_[^"]+)"', text)
-            if self.no_targets:
-                targets: list[dict[str, Any]] = []
-            else:
-                targets = []
-                count = 2 if self.two_targets else 1
-                for index in range(count):
-                    existing = bool(object_ids)
-                    x_min, x_max = ((0.125, 0.5) if index == 0 else (0.55, 0.9))
-                    targets.append(
-                        {
-                            "target_id": f"target_{index + 1:03d}",
-                            "object_name_zh": "银灰色人体工学鼠标",
-                            "sam_text_prompt": "computer mouse",
-                            "current_view_facts": {
-                                "category": "鼠标",
-                                "visible_identity_features": ["右侧轮廓隆起"],
-                                "brand_or_markings": [],
-                                "part_appearance": [],
-                            },
-                            "identity_hypothesis": "existing" if existing else "new",
-                            "matched_object_id": object_ids[0] if existing else None,
-                            "identity_short_reason": "轮廓证据",
-                            "proposed_object_summary": summary_payload(
-                                "银灰色非对称鼠标，右侧轮廓明显隆起。"
-                                if existing
-                                else "银灰色非对称鼠标。"
-                            ),
-                            "temporary_target_anchor": {
-                                "x_min": x_min,
-                                "y_min": 0.125,
-                                "x_max": x_max,
-                                "y_max": 0.875,
-                            },
-                        }
-                    )
-            raw = json.dumps(
-                {
-                    "image": {
-                        "source_id": source_id,
-                        "scene_summary": "桌面上的鼠标",
-                        "targets": targets,
-                        "no_target_reason": "没有目标" if not targets else None,
+            cluster_ids = list(dict.fromkeys(re.findall(r"CLUSTER (clu_[a-z0-9]+)", text)))
+            reviews = []
+            for index, cluster_id in enumerate(cluster_ids, start=1):
+                reviews.append(
+                    {
+                        "cluster_id": cluster_id,
+                        "verdict": "ignore" if self.ignore else "object",
+                        "identity_hypothesis": (
+                            "uncertain" if self.ignore else "new"
+                        ),
+                        "matched_object_id": None,
+                        "short_reason": (
+                            "背景区域" if self.ignore else "多视角轮廓一致且为完整物体"
+                        ),
+                        "object_summary": (
+                            None
+                            if self.ignore
+                            else summary_payload(f"银灰色人体工学鼠标{index}")
+                        ),
                     }
-                },
-                ensure_ascii=False,
-            )
+                )
+            raw = json.dumps({"reviews": reviews}, ensure_ascii=False)
         return MllmPrediction(raw, 100, 80, 0.2)
 
     @property
@@ -129,25 +112,25 @@ class FakeSamRuntime:
     def __init__(self, events: list[str], *, two_candidates: bool = False) -> None:
         self.events = events
         self.two_candidates = two_candidates
-        self.received_prompts: list[tuple[str, ...]] = []
+        self.calls = 0
 
     def load(self) -> None:
         self.events.append("sam.load")
 
-    def predict(self, image: Image.Image, prompts: Sequence[str]) -> Sam3Prediction:
+    def predict(self, image: Image.Image) -> Sam3Prediction:
         self.events.append("sam.predict")
-        self.received_prompts.append(tuple(prompts))
-        candidates = []
+        self.calls += 1
         boxes = [(4, 4, 16, 28)]
         if self.two_candidates:
             boxes.append((18, 4, 29, 28))
+        candidates = []
         for index, (x_min, y_min, x_max, y_max) in enumerate(boxes):
             mask = np.zeros((image.height, image.width), dtype=bool)
             mask[y_min:y_max, x_min:x_max] = True
             candidates.append(
                 RawSamCandidate(
-                    raw_candidate_id=f"candidate_{index}",
-                    prompt=prompts[0],
+                    raw_candidate_id=f"grid_point_{index:06d}",
+                    prompt=AUTOMATIC_CANDIDATE_SOURCE,
                     score=0.95 - index * 0.01,
                     bbox_xyxy=(x_min, y_min, x_max, y_max),
                     mask=mask,
@@ -155,7 +138,6 @@ class FakeSamRuntime:
             )
         return Sam3Prediction(
             candidates=tuple(candidates),
-            prompt_counts={prompts[0]: len(candidates)},
             inference_seconds=0.1,
         )
 
@@ -215,10 +197,12 @@ def make_pipeline(
 
 
 class PipelineTests(unittest.TestCase):
-    def test_each_unique_image_calls_qwen_once_and_iterates_summary(self) -> None:
+    def test_cross_image_cluster_creates_one_object_with_two_observations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            first, second, duplicate = root / "first.png", root / "second.png", root / "duplicate.png"
+            first = root / "first.png"
+            second = root / "second.png"
+            duplicate = root / "duplicate.png"
             Image.new("RGB", (32, 32), (255, 0, 0)).save(first)
             Image.new("RGB", (32, 32), (0, 0, 255)).save(second)
             shutil.copy2(first, duplicate)
@@ -230,53 +214,41 @@ class PipelineTests(unittest.TestCase):
             report = pipeline.run([first, second, duplicate], run_id="run_demo")
 
             self.assertEqual(report["status"], "passed")
-            self.assertEqual(qwen.calls, 2)
-            self.assertEqual(report["models"]["qwen"]["calls"], 2)
-            self.assertEqual(
-                report["models"]["dinov3"]["result_counts"],
-                {"match": 1, "no_match": 1, "ambiguous": 0},
-            )
-            self.assertFalse(report["strategy"]["second_qwen_stage"])
+            self.assertEqual(sam.calls, 2)
+            self.assertEqual(qwen.calls, 1)
+            self.assertEqual(len(report["clusters"]), 1)
             self.assertEqual(report["run"]["decision_counts"]["new"], 1)
             self.assertEqual(report["run"]["decision_counts"]["existing"], 1)
             self.assertEqual(report["run"]["active_objects_total"], 1)
             self.assertEqual(report["run"]["observations_added"], 2)
-            self.assertTrue(
-                all(
-                    proposal["status"] == "decided"
-                    for image_report in report["images"]
-                    for proposal in image_report["kept_proposals"]
-                )
-            )
-            self.assertLess(events.index("dino.load"), events.index("qwen.predict"))
-            cards = MemoryStore(pipeline.paths).list_object_cards()
-            self.assertIn("明显隆起", cards[0].summary.stable_description)
+            self.assertLess(events.index("sam.close"), events.index("dino.load"))
+            self.assertLess(events.index("dino.close"), events.index("qwen.load"))
             with sqlite3.connect(pipeline.paths.database) as connection:
                 fingerprints = connection.execute(
                     "SELECT fingerprint_json FROM proposals ORDER BY created_at"
                 ).fetchall()
             self.assertTrue(all(row[0] for row in fingerprints))
+            cards = MemoryStore(pipeline.paths).list_object_cards()
+            self.assertIn("轮廓明显隆起", cards[0].summary.stable_description)
 
-    def test_duplicate_prompt_targets_share_query_and_pre_image_history(self) -> None:
+    def test_same_source_candidates_never_merge_into_one_cluster(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "two.png"
             Image.new("RGB", (32, 32), (100, 100, 100)).save(image)
             events: list[str] = []
-            qwen = FakeQwenRuntime(events, two_targets=True)
+            qwen = FakeQwenRuntime(events)
             sam = FakeSamRuntime(events, two_candidates=True)
             dino = FakeDinoRuntime(events)
             report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
                 [image], run_id="run_two"
             )
             self.assertEqual(qwen.calls, 1)
-            self.assertEqual(sam.received_prompts, [("computer mouse",)])
-            self.assertEqual(len(report["images"][0]["decisions"]), 2)
+            self.assertEqual(len(report["clusters"]), 2)
             self.assertEqual(report["run"]["decision_counts"]["new"], 2)
-            self.assertEqual(report["run"]["decision_counts"]["uncertain"], 0)
             self.assertEqual(report["run"]["active_objects_total"], 2)
 
-    def test_invalid_qwen_output_fails_source_after_one_call(self) -> None:
+    def test_invalid_cluster_review_fails_after_sam_and_dino(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             image = root / "one.png"
@@ -289,24 +261,29 @@ class PipelineTests(unittest.TestCase):
                 [image], run_id="run_invalid"
             )
             self.assertEqual(qwen.calls, 1)
-            self.assertNotIn("sam.predict", events)
+            self.assertIn("sam.predict", events)
+            self.assertIn("dino.extract", events)
             self.assertEqual(report["status"], "completed_with_errors")
+            raw_response = report["clusters"][0]["raw_response"]
+            self.assertTrue(raw_response)
+            self.assertTrue(pipeline.paths.resolve_asset(raw_response).is_file())
 
-    def test_empty_target_response_skips_sam_and_dino(self) -> None:
+    def test_qwen_ignore_filters_cluster_without_creating_object(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            image = root / "empty.png"
+            image = root / "background.png"
             Image.new("RGB", (32, 32), (10, 20, 30)).save(image)
             events: list[str] = []
-            qwen = FakeQwenRuntime(events, no_targets=True)
+            qwen = FakeQwenRuntime(events, ignore=True)
             sam = FakeSamRuntime(events)
             dino = FakeDinoRuntime(events)
             report = make_pipeline(root, qwen=qwen, sam=sam, dino=dino).run(
-                [image], run_id="run_empty"
+                [image], run_id="run_ignore"
             )
             self.assertEqual(report["status"], "passed")
-            self.assertNotIn("sam.predict", events)
-            self.assertEqual(dino.extract_count, 0)
+            self.assertEqual(report["cluster_counts"], {"ignored": 1})
+            self.assertEqual(report["run"]["active_objects_total"], 0)
+            self.assertEqual(report["run"]["proposal_counts"]["filtered"], 1)
 
 
 if __name__ == "__main__":

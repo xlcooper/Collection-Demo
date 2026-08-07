@@ -6,16 +6,17 @@ from dataclasses import replace
 
 from .assets import MemoryPaths
 from .memory_store import (
-    DecisionWriteResult,
+    ClusterWriteResult,
     FingerprintRecord,
     MemoryStore,
     RunSummary,
     SourceRegistration,
 )
 from .schemas import (
+    ClusterReview,
     Decision,
+    DecisionReasonCode,
     DecisionType,
-    FinalIdentityDecision,
     MemoryObject,
     ObjectCard,
     Observation,
@@ -23,7 +24,7 @@ from .schemas import (
     ProposalStatus,
     Run,
     SourceImage,
-    VisualFingerprint,
+    VisualEvidence,
     new_id,
     utc_now,
 )
@@ -51,67 +52,129 @@ class MemoryLoop:
     def record_filtered_proposal(self, proposal: Proposal) -> None:
         self.store.record_filtered_proposal(proposal)
 
+    def record_filtered_cluster(
+        self,
+        proposals: list[Proposal],
+        *,
+        cluster_id: str,
+        reason: str,
+    ) -> None:
+        message = reason.strip()
+        if not message:
+            raise ValueError("cluster filter reason must not be empty")
+        for proposal in proposals:
+            proposal.target_id = cluster_id
+            proposal.status = ProposalStatus.FILTERED
+            proposal.filter_reason = f"qwen_cluster_ignore:{message}"
+            proposal.updated_at = utc_now()
+        self.store.record_filtered_proposals(proposals)
+
     def object_cards(self) -> list[ObjectCard]:
         return self.store.list_object_cards()
 
     def fingerprint_records(self) -> list[FingerprintRecord]:
         return self.store.list_fingerprint_records()
 
-    def apply_decision(
+    def apply_cluster_decision(
         self,
         *,
-        proposal: Proposal,
-        result: FinalIdentityDecision,
-        fingerprint: VisualFingerprint,
+        proposals: list[Proposal],
+        review: ClusterReview,
+        decision_type: DecisionType,
+        visual_evidence: VisualEvidence,
         prompt_version: str,
-        raw_response_path: str | None,
-    ) -> DecisionWriteResult:
-        """Persist one final Qwen-plus-DINOv3 decision without copying assets."""
+        raw_response_path: str,
+        reason_code: DecisionReasonCode,
+        short_reason: str,
+    ) -> ClusterWriteResult:
+        """Persist one cluster atomically and create at most one object."""
 
-        proposal.fingerprint = fingerprint
-        decision = Decision(
-            proposal_id=proposal.id,
-            decision=result.decision,
-            matched_object_id=result.matched_object_id,
-            confidence=result.confidence,
-            reason_code=result.reason_code.value,
-            short_reason=result.short_reason,
-            prompt_version=prompt_version,
-            qwen_hypothesis=result.qwen_hypothesis,
-            qwen_matched_object_id=result.qwen_matched_object_id,
-            visual_evidence=result.visual_evidence,
-            raw_response_path=raw_response_path,
-        )
-        memory_object: MemoryObject | None = None
-        observation: Observation | None = None
-        object_summary = None
-        if result.decision in {DecisionType.NEW, DecisionType.EXISTING}:
-            if result.object_summary is None:
-                raise ValueError("new and existing decisions require object_summary")
-            object_id = result.matched_object_id or new_id("obj")
-            if result.decision is DecisionType.NEW:
-                memory_object = MemoryObject(
-                    id=object_id,
-                    summary=result.object_summary,
-                )
-            else:
-                object_summary = result.object_summary
-            observation = Observation(
-                object_id=object_id,
-                proposal_id=proposal.id,
-                source_image_id=proposal.source_image_id,
-                fingerprint=fingerprint,
+        if not proposals:
+            raise ValueError("A cluster decision requires proposals")
+        proposal_list = sorted(proposals, key=lambda proposal: proposal.id)
+        for proposal in proposal_list:
+            if proposal.fingerprint is None:
+                raise ValueError("Every reviewed proposal requires a fingerprint")
+            proposal.target_id = review.cluster_id
+            proposal.target_object_name_zh = (
+                review.object_summary.object_name_zh
+                if review.object_summary is not None
+                else None
             )
-        write_result = self.store.commit_decision(
-            proposal=proposal,
-            decision=decision,
+
+        memory_object: MemoryObject | None = None
+        object_summary = None
+        object_id: str | None = None
+        if decision_type is DecisionType.NEW:
+            if review.object_summary is None:
+                raise ValueError("A new cluster requires an object summary")
+            object_id = new_id("obj")
+            memory_object = MemoryObject(id=object_id, summary=review.object_summary)
+        elif decision_type is DecisionType.EXISTING:
+            if review.object_summary is None or review.matched_object_id is None:
+                raise ValueError("An existing cluster requires object ID and summary")
+            object_id = review.matched_object_id
+            object_summary = review.object_summary
+
+        decisions: list[Decision] = []
+        observations: list[Observation] = []
+        first_new = True
+        for proposal in proposal_list:
+            proposal_decision = decision_type
+            matched_object_id = object_id if decision_type is DecisionType.EXISTING else None
+            proposal_reason_code = reason_code
+            proposal_short_reason = short_reason
+            if decision_type is DecisionType.NEW and not first_new:
+                proposal_decision = DecisionType.EXISTING
+                matched_object_id = object_id
+                proposal_reason_code = DecisionReasonCode.CLUSTER_MEMBER
+                proposal_short_reason = (
+                    "该视角与本批次首个新对象候选属于同一DINOv3聚类。"
+                )
+            decisions.append(
+                Decision(
+                    proposal_id=proposal.id,
+                    decision=proposal_decision,
+                    matched_object_id=matched_object_id,
+                    confidence=(
+                        review.object_summary.summary_confidence
+                        if (
+                            review.object_summary is not None
+                            and decision_type is not DecisionType.UNCERTAIN
+                        )
+                        else 0.0
+                    ),
+                    reason_code=proposal_reason_code.value,
+                    short_reason=proposal_short_reason,
+                    prompt_version=prompt_version,
+                    qwen_hypothesis=review.identity_hypothesis,
+                    qwen_matched_object_id=review.matched_object_id,
+                    visual_evidence=visual_evidence,
+                    raw_response_path=raw_response_path,
+                )
+            )
+            if object_id is not None:
+                observations.append(
+                    Observation(
+                        object_id=object_id,
+                        proposal_id=proposal.id,
+                        source_image_id=proposal.source_image_id,
+                        fingerprint=proposal.fingerprint,
+                    )
+                )
+            first_new = False
+
+        result = self.store.commit_cluster_decisions(
+            proposals=proposal_list,
+            decisions=decisions,
             memory_object=memory_object,
             object_summary=object_summary,
-            observation=observation,
+            observations=observations,
         )
-        proposal.status = write_result.proposal_status
-        proposal.updated_at = utc_now()
-        return write_result
+        for proposal in proposal_list:
+            proposal.status = ProposalStatus.DECIDED
+            proposal.updated_at = utc_now()
+        return result
 
     def record_proposal_failure(self, proposal: Proposal, error_message: str) -> None:
         self.store.record_proposal_failure(proposal, error_message)

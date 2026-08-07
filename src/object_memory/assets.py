@@ -46,6 +46,10 @@ class MemoryPaths:
         return self.root / "objects"
 
     @property
+    def clusters(self) -> Path:
+        return self.root / "clusters"
+
+    @property
     def raw_responses(self) -> Path:
         return self.root / "raw_responses"
 
@@ -61,6 +65,7 @@ class MemoryPaths:
             self.sources,
             self.proposals,
             self.objects,
+            self.clusters,
             self.raw_responses,
             self.run_reports,
         ):
@@ -75,6 +80,11 @@ class MemoryPaths:
         object_id = _validate_segment(object_id, "object_id")
         observation_id = _validate_segment(observation_id, "observation_id")
         return self.objects / object_id / "observations" / observation_id
+
+    def cluster_dir(self, run_id: str, cluster_id: str) -> Path:
+        run_id = _validate_segment(run_id, "run_id")
+        cluster_id = _validate_segment(cluster_id, "cluster_id")
+        return self.clusters / run_id / cluster_id
 
     def raw_response_dir(self, run_id: str, scope_id: str) -> Path:
         run_id = _validate_segment(run_id, "run_id")

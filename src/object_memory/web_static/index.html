@@ -35,8 +35,8 @@
           <h1>Collection<br />Demo</h1>
           <p class="hero-tagline">从场景图片到可持续对象记忆</p>
           <p class="hero-description">
-            上传一组场景图片后，Qwen3-VL 会发现、命名并迭代对象文字档案，SAM3 按文本目标定位候选，
-            DINOv3 再用视角视觉指纹提供实例匹配证据。对象档案和跨视角观测最终写入 SQLite，页面同步呈现完整过程、耗时与结果证据。
+            上传一组场景图片后，SAM3 自动产生候选区域，DINOv3 将跨图片的相似视角聚为对象假设，
+            Qwen3-VL 最后判断完整物体、背景和零件并生成对象档案。对象与跨视角观测写入 SQLite，页面保留聚类、语义判断和最终归属证据。
           </p>
           <div class="demo-config" aria-label="默认 Demo 配置与服务器基线">
             <article>
@@ -45,7 +45,7 @@
             </article>
             <article>
               <span>默认分割模型</span>
-              <strong>SAM3 0.1.0 · BF16 · 文本阈值 0.4</strong>
+              <strong>SAM3 0.1.0 · BF16 · 16×16 自动点网格</strong>
             </article>
             <article>
               <span>默认视觉编码器</span>
@@ -53,7 +53,7 @@
             </article>
             <article>
               <span>服务器与推理调度基线</span>
-              <strong>AutoDL · RTX 4090 24 GB · 三模型联合驻留（待实测）</strong>
+              <strong>AutoDL · RTX 4090 24 GB · SAM → DINO → Qwen 顺序驻留</strong>
             </article>
           </div>
           <a
@@ -146,20 +146,20 @@
             <strong>图片输入</strong>
             <small>输入文件 → 本次新登记源图</small>
           </li>
-          <li data-flow-stage="scene_guidance">
-            <span class="flow-number">02</span>
-            <strong>目标规划</strong>
-            <small>新登记源图 → Qwen 目标条目</small>
-          </li>
           <li data-flow-stage="sam3">
-            <span class="flow-number">03</span>
-            <strong>对象分割</strong>
-            <small>英文查询 → 候选区域</small>
+            <span class="flow-number">02</span>
+            <strong>自动分割</strong>
+            <small>点网格 → 过滤后候选</small>
           </li>
-          <li data-flow-stage="candidate_reasoning">
+          <li data-flow-stage="clustering">
+            <span class="flow-number">03</span>
+            <strong>视觉聚类</strong>
+            <small>DINOv3 指纹 → 跨图对象假设</small>
+          </li>
+          <li data-flow-stage="cluster_review">
             <span class="flow-number">04</span>
-            <strong>视觉身份决策</strong>
-            <small>视觉指纹 → 双证据决定</small>
+            <strong>语义审查</strong>
+            <small>Qwen 聚类判断 → 对象决定</small>
           </li>
           <li data-flow-stage="memory">
             <span class="flow-number">05</span>
@@ -233,7 +233,7 @@
           <div>
             <p class="eyebrow">02 · EVIDENCE</p>
             <h2 id="intermediates-title">逐阶段中间结果</h2>
-            <p>沿着输入整理、目标规划、对象分割和对象决策，查看场景图片如何逐步转化为对象记忆。</p>
+            <p>沿着输入整理、自动分割、视觉聚类和语义审查，查看候选如何转化为对象记忆。</p>
           </div>
           <span class="data-freshness" id="event-freshness">等待实验事件</span>
         </div>
@@ -243,14 +243,14 @@
             <button role="tab" aria-selected="true" data-stage-tab="input" type="button">
               <span>01</span><strong>输入整理</strong><small id="tab-count-input">等待结果</small>
             </button>
-            <button role="tab" aria-selected="false" data-stage-tab="scene_guidance" type="button">
-              <span>02</span><strong>目标规划</strong><small id="tab-count-scene">等待结果</small>
-            </button>
             <button role="tab" aria-selected="false" data-stage-tab="sam3" type="button">
-              <span>03</span><strong>分割候选</strong><small id="tab-count-sam">等待结果</small>
+              <span>02</span><strong>自动分割</strong><small id="tab-count-sam">等待结果</small>
             </button>
-            <button role="tab" aria-selected="false" data-stage-tab="candidate_reasoning" type="button">
-              <span>04</span><strong>视觉身份</strong><small id="tab-count-reasoning">等待结果</small>
+            <button role="tab" aria-selected="false" data-stage-tab="clustering" type="button">
+              <span>03</span><strong>视觉聚类</strong><small id="tab-count-scene">等待结果</small>
+            </button>
+            <button role="tab" aria-selected="false" data-stage-tab="cluster_review" type="button">
+              <span>04</span><strong>语义审查</strong><small id="tab-count-reasoning">等待结果</small>
             </button>
           </div>
           <div class="stage-panel" id="stage-panel" role="tabpanel" aria-live="polite">

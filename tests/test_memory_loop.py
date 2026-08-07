@@ -1,4 +1,4 @@
-"""Transactional tests for summary iteration and fingerprint references."""
+"""Transactional tests for cluster writes and visual fingerprint references."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from object_memory.memory_loop import MemoryLoop
 from object_memory.memory_store import MemoryStore
 from object_memory.schemas import (
     BoundingBox,
+    ClusterReview,
+    ClusterVerdict,
     DecisionReasonCode,
     DecisionType,
-    FinalIdentityDecision,
     IdentityHypothesis,
     ObjectSummary,
-    Observation,
     Proposal,
     Run,
     SourceImage,
@@ -59,18 +59,49 @@ def proposal(source_id: str, suffix: str) -> Proposal:
     return Proposal(
         id=f"prop_{suffix}",
         source_image_id=source_id,
-        raw_candidate_id=f"raw_{suffix}",
-        prompt="computer mouse",
+        raw_candidate_id=f"grid_{suffix}",
+        prompt="automatic_point_grid",
         score=0.9,
         bbox=BoundingBox(x_min=1, y_min=1, x_max=10, y_max=10),
         crop_path=f"proposals/run_1/prop_{suffix}/crop.png",
         mask_path=f"proposals/run_1/prop_{suffix}/mask.png",
         overlay_path=f"proposals/run_1/prop_{suffix}/overlay.jpg",
+        fingerprint=fingerprint(f"proposals/run_1/prop_{suffix}/fingerprint.npz"),
     )
 
 
+def review(
+    cluster_id: str,
+    *,
+    hypothesis: IdentityHypothesis,
+    matched_object_id: str | None = None,
+    summary: ObjectSummary | None = None,
+) -> ClusterReview:
+    return ClusterReview(
+        cluster_id=cluster_id,
+        verdict=ClusterVerdict.OBJECT,
+        identity_hypothesis=hypothesis,
+        matched_object_id=matched_object_id,
+        short_reason="聚类成员轮廓一致",
+        object_summary=summary or object_summary(),
+    )
+
+
+def register_source(loop: MemoryLoop, run: Run, source_id: str, digest: str) -> SourceImage:
+    source = SourceImage(
+        id=source_id,
+        run_id=run.id,
+        sha256=digest * 64,
+        relative_path=f"sources/{source_id}.png",
+        width=20,
+        height=20,
+    )
+    loop.register_source(source)
+    return source
+
+
 class MemoryLoopTests(unittest.TestCase):
-    def test_new_and_existing_update_one_summary_without_copying_assets(self) -> None:
+    def test_new_cluster_creates_one_object_and_observation_per_view(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = MemoryPaths(Path(temporary_directory) / "memory")
             store = MemoryStore(paths)
@@ -84,81 +115,42 @@ class MemoryLoopTests(unittest.TestCase):
                 dinov3_model_id="dino",
             )
             loop.begin_run(run)
-            first_source = SourceImage(
-                id="src_1",
-                run_id=run.id,
-                sha256="b" * 64,
-                relative_path="sources/one.png",
-                width=20,
-                height=20,
-            )
-            loop.register_source(first_source)
-            first = loop.apply_decision(
-                proposal=proposal(first_source.id, "one"),
-                result=FinalIdentityDecision(
-                    decision=DecisionType.NEW,
-                    confidence=0.9,
-                    reason_code=DecisionReasonCode.NEW_OBJECT,
-                    short_reason="无历史匹配",
-                    qwen_hypothesis=IdentityHypothesis.NEW,
-                    visual_evidence=VisualEvidence(result=VisualMatchType.NO_MATCH),
-                    object_summary=object_summary(),
-                ),
-                fingerprint=fingerprint("proposals/run_1/prop_one/fingerprint.npz"),
-                prompt_version="object-memory-single-pass-v1",
-                raw_response_path="raw_responses/run_1/src_1/response.json",
+            first_source = register_source(loop, run, "src_1", "b")
+            second_source = register_source(loop, run, "src_2", "c")
+            proposals = [
+                proposal(first_source.id, "one"),
+                proposal(second_source.id, "two"),
+            ]
+            result = loop.apply_cluster_decision(
+                proposals=proposals,
+                review=review("clu_mouse", hypothesis=IdentityHypothesis.NEW),
+                decision_type=DecisionType.NEW,
+                visual_evidence=VisualEvidence(result=VisualMatchType.NO_MATCH),
+                prompt_version="object-memory-cluster-review-v1",
+                raw_response_path="raw_responses/run_1/cluster_batch_0001/response.json",
+                reason_code=DecisionReasonCode.NEW_OBJECT,
+                short_reason="未匹配历史对象",
             )
             loop.complete_source(first_source.id)
-            self.assertIsNotNone(first.object_id)
-
-            second_source = SourceImage(
-                id="src_2",
-                run_id=run.id,
-                sha256="c" * 64,
-                relative_path="sources/two.png",
-                width=20,
-                height=20,
-            )
-            loop.register_source(second_source)
-            updated = object_summary("银灰色非对称鼠标，右侧轮廓明显隆起。")
-            second = loop.apply_decision(
-                proposal=proposal(second_source.id, "two"),
-                result=FinalIdentityDecision(
-                    decision=DecisionType.EXISTING,
-                    matched_object_id=first.object_id,
-                    confidence=0.92,
-                    reason_code=DecisionReasonCode.VISUAL_INSTANCE_MATCH,
-                    short_reason="双证据一致",
-                    qwen_hypothesis=IdentityHypothesis.EXISTING,
-                    qwen_matched_object_id=first.object_id,
-                    visual_evidence=VisualEvidence(
-                        result=VisualMatchType.MATCH,
-                        matched_object_id=first.object_id,
-                        matched_observation_id=first.observation_id,
-                        visual_score=0.9,
-                    ),
-                    object_summary=updated,
-                ),
-                fingerprint=fingerprint("proposals/run_1/prop_two/fingerprint.npz"),
-                prompt_version="object-memory-single-pass-v1",
-                raw_response_path="raw_responses/run_1/src_2/response.json",
-            )
             loop.complete_source(second_source.id)
 
-            cards = loop.object_cards()
-            records = loop.fingerprint_records()
-            self.assertEqual(len(cards), 1)
-            self.assertEqual(cards[0].summary.stable_description, updated.stable_description)
-            self.assertEqual(len(records), 2)
-            self.assertFalse(any(paths.objects.rglob("crop.png")))
+            self.assertIsNotNone(result.object_id)
+            self.assertEqual(
+                [item.decision for item in result.proposal_results],
+                [DecisionType.NEW, DecisionType.EXISTING],
+            )
+            self.assertTrue(
+                all(item.object_id == result.object_id for item in result.proposal_results)
+            )
+            self.assertEqual(len(loop.object_cards()), 1)
+            self.assertEqual(len(loop.fingerprint_records()), 2)
             with sqlite3.connect(paths.database) as connection:
                 observations = connection.execute(
                     "SELECT COUNT(*) FROM observations"
                 ).fetchone()[0]
             self.assertEqual(observations, 2)
-            self.assertEqual(second.object_id, first.object_id)
 
-    def test_uncertain_is_terminal_and_does_not_update_objects(self) -> None:
+    def test_uncertain_cluster_is_terminal_without_object_or_observation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = MemoryPaths(Path(temporary_directory) / "memory")
             store = MemoryStore(paths)
@@ -172,33 +164,22 @@ class MemoryLoopTests(unittest.TestCase):
                 dinov3_model_id="dino",
             )
             loop.begin_run(run)
-            source = SourceImage(
-                id="src_1",
-                run_id=run.id,
-                sha256="b" * 64,
-                relative_path="sources/one.png",
-                width=20,
-                height=20,
-            )
-            loop.register_source(source)
-            result = loop.apply_decision(
-                proposal=proposal(source.id, "one"),
-                result=FinalIdentityDecision(
-                    decision=DecisionType.UNCERTAIN,
-                    confidence=0.2,
-                    reason_code=DecisionReasonCode.INSUFFICIENT_EVIDENCE,
-                    short_reason="证据冲突",
-                    qwen_hypothesis=IdentityHypothesis.UNCERTAIN,
-                    visual_evidence=VisualEvidence(result=VisualMatchType.NO_MATCH),
-                ),
-                fingerprint=fingerprint("proposals/run_1/prop_one/fingerprint.npz"),
-                prompt_version="object-memory-single-pass-v1",
-                raw_response_path="raw_responses/run_1/src_1/response.json",
+            source = register_source(loop, run, "src_1", "b")
+            result = loop.apply_cluster_decision(
+                proposals=[proposal(source.id, "one")],
+                review=review("clu_mouse", hypothesis=IdentityHypothesis.NEW),
+                decision_type=DecisionType.UNCERTAIN,
+                visual_evidence=VisualEvidence(result=VisualMatchType.AMBIGUOUS),
+                prompt_version="object-memory-cluster-review-v1",
+                raw_response_path="raw_responses/run_1/cluster_batch_0001/response.json",
+                reason_code=DecisionReasonCode.AMBIGUOUS_MATCH,
+                short_reason="视觉证据冲突",
             )
             loop.complete_source(source.id)
             summary = loop.complete_run(run.id)
-            self.assertEqual(result.proposal_status.value, "decided")
-            self.assertEqual(summary.status.value, "completed")
+
+            self.assertIsNone(result.object_id)
+            self.assertEqual(result.proposal_results[0].decision, DecisionType.UNCERTAIN)
             self.assertEqual(summary.active_objects_total, 0)
             self.assertEqual(summary.observations_added, 0)
 

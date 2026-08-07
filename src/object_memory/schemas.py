@@ -1,11 +1,10 @@
-"""Validated data exchanged between the single-pass object-memory stages."""
+"""Validated data exchanged by the clustered object-memory workflow."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import PurePosixPath
-import re
 from typing import Annotated
 from uuid import uuid4
 
@@ -14,7 +13,6 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
-    field_validator,
     model_validator,
 )
 
@@ -87,6 +85,7 @@ class DecisionType(str, Enum):
 class DecisionReasonCode(str, Enum):
     NEW_OBJECT = "new_object"
     VISUAL_INSTANCE_MATCH = "visual_instance_match"
+    CLUSTER_MEMBER = "cluster_member"
     AMBIGUOUS_MATCH = "ambiguous_match"
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
@@ -94,6 +93,12 @@ class DecisionReasonCode(str, Enum):
 class IdentityHypothesis(str, Enum):
     NEW = "new"
     EXISTING = "existing"
+    UNCERTAIN = "uncertain"
+
+
+class ClusterVerdict(str, Enum):
+    OBJECT = "object"
+    IGNORE = "ignore"
     UNCERTAIN = "uncertain"
 
 
@@ -143,19 +148,46 @@ class ObjectSummary(StrictModel):
         return self
 
 
-class CurrentViewFacts(StrictModel):
-    """Visible facts retained in the audited Qwen response, not the object card."""
+class ClusterReview(StrictModel):
+    """Qwen's one semantic judgment for a DINOv3 candidate cluster."""
 
-    category: NonEmptyText
-    visible_identity_features: list[NonEmptyText] = Field(default_factory=list)
-    brand_or_markings: list[NonEmptyText] = Field(default_factory=list)
-    part_appearance: list[PartAppearance] = Field(default_factory=list)
+    cluster_id: Identifier
+    verdict: ClusterVerdict
+    identity_hypothesis: IdentityHypothesis
+    matched_object_id: Identifier | None = None
+    short_reason: NonEmptyText
+    object_summary: ObjectSummary | None = None
 
     @model_validator(mode="after")
-    def validate_unique_view_entries(self) -> "CurrentViewFacts":
-        part_names = [item.part for item in self.part_appearance]
-        if len(part_names) != len(set(part_names)):
-            raise ValueError("current-view part names must be unique")
+    def validate_cluster_review(self) -> "ClusterReview":
+        if self.verdict is ClusterVerdict.OBJECT:
+            if self.identity_hypothesis is IdentityHypothesis.UNCERTAIN:
+                raise ValueError("an accepted object cluster requires new or existing")
+            if self.object_summary is None:
+                raise ValueError("an accepted object cluster requires object_summary")
+            if self.identity_hypothesis is IdentityHypothesis.EXISTING:
+                if self.matched_object_id is None:
+                    raise ValueError("existing cluster review requires matched_object_id")
+            elif self.matched_object_id is not None:
+                raise ValueError("new cluster review cannot carry matched_object_id")
+        else:
+            if self.identity_hypothesis is not IdentityHypothesis.UNCERTAIN:
+                raise ValueError("ignored or uncertain clusters use uncertain identity")
+            if self.matched_object_id is not None or self.object_summary is not None:
+                raise ValueError(
+                    "ignored or uncertain clusters cannot update object memory"
+                )
+        return self
+
+
+class ClusterReviewResponse(StrictModel):
+    reviews: list[ClusterReview]
+
+    @model_validator(mode="after")
+    def validate_unique_clusters(self) -> "ClusterReviewResponse":
+        cluster_ids = [review.cluster_id for review in self.reviews]
+        if len(cluster_ids) != len(set(cluster_ids)):
+            raise ValueError("cluster review IDs must be unique")
         return self
 
 
@@ -170,80 +202,6 @@ class NormalizedBoundingBox(StrictModel):
         if self.x_max <= self.x_min or self.y_max <= self.y_min:
             raise ValueError("Normalized bounding-box maximums must exceed minimums")
         return self
-
-
-class SceneTarget(StrictModel):
-    """One Qwen-discovered instance, its SAM query, and its text identity guess."""
-
-    target_id: Identifier
-    object_name_zh: NonEmptyText
-    sam_text_prompt: NonEmptyText
-    current_view_facts: CurrentViewFacts
-    identity_hypothesis: IdentityHypothesis
-    matched_object_id: Identifier | None = None
-    identity_short_reason: NonEmptyText
-    proposed_object_summary: ObjectSummary
-    temporary_target_anchor: NormalizedBoundingBox
-
-    @field_validator("sam_text_prompt")
-    @classmethod
-    def validate_sam_text_prompt(cls, value: str) -> str:
-        if not 2 <= len(value) <= 64:
-            raise ValueError("sam_text_prompt must contain 2 to 64 characters")
-        words = value.split()
-        if not re.fullmatch(r"[a-z][a-z0-9]*(?:[ '][a-z0-9]+)*", value):
-            raise ValueError(
-                "sam_text_prompt must be a short lowercase English noun phrase"
-            )
-        if "or" in words:
-            raise ValueError(
-                "sam_text_prompt must describe one object concept without alternatives"
-            )
-        forbidden = {
-            "left", "right", "upper", "lower", "top", "bottom", "front",
-            "rear", "near", "on", "in", "under", "above", "below",
-            "behind", "beside", "between", "next", "to", "by", "from",
-            "object", "objects", "item", "items", "thing", "things",
-            "stuff", "scene", "region", "area", "background", "foreground",
-        }
-        if forbidden.intersection(words):
-            raise ValueError(
-                "sam_text_prompt must use a concrete category without scene position"
-            )
-        return value
-
-    @model_validator(mode="after")
-    def validate_identity_hypothesis(self) -> "SceneTarget":
-        if self.identity_hypothesis is IdentityHypothesis.EXISTING:
-            if self.matched_object_id is None:
-                raise ValueError("existing hypothesis requires matched_object_id")
-        elif self.matched_object_id is not None:
-            raise ValueError("only existing hypothesis may carry matched_object_id")
-        return self
-
-
-class SceneImageGuidance(StrictModel):
-    """The only Qwen response for one exact source image."""
-
-    source_id: Identifier
-    scene_summary: NonEmptyText
-    targets: list[SceneTarget] = Field(default_factory=list)
-    no_target_reason: str | None = None
-
-    @model_validator(mode="after")
-    def validate_scene_targets(self) -> "SceneImageGuidance":
-        target_ids = [target.target_id for target in self.targets]
-        if len(target_ids) != len(set(target_ids)):
-            raise ValueError("scene target IDs must be unique within one image")
-        if self.targets and self.no_target_reason is not None:
-            raise ValueError("no_target_reason is only valid when targets is empty")
-        if not self.targets and not (self.no_target_reason or "").strip():
-            raise ValueError("an empty target list requires no_target_reason")
-        return self
-
-
-class SceneGuidanceResponse(StrictModel):
-    image: SceneImageGuidance
 
 
 class BoundingBox(StrictModel):
@@ -351,6 +309,11 @@ class VisualEvidence(StrictModel):
     second_best_score: CosineScore | None = None
     score_margin: Annotated[float, Field(ge=0.0, le=2.0)] | None = None
     object_scores: list[VisualObjectScore] = Field(default_factory=list)
+    cluster_id: Identifier | None = None
+    cluster_member_proposal_ids: list[Identifier] = Field(default_factory=list)
+    cluster_global_similarity_min: CosineScore | None = None
+    cluster_global_similarity_mean: CosineScore | None = None
+    cluster_global_similarity_max: CosineScore | None = None
 
     @model_validator(mode="after")
     def validate_match(self) -> "VisualEvidence":
@@ -359,37 +322,6 @@ class VisualEvidence(StrictModel):
                 raise ValueError("visual match requires object and observation IDs")
         elif self.matched_object_id is not None or self.matched_observation_id is not None:
             raise ValueError("only a visual match may carry matched IDs")
-        return self
-
-
-class FinalIdentityDecision(StrictModel):
-    decision: DecisionType
-    matched_object_id: Identifier | None = None
-    confidence: Confidence
-    reason_code: DecisionReasonCode
-    short_reason: NonEmptyText
-    qwen_hypothesis: IdentityHypothesis
-    qwen_matched_object_id: Identifier | None = None
-    visual_evidence: VisualEvidence
-    object_summary: ObjectSummary | None = None
-
-    @model_validator(mode="after")
-    def validate_payload(self) -> "FinalIdentityDecision":
-        if self.decision is DecisionType.EXISTING:
-            if self.matched_object_id is None:
-                raise ValueError("existing decision requires matched_object_id")
-        elif self.matched_object_id is not None:
-            raise ValueError("only existing decision may carry matched_object_id")
-        if self.decision in {DecisionType.NEW, DecisionType.EXISTING}:
-            if self.object_summary is None:
-                raise ValueError("new and existing decisions require object_summary")
-        elif self.object_summary is not None:
-            raise ValueError("uncertain decisions cannot update an object summary")
-        if self.qwen_hypothesis is IdentityHypothesis.EXISTING:
-            if self.qwen_matched_object_id is None:
-                raise ValueError("existing Qwen hypothesis requires an object ID")
-        elif self.qwen_matched_object_id is not None:
-            raise ValueError("only existing Qwen hypothesis may carry an object ID")
         return self
 
 

@@ -107,7 +107,7 @@ def add_completed_memory_run(
             ),
         )
     report: dict[str, Any] = {
-        "schema_version": 7,
+        "schema_version": 8,
         "status": "passed",
         "run": {"run_id": run_id},
         "images": [],
@@ -224,6 +224,9 @@ class AssetBoundaryTests(unittest.TestCase):
             image = memory / "objects" / "obj_1" / "observations" / "obs_1" / "crop.png"
             image.parent.mkdir(parents=True)
             image.write_bytes(png_bytes())
+            cluster_sheet = memory / "clusters" / "run_1" / "clu_1" / "contact_sheet.jpg"
+            cluster_sheet.parent.mkdir(parents=True)
+            cluster_sheet.write_bytes(png_bytes())
             audit = memory / "run_reports" / "run_1.json"
             audit.parent.mkdir(parents=True)
             audit.write_text("{}", encoding="utf-8")
@@ -238,6 +241,13 @@ class AssetBoundaryTests(unittest.TestCase):
             self.assertEqual(
                 resolve_audit_json(memory, "run_reports/run_1.json"),
                 audit,
+            )
+            self.assertEqual(
+                resolve_memory_image(
+                    memory,
+                    "clusters/run_1/clu_1/contact_sheet.jpg",
+                ),
+                cluster_sheet,
             )
             for path in (
                 "../memory.sqlite",
@@ -766,22 +776,22 @@ class ResultSummaryTests(unittest.TestCase):
             },
             "images": [
                 {
-                    "scene_guidance": {
-                        "targets": [{"target_id": "target_1"}, {"target_id": "target_2"}]
-                    },
                     "sam": {
-                        "prompt_detection_counts": {
-                            "water bottle": 1,
-                            "computer mouse": 0,
-                        },
-                        "zero_candidate_prompts": ["computer mouse"],
-                        "above_confidence_threshold_candidates": 2,
+                        "raw_candidates": 256,
                         "kept": 1,
                         "filtered": 1,
                     },
                     "error": None,
                 }
             ],
+            "clusters": [
+                {
+                    "cluster_id": "clu_1",
+                    "qwen_review": {"verdict": "object"},
+                    "final_decision": "existing",
+                }
+            ],
+            "cluster_counts": {"existing": 1},
             "external_errors": [],
         }
 
@@ -790,9 +800,10 @@ class ResultSummaryTests(unittest.TestCase):
             {"elapsed_seconds": 12.5},
         )
 
-        self.assertEqual(summary["scene_targets"], 2)
-        self.assertEqual(summary["sam_prompts"], 2)
-        self.assertEqual(summary["sam_zero_candidate_prompts"], 1)
+        self.assertEqual(summary["sam_grid_raw_candidates"], 256)
+        self.assertEqual(summary["clusters"], 1)
+        self.assertEqual(summary["reviewed_clusters"], 1)
+        self.assertEqual(summary["cluster_counts"]["existing"], 1)
         self.assertEqual(summary["decision_counts"]["existing"], 1)
         self.assertEqual(summary["elapsed_seconds"], 12.5)
         self.assertTrue(summary["manual_review_required"])

@@ -13,6 +13,7 @@ data/
     ├── memory.sqlite
     ├── sources/
     ├── proposals/
+    ├── clusters/
     ├── objects/
     ├── raw_responses/
     └── run_reports/
@@ -27,13 +28,14 @@ data/
 | `memory.sqlite` | run、源图、候选、对象、观测和决策的结构化索引 |
 | `sources/` | 按 SHA-256 保存的处理用原图 |
 | `proposals/` | 候选的 `crop.png`、`mask.png`、`overlay.jpg` 和 `fingerprint.npz` |
+| `clusters/` | 每个 DINOv3 聚类的代表视角接触表，左侧为隔离 crop、右侧为原图定位上下文 |
 | `objects/` | 保留的目录边界；新 schema 不再复制候选图片到对象目录 |
-| `raw_responses/` | 每张唯一新图唯一一次 Qwen 回答、token 与耗时 |
+| `raw_responses/` | 每个聚类批次的一次 Qwen 回答、输入聚类、token 与耗时 |
 | `run_reports/` | 该记忆库内每次运行的报告 |
 
 SQLite 保存相对路径，因此数据库与上述资产目录必须作为一个整体移动、提交或清理。`environment/run_report.json` 是最近一次 Web/CLI 运行的外部报告副本，不替代记忆库内的报告。
 
-对象表只保存一份当前结构化文字摘要。每条 observation 引用原 proposal 的 crop、mask 和视觉指纹，不重复保存图片或逐视角文字描述；页面通过这些引用展示跨视角时间线，历史自动匹配只读取 `fingerprint.npz`。
+对象表只保存一份当前结构化文字摘要。每条 observation 引用原 proposal 的 crop、mask 和视觉指纹，不重复保存图片或逐视角文字描述；页面通过这些引用展示跨视角时间线，自动聚类和历史匹配只读取 `fingerprint.npz`。`clusters/` 是解释和审计资产，不参与后续数值比较。
 
 ## 状态与管理规则
 

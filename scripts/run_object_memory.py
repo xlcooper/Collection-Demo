@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the per-image Qwen, SAM3, and DINOv3 object-memory workflow."""
+"""Run the SAM3, DINOv3 clustering, and Qwen object-memory workflow."""
 
 from __future__ import annotations
 
@@ -54,8 +54,8 @@ def parse_args() -> argparse.Namespace:
         "--validate-demo",
         action="store_true",
         help=(
-            "Require coverage for at least two new objects, one existing match, "
-            "one duplicate image, and no pending or failed proposals."
+            "Require coverage for at least two object archives, one multi-view "
+            "merge, one duplicate image, and no pending or failed proposals."
         ),
     )
     parser.add_argument(
@@ -112,9 +112,9 @@ def failure_report(
     run_id: str | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
-        "schema_version": 7,
+        "schema_version": 8,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "test": "object_memory_demo_single_pass_dinov3",
+        "test": "object_memory_demo_sam_grid_dino_cluster_review",
         "status": "failed",
         "error": {
             "type": type(exc).__name__,
@@ -174,6 +174,8 @@ def main() -> int:
         sam_runtime = Sam3Adapter(
             checkpoint,
             config.sam3_pipeline.confidence_threshold,
+            points_per_side=config.sam3_pipeline.points_per_side,
+            points_per_batch=config.sam3_pipeline.points_per_batch,
         )
         mllm_runtime = QwenMllmAdapter(
             config.models.qwen_model_id,
